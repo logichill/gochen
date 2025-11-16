@@ -63,10 +63,10 @@ func TestAggregateLockMiddleware_MultipleAggregates(t *testing.T) {
 		return nil
 	}
 
-	// 并发执行不同聚合的命令
+	// 并发执行不同聚合的命令（从 1 开始，0 视为“无聚合 ID”不参与加锁）
 	var wg sync.WaitGroup
 	numAggregates := 10
-	for i := 0; i < numAggregates; i++ {
+	for i := 1; i <= numAggregates; i++ {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()

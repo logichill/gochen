@@ -17,9 +17,8 @@ import (
 //   - error: 已启动或启动失败时返回错误
 func (t *MemoryTransport) Start(ctx context.Context) error {
 	t.mutex.Lock()
-	defer t.mutex.Unlock()
-
 	if t.running {
+		t.mutex.Unlock()
 		return fmt.Errorf("memory transport is already running")
 	}
 
@@ -34,6 +33,7 @@ func (t *MemoryTransport) Start(ctx context.Context) error {
 		go t.worker(ctx, i, stopCh)
 	}
 
+	t.mutex.Unlock()
 	return nil
 }
 
@@ -45,19 +45,26 @@ func (t *MemoryTransport) Start(ctx context.Context) error {
 //   - error: 未启动或关闭失败时返回错误
 func (t *MemoryTransport) Close() error {
 	t.mutex.Lock()
-	defer t.mutex.Unlock()
-
 	if !t.running {
+		t.mutex.Unlock()
 		return fmt.Errorf("memory transport is not running")
 	}
 
+	// 标记为已停止，并复制 workers/queue 引用，避免在持锁状态下阻塞等待
 	t.running = false
+	workers := make([]chan struct{}, len(t.workers))
+	copy(workers, t.workers)
+	queue := t.queue
+	t.mutex.Unlock()
 
 	// 停止所有工作协程
-	for _, stopCh := range t.workers {
+	for _, stopCh := range workers {
+		if stopCh == nil {
+			continue
+		}
 		select {
 		case <-stopCh:
-			// channel已经关闭
+			// channel 已经关闭
 		default:
 			close(stopCh)
 		}
@@ -67,7 +74,7 @@ func (t *MemoryTransport) Close() error {
 	t.wg.Wait()
 
 	// 关闭队列
-	close(t.queue)
+	close(queue)
 
 	return nil
 }

@@ -25,12 +25,32 @@ type CommandBus struct {
 	// key: commandType, value: handler
 	handlers map[string]messaging.IMessageHandler
 	mutex    sync.RWMutex
+}
 
-	// aggregateLocks 聚合级锁（可选）
-	// 用于防止同一聚合的并发命令冲突
-	aggregateLocks      map[int64]*sync.Mutex
-	locksMux            sync.RWMutex
-	enableAggregateLock bool
+// commandRoutingHandler 根据命令类型进行路由的适配器
+//
+// 它订阅在统一的消息类型（messaging.MessageTypeCommand）上，
+// 根据 Command.Metadata["command_type"] 与 commandType 的匹配结果决定是否处理。
+type commandRoutingHandler struct {
+	commandType string
+	inner       messaging.IMessageHandler
+}
+
+func (h *commandRoutingHandler) Handle(ctx context.Context, message messaging.IMessage) error {
+	cmd, ok := message.(*Command)
+	if !ok {
+		// 非 Command，忽略
+		return nil
+	}
+	if cmd.GetCommandType() != h.commandType {
+		// 其他命令类型，忽略
+		return nil
+	}
+	return h.inner.Handle(ctx, message)
+}
+
+func (h *commandRoutingHandler) Type() string {
+	return h.inner.Type()
 }
 
 // CommandBusConfig 命令总线配置
@@ -52,7 +72,7 @@ func DefaultCommandBusConfig() *CommandBusConfig {
 //
 // 参数：
 //   - messageBus: 底层消息总线（复用）
-//   - config: 配置，nil 则使用默认配置
+//   - config: 配置，当前仅为兼容保留，聚合锁应通过中间件实现
 //
 // 返回：
 //   - *CommandBus: 命令总线实例
@@ -62,10 +82,8 @@ func NewCommandBus(messageBus messaging.IMessageBus, config *CommandBusConfig) *
 	}
 
 	return &CommandBus{
-		messageBus:          messageBus,
-		handlers:            make(map[string]messaging.IMessageHandler),
-		aggregateLocks:      make(map[int64]*sync.Mutex),
-		enableAggregateLock: config.EnableAggregateLock,
+		messageBus: messageBus,
+		handlers:   make(map[string]messaging.IMessageHandler),
 	}
 }
 
@@ -86,17 +104,24 @@ func (bus *CommandBus) RegisterHandler(commandType string, handler CommandHandle
 		return fmt.Errorf("handler cannot be nil")
 	}
 
-	// 转换为消息处理器
-	messageHandler := handler.AsMessageHandler(commandType)
+	// 基础命令处理器（直接处理 *Command 并回传结果）
+	baseHandler := handler.AsMessageHandler(commandType)
+
+	// 路由包装器：只处理指定 commandType 的命令，
+	// 订阅在统一的命令消息类型上（messaging.MessageTypeCommand）
+	routingHandler := &commandRoutingHandler{
+		commandType: commandType,
+		inner:       baseHandler,
+	}
 
 	// 订阅到消息总线
-	if err := bus.messageBus.Subscribe(context.Background(), commandType, messageHandler); err != nil {
+	if err := bus.messageBus.Subscribe(context.Background(), messaging.MessageTypeCommand, routingHandler); err != nil {
 		return fmt.Errorf("failed to subscribe command handler: %w", err)
 	}
 
 	// 记录处理器
 	bus.mutex.Lock()
-	bus.handlers[commandType] = messageHandler
+	bus.handlers[commandType] = routingHandler
 	bus.mutex.Unlock()
 
 	return nil
@@ -122,14 +147,7 @@ func (bus *CommandBus) Dispatch(ctx context.Context, cmd *Command) error {
 		return ErrInvalidCommand
 	}
 
-	// 可选：聚合级锁
-	if bus.enableAggregateLock && cmd.AggregateID > 0 {
-		lock := bus.getOrCreateAggregateLock(cmd.AggregateID)
-		lock.Lock()
-		defer lock.Unlock()
-	}
-
-	// 委托给 MessageBus（自动执行中间件链和路由）
+	// 命令分发交由底层消息总线和 Transport 决定同步/异步语义
 	return bus.messageBus.Publish(ctx, cmd)
 }
 
@@ -138,30 +156,6 @@ func (bus *CommandBus) Dispatch(ctx context.Context, cmd *Command) error {
 // 委托给底层 MessageBus，复用中间件机制
 func (bus *CommandBus) Use(middleware messaging.IMiddleware) {
 	bus.messageBus.Use(middleware)
-}
-
-// getOrCreateAggregateLock 获取或创建聚合锁
-func (bus *CommandBus) getOrCreateAggregateLock(aggregateID int64) *sync.Mutex {
-	bus.locksMux.RLock()
-	lock, exists := bus.aggregateLocks[aggregateID]
-	bus.locksMux.RUnlock()
-
-	if exists {
-		return lock
-	}
-
-	// 创建新锁
-	bus.locksMux.Lock()
-	defer bus.locksMux.Unlock()
-
-	// 双重检查
-	if lock, exists := bus.aggregateLocks[aggregateID]; exists {
-		return lock
-	}
-
-	lock = &sync.Mutex{}
-	bus.aggregateLocks[aggregateID] = lock
-	return lock
 }
 
 // GetHandler 获取命令处理器（用于测试）
