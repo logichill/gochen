@@ -6,57 +6,37 @@ import (
 	"gochen/httpx"
 	"gochen/messaging"
 	"gochen/messaging/command"
+	mmw "gochen/messaging/middleware"
 )
 
-// tracingMiddleware 追踪中间件实现
-type tracingMiddleware struct{}
+// HttpTracingMiddleware 针对 HTTP 上下文的命令追踪中间件
+//
+// 它从 httpx.Context 中提取 correlation_id/causation_id 注入到命令 Metadata，
+// 再委托通用的 TracingMiddleware 完成后续的命令/事件链路传播，从而与事件追踪模型保持一致。
+type HttpTracingMiddleware struct {
+	base *mmw.TracingMiddleware
+}
 
-// TracingMiddleware 追踪中间件
-//
-// 自动将 Context 中的 correlation_id 和 causation_id 注入到命令的 Metadata 中。
-//
-// 追踪 ID 流转规则：
-//  1. Correlation ID - 保持不变，标识整个业务流程
-//  2. Causation ID - 设置为当前命令的 ID，标识直接因果关系
-//
-// 使用示例：
-//
-//	// 注意：由于当前 MessageBus 的中间件机制限制，
-//	// 建议在命令处理器中手动注入追踪 ID
-//	ctx := httpx.WithCorrelationID(ctx, "cor-123")
-//	ctx = httpx.WithCausationID(ctx, "req-456")
-//	httpx.InjectTraceContext(ctx, cmd.Metadata)
-func TracingMiddleware() *tracingMiddleware {
-	return &tracingMiddleware{}
+// NewHttpTracingMiddleware 创建 HTTP 追踪中间件
+func NewHttpTracingMiddleware() *HttpTracingMiddleware {
+	return &HttpTracingMiddleware{
+		base: mmw.NewTracingMiddleware(),
+	}
 }
 
 // Name 返回中间件名称
-func (m *tracingMiddleware) Name() string {
-	return "TracingMiddleware"
+func (m *HttpTracingMiddleware) Name() string {
+	return "HttpTracingMiddleware"
 }
 
 // Handle 处理消息
-func (m *tracingMiddleware) Handle(ctx context.Context, message messaging.IMessage, next messaging.HandlerFunc) error {
-	// 只处理命令类型
-	if cmd, ok := message.(*command.Command); ok {
-		// 从 Context 提取追踪 ID
-		correlationID := httpx.GetCorrelationID(ctx)
-		causationID := httpx.GetCausationID(ctx)
-
-		// 注入到命令的 Metadata
-		if correlationID != "" {
-			cmd.WithMetadata("correlation_id", correlationID)
-		}
-		if causationID != "" {
-			cmd.WithMetadata("causation_id", causationID)
-		} else {
-			// 若上下文没有 causation_id，则将其设为当前命令 ID（形成清晰的因果链）
-			if cmd.GetID() != "" {
-				cmd.WithMetadata("causation_id", cmd.GetID())
-			}
-		}
+func (m *HttpTracingMiddleware) Handle(ctx context.Context, message messaging.IMessage, next messaging.HandlerFunc) error {
+	// 只对命令类型注入 HTTP 追踪上下文
+	if _, ok := message.(*command.Command); ok {
+		md := message.GetMetadata()
+		httpx.InjectTraceContext(ctx, md)
 	}
 
-	// 执行下一个处理器
-	return next(ctx, message)
+	// 交由通用 TracingMiddleware 统一处理命令/事件 trace 传播
+	return m.base.Handle(ctx, message, next)
 }

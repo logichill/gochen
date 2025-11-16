@@ -23,8 +23,12 @@ import (
 //   - 分布式环境需要使用分布式锁（Redis、Etcd 等）
 //   - 可能影响吞吐量（串行执行）
 type AggregateLockMiddleware struct {
-	// locks 聚合 ID 到锁的映射
-	locks map[int64]*sync.Mutex
+	// locksByAggregate 聚合 ID 到锁的映射（LockGranularity = "aggregate" 时使用）
+	locksByAggregate map[int64]*sync.Mutex
+
+	// locksByType 聚合类型到锁的映射（LockGranularity = "type" 时使用）
+	locksByType map[string]*sync.Mutex
+
 	mutex sync.RWMutex
 
 	// lockGranularity 锁粒度
@@ -61,8 +65,9 @@ func NewAggregateLockMiddleware(config *AggregateLockConfig) *AggregateLockMiddl
 	}
 
 	return &AggregateLockMiddleware{
-		locks:           make(map[int64]*sync.Mutex),
-		lockGranularity: config.LockGranularity,
+		locksByAggregate: make(map[int64]*sync.Mutex),
+		locksByType:      make(map[string]*sync.Mutex),
+		lockGranularity:  config.LockGranularity,
 	}
 }
 
@@ -89,13 +94,24 @@ func (m *AggregateLockMiddleware) Handle(ctx context.Context, message messaging.
 
 	// 获取聚合 ID
 	aggregateID := cmd.GetAggregateID()
-	if aggregateID == 0 {
-		// 没有聚合 ID，不需要加锁
-		return next(ctx, message)
-	}
+	aggregateType := cmd.GetAggregateType()
 
-	// 获取锁
-	lock := m.getOrCreateLock(aggregateID)
+	// 选择锁粒度
+	var lock *sync.Mutex
+	switch m.lockGranularity {
+	case "type":
+		// 按聚合类型加锁；没有类型信息则直接透传
+		if aggregateType == "" {
+			return next(ctx, message)
+		}
+		lock = m.getOrCreateTypeLock(aggregateType)
+	default: // "aggregate" 或其他值均视为按聚合 ID 加锁
+		if aggregateID == 0 {
+			// 没有聚合 ID，不需要加锁
+			return next(ctx, message)
+		}
+		lock = m.getOrCreateAggregateLock(aggregateID)
+	}
 
 	// 加锁
 	lock.Lock()
@@ -110,11 +126,43 @@ func (m *AggregateLockMiddleware) Name() string {
 	return "CommandAggregateLock"
 }
 
-// getOrCreateLock 获取或创建锁
-func (m *AggregateLockMiddleware) getOrCreateLock(aggregateID int64) *sync.Mutex {
+// GetLockCount 获取当前锁的数量（用于监控）
+func (m *AggregateLockMiddleware) GetLockCount() int {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+
+	switch m.lockGranularity {
+	case "type":
+		return len(m.locksByType)
+	default:
+		return len(m.locksByAggregate)
+	}
+}
+
+// Clear 清空所有锁（用于测试）
+func (m *AggregateLockMiddleware) Clear() {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	m.locksByAggregate = make(map[int64]*sync.Mutex)
+	m.locksByType = make(map[string]*sync.Mutex)
+}
+
+// Prune 清理所有当前锁映射（用于维护窗口）
+//
+// 注意：
+//   - 该方法不会尝试检测锁是否正在使用；
+//   - 调用方应在确认没有正在执行的命令（或可以接受少量竞争失败）的前提下调用；
+//   - 在高并发、长时间运行场景下，可在运维窗口周期性调用以释放不再需要的锁映射。
+func (m *AggregateLockMiddleware) Prune() {
+	m.Clear()
+}
+
+// getOrCreateAggregateLock 获取或创建按聚合 ID 的锁
+func (m *AggregateLockMiddleware) getOrCreateAggregateLock(aggregateID int64) *sync.Mutex {
 	// 快速路径：读锁检查
 	m.mutex.RLock()
-	lock, exists := m.locks[aggregateID]
+	lock, exists := m.locksByAggregate[aggregateID]
 	m.mutex.RUnlock()
 
 	if exists {
@@ -126,28 +174,36 @@ func (m *AggregateLockMiddleware) getOrCreateLock(aggregateID int64) *sync.Mutex
 	defer m.mutex.Unlock()
 
 	// 双重检查
-	if lock, exists := m.locks[aggregateID]; exists {
+	if lock, exists := m.locksByAggregate[aggregateID]; exists {
 		return lock
 	}
 
-	// 创建新锁
 	lock = &sync.Mutex{}
-	m.locks[aggregateID] = lock
+	m.locksByAggregate[aggregateID] = lock
 	return lock
 }
 
-// GetLockCount 获取当前锁的数量（用于监控）
-func (m *AggregateLockMiddleware) GetLockCount() int {
+// getOrCreateTypeLock 获取或创建按聚合类型的锁
+func (m *AggregateLockMiddleware) getOrCreateTypeLock(aggregateType string) *sync.Mutex {
+	// 快速路径：读锁检查
 	m.mutex.RLock()
-	defer m.mutex.RUnlock()
+	lock, exists := m.locksByType[aggregateType]
+	m.mutex.RUnlock()
 
-	return len(m.locks)
-}
+	if exists {
+		return lock
+	}
 
-// Clear 清空所有锁（用于测试）
-func (m *AggregateLockMiddleware) Clear() {
+	// 慢速路径：创建新锁
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	m.locks = make(map[int64]*sync.Mutex)
+	// 双重检查
+	if lock, exists := m.locksByType[aggregateType]; exists {
+		return lock
+	}
+
+	lock = &sync.Mutex{}
+	m.locksByType[aggregateType] = lock
+	return lock
 }

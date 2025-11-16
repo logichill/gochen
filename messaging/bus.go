@@ -10,6 +10,12 @@ import (
 // HandlerFunc 是一个函数类型，用于处理消息。它是中间件链中的基本执行单元
 type HandlerFunc func(ctx context.Context, message IMessage) error
 
+// HandlerErrorHook 是处理器错误监控钩子
+//
+// 当 IMessageHandler 返回非 nil error 时，MessageBus 会调用该钩子；
+// 默认不设置，调用方可按需注入统一的错误收集逻辑（日志/监控等）。
+type HandlerErrorHook func(ctx context.Context, message IMessage, err error)
+
 // IMiddleware 定义了消息总线中间件的接口
 type IMiddleware interface {
 	Handle(ctx context.Context, message IMessage, next HandlerFunc) error
@@ -31,13 +37,20 @@ type MessageBus struct {
 	transport   Transport
 	middlewares []IMiddleware
 	mutex       sync.RWMutex
+
+	// handlerErrorHook 可选的处理器错误钩子
+	handlerErrorHook HandlerErrorHook
+
+	// wrappedHandlers 映射原始 handler -> 包装后的 handler（用于 Unsubscribe）
+	wrappedHandlers map[IMessageHandler]IMessageHandler
 }
 
 // NewMessageBus 创建消息总线
 func NewMessageBus(transport Transport) *MessageBus {
 	return &MessageBus{
-		transport:   transport,
-		middlewares: make([]IMiddleware, 0),
+		transport:       transport,
+		middlewares:     make([]IMiddleware, 0),
+		wrappedHandlers: make(map[IMessageHandler]IMessageHandler),
 	}
 }
 
@@ -48,13 +61,50 @@ func (bus *MessageBus) Use(middleware IMiddleware) {
 	bus.middlewares = append(bus.middlewares, middleware)
 }
 
+// SetHandlerErrorHook 设置可选的处理器错误监控钩子
+func (bus *MessageBus) SetHandlerErrorHook(h HandlerErrorHook) {
+	bus.mutex.Lock()
+	defer bus.mutex.Unlock()
+	bus.handlerErrorHook = h
+}
+
+// getHandlerErrorHook 获取当前错误钩子（并发安全）
+func (bus *MessageBus) getHandlerErrorHook() HandlerErrorHook {
+	bus.mutex.RLock()
+	defer bus.mutex.RUnlock()
+	return bus.handlerErrorHook
+}
+
 // Subscribe 订阅消息处理器
 func (bus *MessageBus) Subscribe(ctx context.Context, messageType string, handler IMessageHandler) error {
-	return bus.transport.Subscribe(messageType, handler)
+	bus.mutex.Lock()
+	wrapped, exists := bus.wrappedHandlers[handler]
+	if !exists {
+		wrapped = &handlerWithErrorHook{
+			inner: handler,
+			bus:   bus,
+		}
+		bus.wrappedHandlers[handler] = wrapped
+	}
+	bus.mutex.Unlock()
+
+	return bus.transport.Subscribe(messageType, wrapped)
 }
 
 // Unsubscribe 取消订阅消息处理器
 func (bus *MessageBus) Unsubscribe(ctx context.Context, messageType string, handler IMessageHandler) error {
+	bus.mutex.Lock()
+	wrapped, exists := bus.wrappedHandlers[handler]
+	if exists {
+		delete(bus.wrappedHandlers, handler)
+	}
+	bus.mutex.Unlock()
+
+	if exists {
+		return bus.transport.Unsubscribe(messageType, wrapped)
+	}
+
+	// 如果找不到包装器，回退到原始 handler（兼容直接订阅 Transport 场景）
 	return bus.transport.Unsubscribe(messageType, handler)
 }
 
@@ -113,4 +163,24 @@ func (bus *MessageBus) executeMiddlewares(ctx context.Context, message IMessage,
 		}
 	}
 	return next(ctx, message)
+}
+
+// handlerWithErrorHook 包装 IMessageHandler，在处理器返回错误时触发 MessageBus 的错误钩子
+type handlerWithErrorHook struct {
+	inner IMessageHandler
+	bus   *MessageBus
+}
+
+func (h *handlerWithErrorHook) Handle(ctx context.Context, message IMessage) error {
+	err := h.inner.Handle(ctx, message)
+	if err != nil {
+		if hook := h.bus.getHandlerErrorHook(); hook != nil {
+			hook(ctx, message, err)
+		}
+	}
+	return err
+}
+
+func (h *handlerWithErrorHook) Type() string {
+	return h.inner.Type()
 }

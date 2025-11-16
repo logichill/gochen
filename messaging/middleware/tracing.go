@@ -8,10 +8,21 @@ import (
 )
 
 // TracingKeys 用于在 Metadata 与 Context 中传播的字段名
+//
+// 注意：这些常量只用于 Metadata 中的键名；Context 中的键使用内部专用类型，避免与外部代码的 string key 发生冲突。
 const (
 	KeyCorrelationID = "correlation_id"
 	KeyCausationID   = "causation_id"
 	KeyTraceID       = "trace_id"
+)
+
+// 内部上下文键类型，避免与外部 string key 冲突
+type traceCtxKey string
+
+const (
+	ctxKeyCorrelationID traceCtxKey = "corr_id"
+	ctxKeyCausationID   traceCtxKey = "caus_id"
+	ctxKeyTraceID       traceCtxKey = "trace_id"
 )
 
 // TracingMiddleware 注入并传播 correlation_id/causation_id/trace_id
@@ -33,10 +44,10 @@ func (m *TracingMiddleware) Handle(ctx context.Context, message messaging.IMessa
 	msgID := message.GetID()
 	msgType := message.GetType()
 
-	// 从上下文获取已有链路信息
-	ctxCorr, _ := ctx.Value(KeyCorrelationID).(string)
-	ctxCaus, _ := ctx.Value(KeyCausationID).(string)
-	ctxTrace, _ := ctx.Value(KeyTraceID).(string)
+	// 从上下文获取已有链路信息（仅使用内部专用 key）
+	ctxCorr, _ := ctx.Value(ctxKeyCorrelationID).(string)
+	ctxCaus, _ := ctx.Value(ctxKeyCausationID).(string)
+	ctxTrace, _ := ctx.Value(ctxKeyTraceID).(string)
 
 	switch msgType {
 	case messaging.MessageTypeCommand:
@@ -54,10 +65,10 @@ func (m *TracingMiddleware) Handle(ctx context.Context, message messaging.IMessa
 		if _, ok := md[KeyCausationID]; !ok || md[KeyCausationID] == "" {
 			md[KeyCausationID] = msgID
 		}
-		// 将链路信息放入 Context 以便后续事件沿用
-		ctx = context.WithValue(ctx, KeyCorrelationID, md[KeyCorrelationID])
-		ctx = context.WithValue(ctx, KeyCausationID, md[KeyCausationID])
-		ctx = context.WithValue(ctx, KeyTraceID, md[KeyTraceID])
+		// 将链路信息放入 Context 以便后续事件沿用（使用内部专用 key）
+		ctx = context.WithValue(ctx, ctxKeyCorrelationID, md[KeyCorrelationID])
+		ctx = context.WithValue(ctx, ctxKeyCausationID, md[KeyCausationID])
+		ctx = context.WithValue(ctx, ctxKeyTraceID, md[KeyTraceID])
 
 	case messaging.MessageTypeEvent:
 		if _, ok := md[KeyCorrelationID]; !ok || md[KeyCorrelationID] == "" {
