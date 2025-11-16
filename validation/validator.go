@@ -8,6 +8,11 @@ import (
 	"gochen/errors"
 )
 
+var (
+	emailRegex    = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
+	usernameRegex = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
+)
+
 // IValidator 定义通用验证器接口
 type IValidator interface {
 	Validate(value interface{}) error
@@ -77,8 +82,6 @@ func ValidateEmail(email string) error {
 		return errors.NewError(errors.ErrCodeValidation, "邮箱不能为空")
 	}
 
-	// 简单的邮箱验证正则
-	emailRegex := regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
 	if !emailRegex.MatchString(email) {
 		return errors.NewError(errors.ErrCodeValidation, "邮箱格式不正确")
 	}
@@ -95,8 +98,6 @@ func ValidateUsername(username string) error {
 		return err
 	}
 
-	// 用户名只能包含字母、数字、下划线
-	usernameRegex := regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
 	if !usernameRegex.MatchString(username) {
 		return errors.NewError(errors.ErrCodeValidation,
 			"用户名只能包含字母、数字和下划线")

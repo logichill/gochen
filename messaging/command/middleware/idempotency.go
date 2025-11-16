@@ -96,18 +96,23 @@ func (m *IdempotencyMiddleware) Handle(ctx context.Context, message messaging.IM
 		return next(ctx, message)
 	}
 
-	// 检查是否已处理
-	if m.isProcessed(commandID) {
-		// 已处理，直接返回成功（幂等行为）
-		return nil
+	// 严格串行化检查与记录，避免并发下重复执行
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	// 已处理且未过期：直接返回成功（幂等行为）
+	if processedAt, exists := m.processed[commandID]; exists {
+		if time.Since(processedAt) <= m.ttl {
+			return nil
+		}
 	}
 
-	// 执行命令
+	// 未处理或已过期：执行命令
 	err := next(ctx, message)
 
 	// 只有成功时才记录（失败的命令可以重试）
 	if err == nil {
-		m.markProcessed(commandID)
+		m.processed[commandID] = time.Now()
 	}
 
 	return err
