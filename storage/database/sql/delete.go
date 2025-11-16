@@ -1,0 +1,59 @@
+package sql
+
+import (
+	"context"
+	"database/sql"
+	"strings"
+
+	core "gochen/storage/database"
+	"gochen/storage/database/dialect"
+)
+
+type deleteBuilder struct {
+	db      core.IDatabase
+	dialect dialect.Dialect
+
+	table string
+	where []string
+	args  []interface{}
+	limit int
+}
+
+func (b *deleteBuilder) Where(cond string, args ...interface{}) IDeleteBuilder {
+	if cond != "" {
+		b.where = append(b.where, cond)
+		b.args = append(b.args, args...)
+	}
+	return b
+}
+
+func (b *deleteBuilder) Limit(n int) IDeleteBuilder {
+	b.limit = n
+	return b
+}
+
+func (b *deleteBuilder) Build() (string, []interface{}) {
+	var sb strings.Builder
+	args := make([]interface{}, len(b.args))
+	copy(args, b.args)
+
+	sb.WriteString("DELETE FROM ")
+	sb.WriteString(b.table)
+
+	if len(b.where) > 0 {
+		sb.WriteString(" WHERE ")
+		sb.WriteString(strings.Join(b.where, " AND "))
+	}
+
+	if b.limit > 0 && b.dialect.SupportsDeleteLimit() {
+		sb.WriteString(" LIMIT ?")
+		args = append(args, b.limit)
+	}
+
+	return sb.String(), args
+}
+
+func (b *deleteBuilder) Exec(ctx context.Context) (sql.Result, error) {
+	q, args := b.Build()
+	return b.db.Exec(ctx, q, args...)
+}
