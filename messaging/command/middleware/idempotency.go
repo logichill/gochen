@@ -23,6 +23,10 @@ type IdempotencyMiddleware struct {
 	processed map[string]time.Time
 	mutex     sync.RWMutex
 
+	// locks 对每个命令 ID 维护一把细粒度锁
+	// 保证同一 ID 的命令串行执行，不同 ID 可以并发
+	locks map[string]*sync.Mutex
+
 	// ttl 命令 ID 的过期时间
 	// 超过此时间的记录会被清理，允许重新执行
 	ttl time.Duration
@@ -65,6 +69,7 @@ func NewIdempotencyMiddleware(config *IdempotencyConfig) *IdempotencyMiddleware 
 
 	m := &IdempotencyMiddleware{
 		processed:       make(map[string]time.Time),
+		locks:           make(map[string]*sync.Mutex),
 		ttl:             config.TTL,
 		cleanupInterval: config.CleanupInterval,
 		stopCleanup:     make(chan struct{}),
@@ -96,15 +101,17 @@ func (m *IdempotencyMiddleware) Handle(ctx context.Context, message messaging.IM
 		return next(ctx, message)
 	}
 
-	// 严格串行化检查与记录，避免并发下重复执行
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
+	// 按命令 ID 串行化检查与记录，避免并发下重复执行
+	lock := m.getOrCreateLock(commandID)
+	lock.Lock()
+	defer func() {
+		lock.Unlock()
+		m.releaseLock(commandID, lock)
+	}()
 
 	// 已处理且未过期：直接返回成功（幂等行为）
-	if processedAt, exists := m.processed[commandID]; exists {
-		if time.Since(processedAt) <= m.ttl {
-			return nil
-		}
+	if m.isProcessed(commandID) {
+		return nil
 	}
 
 	// 未处理或已过期：执行命令
@@ -112,7 +119,7 @@ func (m *IdempotencyMiddleware) Handle(ctx context.Context, message messaging.IM
 
 	// 只有成功时才记录（失败的命令可以重试）
 	if err == nil {
-		m.processed[commandID] = time.Now()
+		m.markProcessed(commandID)
 	}
 
 	return err
@@ -147,6 +154,31 @@ func (m *IdempotencyMiddleware) markProcessed(commandID string) {
 	defer m.mutex.Unlock()
 
 	m.processed[commandID] = time.Now()
+}
+
+// getOrCreateLock 获取或创建指定命令 ID 的细粒度锁
+func (m *IdempotencyMiddleware) getOrCreateLock(commandID string) *sync.Mutex {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	if lock, ok := m.locks[commandID]; ok {
+		return lock
+	}
+
+	lock := &sync.Mutex{}
+	m.locks[commandID] = lock
+	return lock
+}
+
+// releaseLock 在当前调用完成后尝试移除命令 ID 对应的锁
+// 仅当映射中的锁仍然是当前这把时才删除，避免并发下误删
+func (m *IdempotencyMiddleware) releaseLock(commandID string, lock *sync.Mutex) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	if current, ok := m.locks[commandID]; ok && current == lock {
+		delete(m.locks, commandID)
+	}
 }
 
 // startCleanupWorker 启动清理 worker
@@ -188,6 +220,7 @@ func (m *IdempotencyMiddleware) Clear() {
 	defer m.mutex.Unlock()
 
 	m.processed = make(map[string]time.Time)
+	m.locks = make(map[string]*sync.Mutex)
 }
 
 // GetProcessedCount 获取已处理命令数（用于监控）

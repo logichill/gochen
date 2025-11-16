@@ -11,6 +11,7 @@ type mockTransport struct {
 	batch         [][]IMessage
 	subscribed    map[string]int
 	unsubscribed  map[string]int
+	handlers      map[string][]IMessageHandler
 	shouldError   error
 	orderRecorder *[]string
 }
@@ -21,6 +22,7 @@ func newMockTransport() *mockTransport {
 		batch:        make([][]IMessage, 0),
 		subscribed:   make(map[string]int),
 		unsubscribed: make(map[string]int),
+		handlers:     make(map[string][]IMessageHandler),
 	}
 }
 
@@ -39,6 +41,7 @@ func (m *mockTransport) PublishAll(ctx context.Context, messages []IMessage) err
 
 func (m *mockTransport) Subscribe(messageType string, handler IMessageHandler) error {
 	m.subscribed[messageType]++
+	m.handlers[messageType] = append(m.handlers[messageType], handler)
 	return nil
 }
 
@@ -172,5 +175,62 @@ func TestMessageBus_SubscribeDelegation(t *testing.T) {
 	}
 	if transport.unsubscribed["test"] != 1 {
 		t.Fatalf("expected unsubscribe to be delegated")
+	}
+}
+
+// errorHandler 用于测试错误钩子
+type errorHandler struct {
+	err error
+}
+
+func (h *errorHandler) Handle(ctx context.Context, message IMessage) error { return h.err }
+func (h *errorHandler) Type() string                                       { return "error" }
+
+func TestMessageBus_HandlerErrorHook(t *testing.T) {
+	transport := newMockTransport()
+	bus := NewMessageBus(transport)
+
+	var hookCalled bool
+	var hookErr error
+	var hookMsg IMessage
+
+	bus.SetHandlerErrorHook(func(ctx context.Context, msg IMessage, err error) {
+		hookCalled = true
+		hookErr = err
+		hookMsg = msg
+	})
+
+	handlerErr := errors.New("handler failed")
+	h := &errorHandler{err: handlerErr}
+
+	if err := bus.Subscribe(context.Background(), "test", h); err != nil {
+		t.Fatalf("subscribe failed: %v", err)
+	}
+
+	handlers := transport.handlers["test"]
+	if len(handlers) != 1 {
+		t.Fatalf("expected 1 handler, got %d", len(handlers))
+	}
+
+	wrapped := handlers[0]
+	_, ok := wrapped.(*handlerWithErrorHook)
+	if !ok {
+		t.Fatalf("expected handler to be wrapped with handlerWithErrorHook")
+	}
+
+	msg := &Message{ID: "msg-1", Type: "test"}
+	err := wrapped.Handle(context.Background(), msg)
+	if !errors.Is(err, handlerErr) {
+		t.Fatalf("expected handler error %v, got %v", handlerErr, err)
+	}
+
+	if !hookCalled {
+		t.Fatalf("expected error hook to be called")
+	}
+	if hookErr != handlerErr {
+		t.Fatalf("expected hook error %v, got %v", handlerErr, hookErr)
+	}
+	if hookMsg != msg {
+		t.Fatalf("expected hook message to be %v, got %v", msg, hookMsg)
 	}
 }

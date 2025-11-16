@@ -142,6 +142,42 @@ func TestAggregateLockMiddleware_Clear(t *testing.T) {
 	assert.Equal(t, 0, middleware.GetLockCount())
 }
 
+// TestAggregateLockMiddleware_TypeGranularity_SameType 测试按类型粒度锁：同一类型只创建一个锁
+func TestAggregateLockMiddleware_TypeGranularity_SameType(t *testing.T) {
+	config := &AggregateLockConfig{LockGranularity: "type"}
+	middleware := NewAggregateLockMiddleware(config)
+
+	next := func(ctx context.Context, msg messaging.IMessage) error {
+		return nil
+	}
+
+	// 同一聚合类型，不同 ID
+	for i := 1; i <= 5; i++ {
+		cmd := command.NewCommand("cmd-"+string(rune(i)), "TestCommand", int64(i), "Order", nil)
+		_ = middleware.Handle(context.Background(), cmd, next)
+	}
+
+	assert.Equal(t, 1, middleware.GetLockCount())
+}
+
+// TestAggregateLockMiddleware_TypeGranularity_MultipleTypes 测试按类型粒度锁：多种类型各有一把锁
+func TestAggregateLockMiddleware_TypeGranularity_MultipleTypes(t *testing.T) {
+	config := &AggregateLockConfig{LockGranularity: "type"}
+	middleware := NewAggregateLockMiddleware(config)
+
+	next := func(ctx context.Context, msg messaging.IMessage) error {
+		return nil
+	}
+
+	cmdUser := command.NewCommand("cmd-user-1", "TestCommand", 1, "User", nil)
+	cmdOrder := command.NewCommand("cmd-order-1", "TestCommand", 2, "Order", nil)
+
+	_ = middleware.Handle(context.Background(), cmdUser, next)
+	_ = middleware.Handle(context.Background(), cmdOrder, next)
+
+	assert.Equal(t, 2, middleware.GetLockCount())
+}
+
 // TestAggregateLockMiddleware_Name 测试中间件名称
 func TestAggregateLockMiddleware_Name(t *testing.T) {
 	middleware := NewAggregateLockMiddleware(nil)
