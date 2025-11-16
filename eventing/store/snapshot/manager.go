@@ -1,0 +1,218 @@
+package snapshot
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"sync"
+	"time"
+
+	"gochen/eventing"
+	"gochen/eventing/store"
+	"gochen/logging"
+)
+
+// Manager 快照管理器
+type Manager struct {
+	snapshotStore Store
+	eventStore    store.IEventStore
+	config        *Config
+	strategy      Strategy // 快照策略
+	mutex         sync.RWMutex
+}
+
+// Config 快照配置
+type Config struct {
+	Frequency       int           `json:"frequency"`
+	RetentionPeriod time.Duration `json:"retention_period"`
+	MaxSnapshots    int           `json:"max_snapshots"`
+	Enabled         bool          `json:"enabled"`
+}
+
+// DefaultConfig 默认快照配置
+func DefaultConfig() *Config {
+	return &Config{Frequency: 100, RetentionPeriod: 30 * 24 * time.Hour, MaxSnapshots: 10, Enabled: true}
+}
+
+// NewManager 创建快照管理器
+func NewManager(snapshotStore Store, eventStore store.IEventStore, config *Config) *Manager {
+	if config == nil {
+		config = DefaultConfig()
+	}
+	defaultStrategy := NewEventCountStrategy(config.Frequency)
+	return &Manager{snapshotStore: snapshotStore, eventStore: eventStore, config: config, strategy: defaultStrategy}
+}
+
+// SetStrategy 设置快照策略
+func (sm *Manager) SetStrategy(strategy Strategy) {
+	sm.mutex.Lock()
+	sm.strategy = strategy
+	sm.mutex.Unlock()
+}
+
+// GetStrategy 获取当前快照策略
+func (sm *Manager) GetStrategy() Strategy {
+	sm.mutex.RLock()
+	defer sm.mutex.RUnlock()
+	return sm.strategy
+}
+
+// ShouldCreateSnapshot 判断是否应该创建快照
+func (sm *Manager) ShouldCreateSnapshot(ctx context.Context, aggregate ISnapshotAggregate) (bool, error) {
+	if !sm.config.Enabled || aggregate == nil {
+		return false, nil
+	}
+	sm.mutex.RLock()
+	strategy := sm.strategy
+	sm.mutex.RUnlock()
+	if strategy == nil {
+		return false, nil
+	}
+	freq := sm.config.Frequency
+	if freq <= 0 {
+		freq = 1
+	}
+	should, err := strategy.ShouldCreateSnapshot(ctx, aggregate)
+	if err != nil {
+		return false, err
+	}
+	snapshot, err := sm.snapshotStore.GetSnapshot(ctx, aggregate.GetAggregateType(), aggregate.GetID())
+	if err != nil {
+		if aggregate.GetVersion() >= uint64(freq) {
+			return true, nil
+		}
+		return should, nil
+	}
+	if aggregate.GetVersion() >= snapshot.Version+uint64(freq) {
+		return true, nil
+	}
+	return false, nil
+}
+
+// CreateSnapshot 创建快照
+func (sm *Manager) CreateSnapshot(ctx context.Context, aggregateID int64, aggregateType string, data any, version uint64) error {
+	if !sm.config.Enabled {
+		return nil
+	}
+	start := time.Now()
+	var snapshotData interface{} = data
+	if lightweight, ok := data.(interface{ GetSnapshotData() interface{} }); ok {
+		snapshotData = lightweight.GetSnapshotData()
+		snapshotLogger.Debug(ctx, "[SnapshotManager] 使用轻量快照",
+			logging.Int64("aggregate_id", aggregateID), logging.String("aggregate_type", aggregateType))
+	}
+	serializedData, err := json.Marshal(snapshotData)
+	if err != nil {
+		return fmt.Errorf("failed to serialize snapshot data: %w", err)
+	}
+	snap := Snapshot{AggregateID: aggregateID, AggregateType: aggregateType, Version: version, Data: serializedData, Timestamp: time.Now(), Metadata: map[string]any{"created_by": "snapshot_manager", "data_size": len(serializedData)}}
+	if err := sm.snapshotStore.SaveSnapshot(ctx, snap); err != nil {
+		return fmt.Errorf("failed to save snapshot: %w", err)
+	}
+	eventing.GlobalMetrics().RecordSnapshotCreated(time.Since(start))
+	snapshotLogger.Info(ctx, "[SnapshotManager] 创建快照成功", logging.Int64("aggregate_id", aggregateID), logging.Any("version", version), logging.Int("data_size", len(serializedData)))
+	return nil
+}
+
+// LoadSnapshot 加载快照
+func (sm *Manager) LoadSnapshot(ctx context.Context, aggregateID int64, target any) (*Snapshot, error) {
+	start := time.Now()
+	aggregateType := ""
+	if typed, ok := target.(interface{ GetAggregateType() string }); ok {
+		aggregateType = typed.GetAggregateType()
+	}
+	snapshot, err := sm.snapshotStore.GetSnapshot(ctx, aggregateType, aggregateID)
+	if err != nil {
+		eventing.GlobalMetrics().RecordSnapshotLoaded(time.Since(start), false)
+		return nil, err
+	}
+	if restorer, ok := target.(interface{ RestoreFromSnapshotData(data interface{}) error }); ok {
+		var snapshotData interface{}
+		if err := json.Unmarshal(snapshot.Data, &snapshotData); err != nil {
+			eventing.GlobalMetrics().RecordSnapshotLoaded(time.Since(start), false)
+			return nil, fmt.Errorf("failed to deserialize lightweight snapshot data: %w", err)
+		}
+		if err := restorer.RestoreFromSnapshotData(snapshotData); err != nil {
+			eventing.GlobalMetrics().RecordSnapshotLoaded(time.Since(start), false)
+			return nil, fmt.Errorf("failed to restore from lightweight snapshot: %w", err)
+		}
+		snapshotLogger.Debug(ctx, "[SnapshotManager] 使用轻量快照恢复", logging.Int64("aggregate_id", aggregateID))
+	} else {
+		if err := json.Unmarshal(snapshot.Data, target); err != nil {
+			eventing.GlobalMetrics().RecordSnapshotLoaded(time.Since(start), false)
+			return nil, fmt.Errorf("failed to deserialize snapshot data: %w", err)
+		}
+	}
+	eventing.GlobalMetrics().RecordSnapshotLoaded(time.Since(start), true)
+	snapshotLogger.Debug(ctx, "[SnapshotManager] 加载快照成功", logging.Int64("aggregate_id", aggregateID), logging.Any("version", snapshot.Version))
+	return snapshot, nil
+}
+
+// RestoreAggregate 从快照和事件恢复聚合
+func (sm *Manager) RestoreAggregate(ctx context.Context, aggregateID int64, target any) (uint64, error) {
+	var fromVersion uint64 = 0
+	snapshot, err := sm.LoadSnapshot(ctx, aggregateID, target)
+	if err == nil {
+		if restorer, ok := target.(interface {
+			RestoreSnapshotMeta(id int64, aggregateType string, version uint64)
+		}); ok {
+			restorer.RestoreSnapshotMeta(aggregateID, snapshot.AggregateType, snapshot.Version)
+		}
+		fromVersion = snapshot.Version
+		snapshotLogger.Info(ctx, "[SnapshotManager] 从快照恢复聚合", logging.Int64("aggregate_id", aggregateID), logging.Any("snapshot_version", fromVersion))
+	} else {
+		snapshotLogger.Info(ctx, "[SnapshotManager] 未找到快照，从头开始恢复", logging.Int64("aggregate_id", aggregateID))
+	}
+	aggregateType := ""
+	if typed, ok := target.(interface{ GetAggregateType() string }); ok {
+		aggregateType = typed.GetAggregateType()
+	}
+	var events []eventing.Event
+	if typedStore, ok := sm.eventStore.(store.ITypedEventStore); ok {
+		events, err = typedStore.LoadEventsByType(ctx, aggregateType, aggregateID, fromVersion)
+	} else {
+		events, err = sm.eventStore.LoadEvents(ctx, aggregateID, fromVersion)
+	}
+	if err != nil {
+		return fromVersion, fmt.Errorf("failed to get events: %w", err)
+	}
+	snapshotLogger.Debug(ctx, "[SnapshotManager] 应用事件", logging.Int64("aggregate_id", aggregateID), logging.Int("event_count", len(events)))
+	if len(events) > 0 {
+		type eventApplier interface {
+			MarkEventsAsCommitted()
+			When(eventing.Event) error
+		}
+		agg, ok := target.(eventApplier)
+		if !ok {
+			return fromVersion, fmt.Errorf("target aggregate does not implement event applier")
+		}
+		for _, evt := range events {
+			if err := agg.When(evt); err != nil {
+				return fromVersion, fmt.Errorf("failed to apply event: %w", err)
+			}
+		}
+		agg.MarkEventsAsCommitted()
+		return events[len(events)-1].Version, nil
+	}
+	return fromVersion, nil
+}
+
+// CleanupOldSnapshots 清理旧快照
+func (sm *Manager) CleanupOldSnapshots(ctx context.Context) error {
+	return sm.snapshotStore.CleanupSnapshots(ctx, sm.config.RetentionPeriod)
+}
+
+// GetSnapshotStats 获取快照统计信息
+func (sm *Manager) GetSnapshotStats(ctx context.Context) (map[string]any, error) {
+	snapshots, err := sm.snapshotStore.GetSnapshots(ctx, "", 0)
+	if err != nil {
+		return nil, err
+	}
+	stats := map[string]any{"total_snapshots": len(snapshots), "enabled": sm.config.Enabled, "frequency": sm.config.Frequency, "retention_days": sm.config.RetentionPeriod.Hours() / 24, "strategy": sm.strategy.GetName()}
+	typeStats := make(map[string]int)
+	for _, s := range snapshots {
+		typeStats[s.AggregateType]++
+	}
+	stats["by_type"] = typeStats
+	return stats, nil
+}

@@ -1,0 +1,164 @@
+package sql
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"time"
+
+	"gochen/eventing"
+	"gochen/eventing/store"
+	"gochen/messaging"
+)
+
+func (s *SQLEventStore) LoadEvents(ctx context.Context, aggregateID int64, afterVersion uint64) ([]eventing.Event, error) {
+	query := fmt.Sprintf("SELECT id, type, aggregate_id, aggregate_type, version, schema_version, timestamp, payload, metadata FROM %s WHERE aggregate_id = ? AND version > ? ORDER BY version ASC", s.tableName)
+	rows, err := s.db.Query(ctx, query, aggregateID, afterVersion)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return s.scanEvents(rows)
+}
+
+func (s *SQLEventStore) StreamEvents(ctx context.Context, from time.Time) ([]eventing.Event, error) {
+	query := fmt.Sprintf("SELECT id, type, aggregate_id, aggregate_type, version, schema_version, timestamp, payload, metadata FROM %s WHERE timestamp >= ? ORDER BY timestamp ASC, version ASC", s.tableName)
+	rows, err := s.db.Query(ctx, query, from)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return s.scanEvents(rows)
+}
+
+// LoadEventsByType 按聚合类型加载事件（可选接口）
+func (s *SQLEventStore) LoadEventsByType(ctx context.Context, aggregateType string, aggregateID int64, afterVersion uint64) ([]eventing.Event, error) {
+	query := fmt.Sprintf("SELECT id, type, aggregate_id, aggregate_type, version, schema_version, timestamp, payload, metadata FROM %s WHERE aggregate_id = ? AND aggregate_type = ? AND version > ? ORDER BY version ASC", s.tableName)
+	rows, err := s.db.Query(ctx, query, aggregateID, aggregateType, afterVersion)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return s.scanEvents(rows)
+}
+
+// StreamAggregate 按聚合顺序流式读取事件（实现 IAggregateEventStore，可选能力）
+func (s *SQLEventStore) StreamAggregate(ctx context.Context, opts *store.AggregateStreamOptions) (*store.AggregateStreamResult, error) {
+	if opts == nil {
+		return nil, fmt.Errorf("AggregateStreamOptions cannot be nil")
+	}
+	if opts.AggregateID <= 0 {
+		return nil, fmt.Errorf("invalid aggregate id %d", opts.AggregateID)
+	}
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+
+	// 构建查询：按版本升序读取指定聚合的事件，限制条数
+	base := fmt.Sprintf("SELECT id, type, aggregate_id, aggregate_type, version, schema_version, timestamp, payload, metadata FROM %s WHERE aggregate_id = ?", s.tableName)
+	args := []interface{}{opts.AggregateID}
+	if opts.AggregateType != "" {
+		base += " AND aggregate_type = ?"
+		args = append(args, opts.AggregateType)
+	}
+	base += " AND version > ? ORDER BY version ASC LIMIT ?"
+	args = append(args, opts.AfterVersion, limit+1) // 多取一条判断 HasMore
+
+	rows, err := s.db.Query(ctx, base, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	events, err := s.scanEvents(rows)
+	if err != nil {
+		return nil, err
+	}
+
+	res := &store.AggregateStreamResult{Events: events}
+	if len(events) == 0 {
+		return res, nil
+	}
+	// 是否还有更多：若返回数量超过 limit，截断并标记 HasMore
+	if len(events) > limit {
+		res.HasMore = true
+		res.Events = events[:limit]
+	}
+	last := res.Events[len(res.Events)-1]
+	res.NextVersion = last.GetVersion()
+	return res, nil
+}
+
+type rowScanner interface {
+	Next() bool
+	Scan(dest ...interface{}) error
+	Close() error
+}
+
+func (s *SQLEventStore) scanEvents(rows rowScanner) ([]eventing.Event, error) {
+	var events []eventing.Event
+	for rows.Next() {
+		var (
+			id, typ      string
+			aggID        int64
+			aggType      string
+			ver          uint64
+			schema       int
+			ts           time.Time
+			payloadJSON  string
+			metadataJSON string
+		)
+		if err := rows.Scan(&id, &typ, &aggID, &aggType, &ver, &schema, &ts, &payloadJSON, &metadataJSON); err != nil {
+			return nil, err
+		}
+		var payload map[string]interface{}
+		if payloadJSON != "" {
+			_ = json.Unmarshal([]byte(payloadJSON), &payload)
+		}
+		var metadata map[string]interface{}
+		if metadataJSON != "" {
+			_ = json.Unmarshal([]byte(metadataJSON), &metadata)
+		}
+		events = append(events, eventing.Event{
+			Message: messaging.Message{
+				ID:        id,
+				Type:      typ,
+				Timestamp: ts,
+				Payload:   payload,
+				Metadata:  metadata,
+			},
+			AggregateID:   aggID,
+			AggregateType: aggType,
+			Version:       ver,
+			SchemaVersion: schema,
+		})
+	}
+	return events, nil
+}
+
+// HasAggregate 检查聚合是否存在（实现 IAggregateInspector 接口）
+func (s *SQLEventStore) HasAggregate(ctx context.Context, aggregateID int64) (bool, error) {
+	query := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE aggregate_id = ?", s.tableName)
+	row := s.db.QueryRow(ctx, query, aggregateID)
+
+	var count int64
+	if err := row.Scan(&count); err != nil {
+		return false, err
+	}
+
+	return count > 0, nil
+}
+
+// GetAggregateVersion 获取聚合的当前版本（实现 IAggregateInspector 接口）
+func (s *SQLEventStore) GetAggregateVersion(ctx context.Context, aggregateID int64) (uint64, error) {
+	query := fmt.Sprintf("SELECT COALESCE(MAX(version), 0) FROM %s WHERE aggregate_id = ?", s.tableName)
+	row := s.db.QueryRow(ctx, query, aggregateID)
+
+	var version uint64
+	if err := row.Scan(&version); err != nil {
+		return 0, err
+	}
+
+	return version, nil
+}
