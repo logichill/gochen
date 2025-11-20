@@ -51,3 +51,33 @@ func TestMemoryTransport_PublishFlow(t *testing.T) {
 		t.Fatalf("close failed: %v", err)
 	}
 }
+
+func TestMemoryTransport_CloseDrainsQueue(t *testing.T) {
+	tpt := NewMemoryTransport(16, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := tpt.Start(ctx); err != nil {
+		t.Fatalf("start failed: %v", err)
+	}
+
+	var cnt int32
+	if err := tpt.Subscribe("test", testHandler{count: &cnt}); err != nil {
+		t.Fatalf("subscribe failed: %v", err)
+	}
+
+	if err := tpt.Publish(ctx, &msg.Message{ID: "m1", Type: "test"}); err != nil {
+		t.Fatalf("publish failed: %v", err)
+	}
+	if err := tpt.Publish(ctx, &msg.Message{ID: "m2", Type: "test"}); err != nil {
+		t.Fatalf("publish failed: %v", err)
+	}
+
+	if err := tpt.Close(); err != nil {
+		t.Fatalf("close failed: %v", err)
+	}
+
+	if atomic.LoadInt32(&cnt) != 2 {
+		t.Fatalf("expected 2 messages processed before close, got %d", cnt)
+	}
+}

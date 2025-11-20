@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"gochen/eventing"
 	"gochen/eventing/store"
@@ -375,6 +376,30 @@ func TestCachedEventStore_DefaultConfig(t *testing.T) {
 	assert.Equal(t, 5*time.Minute, config.TTL)
 	assert.Equal(t, 1000, config.MaxAggregates)
 	assert.Equal(t, 1*time.Minute, config.CleanupInterval)
+}
+
+func TestCachedEventStore_GetEventStreamWithCursor_Filtered(t *testing.T) {
+	ctx := context.Background()
+	memStore := store.NewMemoryEventStore()
+	cached := NewCachedEventStore(memStore, nil)
+
+	e1 := eventing.NewEvent(1, "Agg", "TypeA", 1, nil)
+	e2 := eventing.NewEvent(1, "Agg", "TypeB", 2, nil)
+	now := time.Now()
+	e1.Timestamp = now
+	e2.Timestamp = now
+
+	require.NoError(t, memStore.AppendEvents(ctx, 1, []eventing.IStorableEvent{e1, e2}, 0))
+
+	res, err := cached.GetEventStreamWithCursor(ctx, &store.StreamOptions{
+		After: e1.ID,
+		Types: []string{"TypeB"},
+	})
+	require.NoError(t, err)
+	require.Len(t, res.Events, 1)
+	require.Equal(t, e2.ID, res.Events[0].ID)
+	require.Equal(t, e2.ID, res.NextCursor)
+	require.False(t, res.HasMore)
 }
 
 // TestCachedEventStore_ClearCache 测试清空缓存

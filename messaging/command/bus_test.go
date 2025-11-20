@@ -163,6 +163,26 @@ func TestCommandBus_HasHandler(t *testing.T) {
 	assert.False(t, commandBus.HasHandler("DeleteUser"))
 }
 
+// Test command handler duplicate registration should fail
+func TestCommandBus_RegisterHandler_Duplicate(t *testing.T) {
+	transport := memory.NewMemoryTransport(10, 2)
+	require.NoError(t, transport.Start(context.Background()))
+	defer transport.Close()
+
+	messageBus := messaging.NewMessageBus(transport)
+	commandBus := NewCommandBus(messageBus, nil)
+
+	err := commandBus.RegisterHandler("CreateUser", func(ctx context.Context, cmd *Command) error {
+		return nil
+	})
+	require.NoError(t, err)
+
+	err = commandBus.RegisterHandler("CreateUser", func(ctx context.Context, cmd *Command) error {
+		return nil
+	})
+	assert.Error(t, err)
+}
+
 // TestCommandBus_NilCommand 测试空命令
 func TestCommandBus_NilCommand(t *testing.T) {
 	transport := memory.NewMemoryTransport(10, 2)

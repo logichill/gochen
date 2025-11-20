@@ -186,6 +186,41 @@ for event := range eventChan {
 
 ## 高级特性
 
+### 游标与类型过滤（推荐）
+
+为避免在事件表上做全表扫描，可以优先使用 `IEventStoreExtended.GetEventStreamWithCursor`：
+
+```go
+stream, err := eventStore.(store.IEventStoreExtended).GetEventStreamWithCursor(ctx, &store.StreamOptions{
+    After:    lastCursor,                // 上次处理的事件 ID（可为空）
+    Types:    []string{"UserUpdated"},   // 可选：按事件类型过滤
+    FromTime: lastEventTime,             // 可选：时间窗口
+    Limit:    500,                       // 限制单次批量
+})
+if err != nil {
+    // 处理错误
+}
+for _, evt := range stream.Events {
+    // 处理事件
+}
+nextCursor := stream.NextCursor
+```
+
+常用实现支持情况：
+- SQL/Memory/Cached/Metrics 事件存储均实现 `IEventStoreExtended`
+- 若当前实例不支持，可回退到 `StreamEvents` 并使用 `store.FilterEventsWithOptions` 过滤
+
+### SQL 索引建议
+
+为提升游标与类型过滤性能，建议在事件表上添加组合索引：
+- `(timestamp, id)`：支持时间窗口 + 游标的顺序扫描
+- `(type, timestamp)`：按事件类型过滤时减少回表
+- 常见 schema（`domain_events`）：可新增示例索引
+```sql
+CREATE INDEX idx_domain_events_timestamp_id ON domain_events (timestamp, id);
+CREATE INDEX idx_domain_events_type_timestamp ON domain_events (type, timestamp);
+```
+
 ### 1. 快照支持
 
 快照可以减少事件重放开销：

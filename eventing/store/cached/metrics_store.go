@@ -51,3 +51,33 @@ func (m *MetricsEventStore) StreamEvents(ctx context.Context, from time.Time) ([
 	}
 	return evs, err
 }
+
+// GetEventStreamWithCursor 若底层支持扩展接口则委托，否则回退到 StreamEvents 并应用过滤
+func (m *MetricsEventStore) GetEventStreamWithCursor(ctx context.Context, opts *estore.StreamOptions) (*estore.StreamResult, error) {
+	start := time.Now()
+	var (
+		res *estore.StreamResult
+		err error
+	)
+	if extended, ok := m.inner.(estore.IEventStoreExtended); ok {
+		res, err = extended.GetEventStreamWithCursor(ctx, opts)
+	} else {
+		var evs []eventing.Event
+		evs, err = m.inner.StreamEvents(ctx, opts.FromTime)
+		if err == nil {
+			res = estore.FilterEventsWithOptions(evs, opts)
+		}
+	}
+
+	if m.mr != nil {
+		count := 0
+		if res != nil {
+			count = len(res.Events)
+		}
+		m.mr.RecordStream(count, time.Since(start), err != nil)
+	}
+	return res, err
+}
+
+// 接口断言
+var _ estore.IEventStoreExtended = (*MetricsEventStore)(nil)
