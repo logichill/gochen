@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
+	"gochen/eventing"
 	"gochen/eventing/bus"
 	"gochen/logging"
 	"gochen/messaging/command"
@@ -91,7 +93,7 @@ func (o *SagaOrchestrator) Execute(ctx context.Context, saga ISaga) error {
 	}
 
 	// 发布 Saga 开始事件
-	o.publishEvent(ctx, "SagaStarted", sagaID, nil)
+	o.publishEvent(ctx, EventSagaStarted, sagaID, nil)
 
 	// 执行步骤
 	for i, step := range steps {
@@ -113,7 +115,7 @@ func (o *SagaOrchestrator) Execute(ctx context.Context, saga ISaga) error {
 			}
 
 			// 发布步骤失败事件
-			o.publishEvent(ctx, "SagaStepFailed", sagaID, map[string]any{
+			o.publishEvent(ctx, EventSagaStepFailed, sagaID, map[string]any{
 				"step":  step.Name,
 				"error": err.Error(),
 			})
@@ -127,7 +129,7 @@ func (o *SagaOrchestrator) Execute(ctx context.Context, saga ISaga) error {
 				saga.OnFailed(ctx, fmt.Errorf("step failed and compensation failed: %w", errors.Join(err, compErr)))
 
 				// 发布 Saga 失败事件
-				o.publishEvent(ctx, "SagaFailed", sagaID, map[string]any{
+				o.publishEvent(ctx, EventSagaFailed, sagaID, map[string]any{
 					"error":              err.Error(),
 					"compensation_error": compErr.Error(),
 				})
@@ -139,7 +141,7 @@ func (o *SagaOrchestrator) Execute(ctx context.Context, saga ISaga) error {
 			saga.OnFailed(ctx, err)
 
 			// 发布 Saga 补偿完成事件
-			o.publishEvent(ctx, "SagaCompensated", sagaID, map[string]any{
+			o.publishEvent(ctx, EventSagaCompensationCompleted, sagaID, map[string]any{
 				"error": err.Error(),
 			})
 
@@ -153,7 +155,7 @@ func (o *SagaOrchestrator) Execute(ctx context.Context, saga ISaga) error {
 		}
 
 		// 发布步骤完成事件
-		o.publishEvent(ctx, "SagaStepCompleted", sagaID, map[string]any{
+		o.publishEvent(ctx, EventSagaStepCompleted, sagaID, map[string]any{
 			"step": step.Name,
 		})
 	}
@@ -172,7 +174,7 @@ func (o *SagaOrchestrator) Execute(ctx context.Context, saga ISaga) error {
 	}
 
 	// 发布 Saga 完成事件
-	o.publishEvent(ctx, "SagaCompleted", sagaID, nil)
+	o.publishEvent(ctx, EventSagaCompleted, sagaID, nil)
 
 	sagaLogger.Info(ctx, "Saga 执行完成",
 		logging.String("saga_id", sagaID),
@@ -230,7 +232,7 @@ func (o *SagaOrchestrator) compensate(ctx context.Context, saga ISaga, state *Sa
 	}
 
 	// 发布补偿开始事件
-	o.publishEvent(ctx, "SagaCompensationStarted", sagaID, nil)
+	o.publishEvent(ctx, EventSagaCompensationStarted, sagaID, nil)
 
 	// 倒序执行补偿（从失败步骤的前一个开始）
 	for i := failedStepIndex - 1; i >= 0; i-- {
@@ -274,7 +276,7 @@ func (o *SagaOrchestrator) compensate(ctx context.Context, saga ISaga, state *Sa
 				logging.String("step", step.Name))
 
 			// 发布补偿失败事件
-			o.publishEvent(ctx, "SagaCompensationStepFailed", sagaID, map[string]any{
+			o.publishEvent(ctx, EventSagaCompensationStepFailed, sagaID, map[string]any{
 				"step":  step.Name,
 				"error": err.Error(),
 			})
@@ -284,7 +286,7 @@ func (o *SagaOrchestrator) compensate(ctx context.Context, saga ISaga, state *Sa
 		}
 
 		// 发布补偿步骤完成事件
-		o.publishEvent(ctx, "SagaCompensationStepCompleted", sagaID, map[string]any{
+		o.publishEvent(ctx, EventSagaStepCompleted, sagaID, map[string]any{
 			"step": step.Name,
 		})
 	}
@@ -307,8 +309,23 @@ func (o *SagaOrchestrator) publishEvent(ctx context.Context, eventType string, s
 		return
 	}
 
-	// TODO: 使用 EventBus 发布事件
-	// 这里简化处理，实际应该创建事件对象
+	payload := make(map[string]any, len(data)+1)
+	payload["saga_id"] = sagaID
+	for k, v := range data {
+		payload[k] = v
+	}
+
+	evt := eventing.NewEvent(1, "Saga", eventType, uint64(time.Now().UnixNano()), payload)
+	metadata := evt.GetMetadata()
+	metadata["saga_id"] = sagaID
+
+	if err := o.eventBus.PublishEvent(ctx, evt); err != nil {
+		sagaLogger.Warn(ctx, "发布 Saga 事件失败", logging.Error(err),
+			logging.String("event_type", eventType),
+			logging.String("saga_id", sagaID))
+		return
+	}
+
 	sagaLogger.Debug(ctx, "发布 Saga 事件",
 		logging.String("event_type", eventType),
 		logging.String("saga_id", sagaID))

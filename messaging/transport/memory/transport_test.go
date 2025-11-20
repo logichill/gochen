@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	msg "gochen/messaging"
 )
 
@@ -16,6 +18,15 @@ func (h testHandler) Handle(ctx context.Context, m msg.IMessage) error {
 	return nil
 }
 func (h testHandler) Type() string { return "testHandler" }
+
+// 阻塞处理器用于测试关闭超时
+type blockingHandler struct{ ch chan struct{} }
+
+func (h blockingHandler) Handle(ctx context.Context, m msg.IMessage) error {
+	<-h.ch
+	return nil
+}
+func (h blockingHandler) Type() string { return "blockingHandler" }
 
 func TestMemoryTransport_PublishFlow(t *testing.T) {
 	tpt := NewMemoryTransport(16, 2)
@@ -80,4 +91,27 @@ func TestMemoryTransport_CloseDrainsQueue(t *testing.T) {
 	if atomic.LoadInt32(&cnt) != 2 {
 		t.Fatalf("expected 2 messages processed before close, got %d", cnt)
 	}
+}
+
+func TestMemoryTransport_CloseWithContextTimeout(t *testing.T) {
+	tpt := NewMemoryTransport(4, 1)
+	ctx := context.Background()
+	require.NoError(t, tpt.Start(ctx))
+
+	blockCh := make(chan struct{})
+	t.Cleanup(func() { close(blockCh) })
+
+	require.NoError(t, tpt.Subscribe("block", blockingHandler{ch: blockCh}))
+
+	require.NoError(t, tpt.Publish(ctx, &msg.Message{ID: "m1", Type: "block"}))
+
+	timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	defer cancel()
+
+	err := tpt.CloseWithContext(timeoutCtx)
+	require.Error(t, err)
+
+	// 确认 CloseWithTimeout 也能返回超时
+	err = tpt.CloseWithTimeout(10 * time.Millisecond)
+	require.Error(t, err)
 }

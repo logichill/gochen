@@ -4,6 +4,7 @@ package memory
 import (
 	"context"
 	"fmt"
+	"time"
 )
 
 // Start 启动传输层
@@ -44,6 +45,21 @@ func (t *MemoryTransport) Start(ctx context.Context) error {
 // 返回:
 //   - error: 未启动或关闭失败时返回错误
 func (t *MemoryTransport) Close() error {
+	return t.CloseWithContext(context.Background())
+}
+
+// CloseWithTimeout 关闭传输层并在指定时间内等待，超时返回 ctx 错误。
+func (t *MemoryTransport) CloseWithTimeout(timeout time.Duration) error {
+	if timeout <= 0 {
+		return t.Close()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return t.CloseWithContext(ctx)
+}
+
+// CloseWithContext 允许调用方控制等待 worker 退出的上下文（可用于超时）。
+func (t *MemoryTransport) CloseWithContext(ctx context.Context) error {
 	t.mutex.Lock()
 	if !t.running {
 		t.mutex.Unlock()
@@ -63,9 +79,19 @@ func (t *MemoryTransport) Close() error {
 	// 不主动关闭 stopCh，避免抢占队列 flush；队列关闭后 worker 会自然退出
 
 	// 等待所有工作协程结束
-	t.wg.Wait()
+	done := make(chan struct{})
+	go func() {
+		t.wg.Wait()
+		close(done)
+	}()
 
-	return nil
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
 }
 
 // worker 工作协程
