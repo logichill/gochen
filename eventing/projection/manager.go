@@ -247,7 +247,7 @@ func (pm *ProjectionManager) RegisterProjection(projection IProjection) error {
 		}
 	}
 
-	projectionLogger.Info(context.Background(), "[ProjectionManager] 注册投影: %s", logging.String("projection", name))
+	projectionLogger.Info(context.Background(), "[ProjectionManager] 注册投影", logging.String("projection", name))
 	return nil
 }
 
@@ -289,7 +289,7 @@ func (pm *ProjectionManager) UnregisterProjection(name string) error {
 	delete(pm.statuses, name)
 	delete(pm.handlers, name)
 
-	projectionLogger.Info(context.Background(), "[ProjectionManager] 取消注册投影: %s", logging.String("projection", name))
+	projectionLogger.Info(context.Background(), "[ProjectionManager] 取消注册投影", logging.String("projection", name))
 	return nil
 }
 
@@ -310,7 +310,7 @@ func (pm *ProjectionManager) StartProjection(name string) error {
 	status.Status = "running"
 	status.UpdatedAt = time.Now()
 
-	projectionLogger.Info(context.Background(), "[ProjectionManager] 启动投影: %s", logging.String("projection", name))
+	projectionLogger.Info(context.Background(), "[ProjectionManager] 启动投影", logging.String("projection", name))
 	return nil
 }
 
@@ -331,7 +331,7 @@ func (pm *ProjectionManager) StopProjection(name string) error {
 	status.Status = "stopped"
 	status.UpdatedAt = time.Now()
 
-	projectionLogger.Info(context.Background(), "[ProjectionManager] 停止投影: %s", logging.String("projection", name))
+	projectionLogger.Info(context.Background(), "[ProjectionManager] 停止投影", logging.String("projection", name))
 	return nil
 }
 
@@ -445,9 +445,10 @@ func (h *projectionEventHandler) HandleEvent(ctx context.Context, event eventing
 	h.manager.mutex.RLock()
 	status, exists := h.manager.statuses[name]
 	checkpointStore := h.manager.checkpointStore
+	shouldProcess := exists && status.Status == "running"
 	h.manager.mutex.RUnlock()
 
-	if !exists || status.Status != "running" {
+	if !shouldProcess {
 		return nil
 	}
 

@@ -33,6 +33,8 @@ type Status struct {
 }
 
 // Manager 投影管理器
+//
+// Deprecated: 请使用功能更完整、支持检查点和事件总线集成的 ProjectionManager。
 type Manager struct {
 	projectors map[string]Projector
 	statuses   map[string]*Status
@@ -41,6 +43,8 @@ type Manager struct {
 }
 
 // NewManager 创建投影管理器
+//
+// Deprecated: 请改用 NewProjectionManager 或 NewProjectionManagerWithConfig。
 func NewManager(eventStore store.IEventStore, config interface{}) *Manager {
 	return &Manager{
 		projectors: make(map[string]Projector),
