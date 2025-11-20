@@ -1,0 +1,181 @@
+# Gochen Shared - golangci-lint 配置
+# 参考: https://golangci-lint.run/usage/configuration/
+
+run:
+  timeout: 5m
+  tests: true
+  build-tags: []
+  skip-dirs:
+    - examples
+    - scripts
+    - docs
+  skip-files:
+    - ".*_test\\.go$"  # 对测试文件放宽检查
+  modules-download-mode: readonly
+  go: '1.24'
+
+output:
+  format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
+  uniq-by-line: true
+  sort-results: true
+
+linters:
+  enable:
+    # 错误检查
+    - errcheck      # 检查未处理的错误
+    - errorlint     # 错误包装检查 (fmt.Errorf %w)
+    - errname       # 错误变量命名规范
+    
+    # 代码质量
+    - govet         # Go 官方静态分析
+    - staticcheck   # 高级静态分析
+    - gosimple      # 简化代码建议
+    - unused        # 未使用的常量/变量/函数
+    - ineffassign   # 无效的赋值检测
+    
+    # 代码风格
+    - gofmt         # 格式检查
+    - goimports     # import 顺序检查
+    - misspell      # 英文拼写检查
+    - revive        # 替代 golint 的代码风格检查
+    
+    # 性能
+    - prealloc      # 切片预分配检查
+    
+    # 并发安全
+    - gocritic      # 综合代码审查工具
+    
+    # Context 使用
+    - contextcheck  # context 使用检查
+    
+    # 其他
+    - unparam       # 未使用的函数参数
+    - unconvert     # 不必要的类型转换
+    - whitespace    # 空白符检查
+
+  disable:
+    - typecheck     # 类型检查由编译器完成
+    - deadcode      # 已废弃，使用 unused
+    - structcheck   # 已废弃，使用 unused
+    - varcheck      # 已废弃，使用 unused
+    - exhaustive    # 穷尽性检查（可选）
+    - cyclop        # 圈复杂度（可选）
+    - gocyclo       # 圈复杂度（可选）
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+    check-blank: true  # 检查 _ = 忽略错误
+    exclude-functions:
+      # 日志函数通常可以忽略错误
+      - (*gochen/logging.Logger).Info
+      - (*gochen/logging.Logger).Debug
+      - (*gochen/logging.Logger).Error
+  
+  errorlint:
+    errorf: true  # 检查 fmt.Errorf 使用 %w
+    asserts: true # 检查 errors.As 使用
+    comparison: true
+  
+  govet:
+    check-shadowing: true
+    enable-all: true
+    disable:
+      - fieldalignment  # 字段对齐优化（可选）
+  
+  staticcheck:
+    go: "1.24"
+    checks: ["all"]
+  
+  revive:
+    severity: warning
+    rules:
+      - name: exported
+        severity: warning
+        disabled: false
+        arguments:
+          - "checkPrivateReceivers"
+          - "sayRepetitiveInsteadOfStutters"
+      - name: package-comments
+        severity: warning
+        disabled: false
+      - name: blank-imports
+        severity: warning
+        disabled: false
+      - name: context-as-argument
+        severity: warning
+        disabled: false
+        arguments:
+          - allowTypesBefore: "*testing.T"
+  
+  goimports:
+    local-prefixes: gochen
+  
+  misspell:
+    locale: US
+    ignore-words:
+      - gochen
+  
+  unparam:
+    check-exported: false  # 不检查导出函数的未使用参数
+  
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - performance
+      - style
+    disabled-checks:
+      - ifElseChain
+      - singleCaseSwitch
+      - unnamedResult
+
+issues:
+  exclude-use-default: false
+  exclude-rules:
+    # 排除测试文件的某些检查
+    - path: _test\.go
+      linters:
+        - errcheck
+        - unparam
+        - gocritic
+    
+    # 排除 examples 目录
+    - path: examples/
+      linters:
+        - errcheck
+        - revive
+        - gocritic
+    
+    # 允许 main 函数中使用 panic
+    - path: examples/.*main\.go
+      text: "use of `panic`"
+      linters:
+        - forbidigo
+    
+    # 忽略某些错误检查（明确注释的情况）
+    - linters:
+        - errcheck
+      text: "Error return value of .*.AfterCreate.*is not checked"
+    - linters:
+        - errcheck
+      text: "Error return value of .*.AfterUpdate.*is not checked"
+    
+    # Interface{} 迁移到 any 的临时豁免
+    - linters:
+        - revive
+      text: "use any instead of interface{}"
+  
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  new: false
+  fix: false
+
+severity:
+  default-severity: warning
+  rules:
+    - linters:
+        - errcheck
+        - errorlint
+      severity: error

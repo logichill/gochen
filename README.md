@@ -4,6 +4,9 @@
 
 [![Go Version](https://img.shields.io/badge/Go-1.21%2B-blue)](https://golang.org)
 [![License](https://img.shields.io/badge/License-MIT-yellow)](./LICENSE)
+[![Code Quality](https://img.shields.io/badge/Quality-⭐⭐⭐⭐-brightgreen)](./AUDIT_REPORT.md)
+
+> 📋 **质量报告**: 已完成全面代码审核，查看 [审核总结](./AUDIT_SUMMARY.md) 或 [详细报告](./AUDIT_REPORT.md)
 
 ## 特性概览
 
@@ -997,6 +1000,28 @@ require gochen v1.0.0
 
 ---
 
+## 📚 文档索引
+
+### 核心文档
+
+- [README.md](./README.md) - 项目介绍和快速开始 (本文档)
+- [NAMING.md](./NAMING.md) - 命名规范和代码风格指南
+- [STABILITY.md](./STABILITY.md) - API 稳定性承诺和版本管理
+
+### 质量与改进
+
+- [AUDIT_SUMMARY.md](./AUDIT_SUMMARY.md) - **审核执行摘要** (5分钟速览) ⭐
+- [AUDIT_REPORT.md](./AUDIT_REPORT.md) - 全面代码质量审核报告 (详细)
+- [ACTION_PLAN.md](./ACTION_PLAN.md) - 3个月质量改进行动计划
+
+### 开发工具
+
+- [Makefile](./Makefile) - 构建和测试工具
+- [.golangci.yml](./.golangci.yml) - 静态分析配置
+- [.github/workflows/ci.yml](./.github/workflows/ci.yml) - CI/CD 配置
+
+---
+
 ## 许可证
 
 MIT License - 查看 [LICENSE](./LICENSE) 文件了解详情
@@ -1008,6 +1033,8 @@ MIT License - 查看 [LICENSE](./LICENSE) 文件了解详情
 - **项目主页**: [GitHub Repository]
 - **问题反馈**: [GitHub Issues]
 - **邮箱**: your-email@example.com
+
+查看 [代码质量报告](./AUDIT_REPORT.md) 了解项目改进计划。
 
 ---
 
