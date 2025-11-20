@@ -78,8 +78,12 @@ func DefaultProjectionConfig() *ProjectionConfig {
 	}
 }
 
-// IProjectionManager 投影管理器
-type IProjectionManager struct {
+// ProjectionManager 投影管理器
+//
+// 注意：历史上该类型曾命名为 IProjectionManager（违反接口命名约定），
+// 为保持向后兼容，仍保留 IProjectionManager 作为别名类型，但推荐新代码
+// 直接使用 ProjectionManager。
+type ProjectionManager struct {
 	projections     map[string]IProjection
 	eventStore      store.IEventStore
 	eventBus        bus.IEventBus
@@ -90,18 +94,21 @@ type IProjectionManager struct {
 	mutex           sync.RWMutex
 }
 
+// Deprecated: IProjectionManager 仅为向后兼容而保留，请使用 ProjectionManager。
+type IProjectionManager = ProjectionManager
+
 // NewProjectionManager 创建投影管理器
-func NewProjectionManager(eventStore store.IEventStore, eventBus bus.IEventBus) *IProjectionManager {
+func NewProjectionManager(eventStore store.IEventStore, eventBus bus.IEventBus) *ProjectionManager {
 	return NewProjectionManagerWithConfig(eventStore, eventBus, nil)
 }
 
 // NewProjectionManagerWithConfig 创建带配置的投影管理器
-func NewProjectionManagerWithConfig(eventStore store.IEventStore, eventBus bus.IEventBus, config *ProjectionConfig) *IProjectionManager {
+func NewProjectionManagerWithConfig(eventStore store.IEventStore, eventBus bus.IEventBus, config *ProjectionConfig) *ProjectionManager {
 	if config == nil {
 		config = DefaultProjectionConfig()
 	}
 
-	return &IProjectionManager{
+	return &ProjectionManager{
 		projections:     make(map[string]IProjection),
 		eventStore:      eventStore,
 		eventBus:        eventBus,
@@ -121,8 +128,8 @@ func NewProjectionManagerWithConfig(eventStore store.IEventStore, eventBus bus.I
 //   - store: 检查点存储实例
 //
 // 返回：
-//   - *IProjectionManager: 管理器实例（支持链式调用）
-func (pm *IProjectionManager) WithCheckpointStore(store ICheckpointStore) *IProjectionManager {
+//   - *ProjectionManager: 管理器实例（支持链式调用）
+func (pm *ProjectionManager) WithCheckpointStore(store ICheckpointStore) *ProjectionManager {
 	pm.mutex.Lock()
 	defer pm.mutex.Unlock()
 
@@ -145,7 +152,7 @@ func (pm *IProjectionManager) WithCheckpointStore(store ICheckpointStore) *IProj
 // 注意：
 //   - 需要先配置 checkpointStore
 //   - 会自动启动投影
-func (pm *IProjectionManager) ResumeFromCheckpoint(ctx context.Context, projectionName string) error {
+func (pm *ProjectionManager) ResumeFromCheckpoint(ctx context.Context, projectionName string) error {
 	pm.mutex.RLock()
 	checkpointStore := pm.checkpointStore
 	_, exists := pm.projections[projectionName]
@@ -190,7 +197,7 @@ func (pm *IProjectionManager) ResumeFromCheckpoint(ctx context.Context, projecti
 //
 // 返回：
 //   - error: 恢复失败错误
-func (pm *IProjectionManager) ResumeAllFromCheckpoint(ctx context.Context) error {
+func (pm *ProjectionManager) ResumeAllFromCheckpoint(ctx context.Context) error {
 	pm.mutex.RLock()
 	names := make([]string, 0, len(pm.projections))
 	for name := range pm.projections {
@@ -210,7 +217,7 @@ func (pm *IProjectionManager) ResumeAllFromCheckpoint(ctx context.Context) error
 }
 
 // RegisterProjection 注册投影
-func (pm *IProjectionManager) RegisterProjection(projection IProjection) error {
+func (pm *ProjectionManager) RegisterProjection(projection IProjection) error {
 	pm.mutex.Lock()
 	defer pm.mutex.Unlock()
 
@@ -240,12 +247,12 @@ func (pm *IProjectionManager) RegisterProjection(projection IProjection) error {
 		}
 	}
 
-	projectionLogger.Info(context.Background(), "[IProjectionManager] 注册投影: %s", logging.String("projection", name))
+	projectionLogger.Info(context.Background(), "[ProjectionManager] 注册投影: %s", logging.String("projection", name))
 	return nil
 }
 
 // UnregisterProjection 取消注册投影
-func (pm *IProjectionManager) UnregisterProjection(name string) error {
+func (pm *ProjectionManager) UnregisterProjection(name string) error {
 	pm.mutex.Lock()
 	defer pm.mutex.Unlock()
 
@@ -260,7 +267,7 @@ func (pm *IProjectionManager) UnregisterProjection(name string) error {
 			handler = pm.handlers[name][eventType]
 		}
 		if handler == nil {
-			projectionLogger.Warn(context.Background(), "[IProjectionManager] 找不到已注册的处理器实例，可能无法正确取消订阅",
+			projectionLogger.Warn(context.Background(), "[ProjectionManager] 找不到已注册的处理器实例，可能无法正确取消订阅",
 				logging.String("projection", name),
 				logging.String("event_type", eventType),
 			)
@@ -282,12 +289,12 @@ func (pm *IProjectionManager) UnregisterProjection(name string) error {
 	delete(pm.statuses, name)
 	delete(pm.handlers, name)
 
-	projectionLogger.Info(context.Background(), "[IProjectionManager] 取消注册投影: %s", logging.String("projection", name))
+	projectionLogger.Info(context.Background(), "[ProjectionManager] 取消注册投影: %s", logging.String("projection", name))
 	return nil
 }
 
 // StartProjection 启动投影
-func (pm *IProjectionManager) StartProjection(name string) error {
+func (pm *ProjectionManager) StartProjection(name string) error {
 	pm.mutex.Lock()
 	defer pm.mutex.Unlock()
 
@@ -303,12 +310,12 @@ func (pm *IProjectionManager) StartProjection(name string) error {
 	status.Status = "running"
 	status.UpdatedAt = time.Now()
 
-	projectionLogger.Info(context.Background(), "[IProjectionManager] 启动投影: %s", logging.String("projection", name))
+	projectionLogger.Info(context.Background(), "[ProjectionManager] 启动投影: %s", logging.String("projection", name))
 	return nil
 }
 
 // StopProjection 停止投影
-func (pm *IProjectionManager) StopProjection(name string) error {
+func (pm *ProjectionManager) StopProjection(name string) error {
 	pm.mutex.Lock()
 	defer pm.mutex.Unlock()
 
@@ -324,12 +331,12 @@ func (pm *IProjectionManager) StopProjection(name string) error {
 	status.Status = "stopped"
 	status.UpdatedAt = time.Now()
 
-	projectionLogger.Info(context.Background(), "[IProjectionManager] 停止投影: %s", logging.String("projection", name))
+	projectionLogger.Info(context.Background(), "[ProjectionManager] 停止投影: %s", logging.String("projection", name))
 	return nil
 }
 
 // GetProjectionStatus 获取投影状态
-func (pm *IProjectionManager) GetProjectionStatus(name string) (*ProjectionStatus, error) {
+func (pm *ProjectionManager) GetProjectionStatus(name string) (*ProjectionStatus, error) {
 	pm.mutex.RLock()
 	defer pm.mutex.RUnlock()
 
@@ -338,24 +345,27 @@ func (pm *IProjectionManager) GetProjectionStatus(name string) (*ProjectionStatu
 		return nil, fmt.Errorf("projection %s not found", name)
 	}
 
-	return status, nil
+	// 返回状态副本，避免调用方在无锁情况下读写共享状态导致竞态
+	statusCopy := *status
+	return &statusCopy, nil
 }
 
 // GetAllProjectionStatuses 获取所有投影状态
-func (pm *IProjectionManager) GetAllProjectionStatuses() map[string]*ProjectionStatus {
+func (pm *ProjectionManager) GetAllProjectionStatuses() map[string]*ProjectionStatus {
 	pm.mutex.RLock()
 	defer pm.mutex.RUnlock()
 
-	result := make(map[string]*ProjectionStatus)
+	result := make(map[string]*ProjectionStatus, len(pm.statuses))
 	for name, status := range pm.statuses {
-		result[name] = status
+		statusCopy := *status
+		result[name] = &statusCopy
 	}
 
 	return result
 }
 
 // RebuildProjection 重建投影
-func (pm *IProjectionManager) RebuildProjection(ctx context.Context, name string, events []eventing.Event) error {
+func (pm *ProjectionManager) RebuildProjection(ctx context.Context, name string, events []eventing.Event) error {
 	pm.mutex.Lock()
 	checkpointStore := pm.checkpointStore
 	projection, exists := pm.projections[name]
@@ -424,50 +434,80 @@ func (pm *IProjectionManager) RebuildProjection(ctx context.Context, name string
 // projectionEventHandler 投影事件处理器
 type projectionEventHandler struct {
 	projection IProjection
-	manager    *IProjectionManager
+	manager    *ProjectionManager
 }
 
 // HandleEvent 处理事件
 func (h *projectionEventHandler) HandleEvent(ctx context.Context, event eventing.IEvent) error {
 	name := h.projection.GetName()
 
-	status := h.manager.statuses[name]
-	if status.Status != "running" {
+	// 首先在读锁下检查投影是否存在且处于运行状态，并捕获当前 checkpointStore 引用
+	h.manager.mutex.RLock()
+	status, exists := h.manager.statuses[name]
+	checkpointStore := h.manager.checkpointStore
+	h.manager.mutex.RUnlock()
+
+	if !exists || status.Status != "running" {
 		return nil
 	}
 
-	// 更新状态
-	status.ProcessedEvents++
-	status.LastEventID = event.GetID()
-	status.LastEventTime = event.GetTimestamp()
-	status.UpdatedAt = time.Now()
+	// 在不持锁的情况下处理事件，避免长时间占用管理器锁
+	err := h.projection.Handle(ctx, event)
 
-	// 处理事件
-	if err := h.projection.Handle(ctx, event); err != nil {
-		// 如果event是eventing.Event类型，则传递给DeadLetterFunc
+	var (
+		processedEvents int64
+		failedEvents    int64
+		checkpoint      *Checkpoint
+	)
+
+	// 根据处理结果更新状态，需要在写锁下进行以避免与其他操作（Start/Stop/Unregister）产生竞态
+	h.manager.mutex.Lock()
+	status, exists = h.manager.statuses[name]
+	if exists {
+		now := time.Now()
+		if err != nil {
+			status.FailedEvents++
+			status.LastError = err.Error()
+			status.UpdatedAt = now
+		} else {
+			status.ProcessedEvents++
+			status.LastEventID = event.GetID()
+			status.LastEventTime = event.GetTimestamp()
+			status.UpdatedAt = now
+
+			if checkpointStore != nil {
+				checkpoint = NewCheckpoint(
+					name,
+					status.ProcessedEvents,
+					event.GetID(),
+					event.GetTimestamp(),
+				)
+			}
+		}
+		processedEvents = status.ProcessedEvents
+		failedEvents = status.FailedEvents
+	}
+	h.manager.mutex.Unlock()
+
+	if err != nil {
+		// 如果 event 是 eventing.Event 类型，则传递给 DeadLetterFunc
 		if e, ok := event.(*eventing.Event); ok {
 			h.manager.config.DeadLetterFunc(err, *e, name)
 		}
 
+		// 使用快照后的计数值进行日志记录，避免在无锁状态下访问共享状态
 		projectionLogger.Error(ctx, "投影处理事件失败", logging.Error(err),
 			logging.String("projection", name),
 			logging.String("event_type", event.GetType()),
-			logging.Int64("processed_events", status.ProcessedEvents),
-			logging.Int64("failed_events", status.FailedEvents),
+			logging.Int64("processed_events", processedEvents),
+			logging.Int64("failed_events", failedEvents),
 		)
 		return err
 	}
 
 	// 自动保存检查点（如果已配置）
-	if h.manager.checkpointStore != nil {
-		checkpoint := NewCheckpoint(
-			name,
-			status.ProcessedEvents,
-			event.GetID(),
-			event.GetTimestamp(),
-		)
-
-		if err := h.manager.checkpointStore.Save(ctx, checkpoint); err != nil {
+	if checkpoint != nil && checkpointStore != nil {
+		if err := checkpointStore.Save(ctx, checkpoint); err != nil {
 			projectionLogger.Warn(ctx, "保存检查点失败", logging.Error(err),
 				logging.String("projection", name))
 			// 不中断事件处理

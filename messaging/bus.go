@@ -41,8 +41,14 @@ type MessageBus struct {
 	// handlerErrorHook 可选的处理器错误钩子
 	handlerErrorHook HandlerErrorHook
 
-	// wrappedHandlers 映射原始 handler -> 包装后的 handler（用于 Unsubscribe）
-	wrappedHandlers map[IMessageHandler]IMessageHandler
+	// wrappedHandlers 映射 handler 标识 -> 包装后的 handler（用于 Unsubscribe）
+	// 注意：
+	//   - 不能直接以 handler 值作为 map key，因为某些实现类型（例如函数类型 EventHandlerFunc）在 Go 中不可比较，
+	//     使用它们作为 map key 会在运行时触发 "hash of unhashable type" panic。
+	//   - 也不能只用 handler 的类型/Type() 作为 key，否则同一 messageType 下的多个“同类型 handler 实例”
+	//     会被错误折叠为同一个 key，导致后注册的 handler 无法被正确区分与解绑。
+	//   - 这里通过组合 messageType + handler 实例指针（%p）+ handler.Type() 构造字符串 key，尽量在不引入反射的前提下区分不同实例。
+	wrappedHandlers map[string]IMessageHandler
 }
 
 // NewMessageBus 创建消息总线
@@ -50,8 +56,17 @@ func NewMessageBus(transport Transport) *MessageBus {
 	return &MessageBus{
 		transport:       transport,
 		middlewares:     make([]IMiddleware, 0),
-		wrappedHandlers: make(map[IMessageHandler]IMessageHandler),
+		wrappedHandlers: make(map[string]IMessageHandler),
 	}
+}
+
+// GetTransport 返回底层传输实现
+//
+// 该方法主要用于内部组件（例如 CommandBus、SagaOrchestrator）在运行时探测
+// Transport 的同步/异步语义，从而给出更明确的错误语义说明或告警。普通调用方
+// 不应依赖具体 Transport 类型来实现业务逻辑。
+func (bus *MessageBus) GetTransport() Transport {
+	return bus.transport
 }
 
 // Use 注册中间件
@@ -78,13 +93,14 @@ func (bus *MessageBus) getHandlerErrorHook() HandlerErrorHook {
 // Subscribe 订阅消息处理器
 func (bus *MessageBus) Subscribe(ctx context.Context, messageType string, handler IMessageHandler) error {
 	bus.mutex.Lock()
-	wrapped, exists := bus.wrappedHandlers[handler]
+	key := bus.handlerKey(messageType, handler)
+	wrapped, exists := bus.wrappedHandlers[key]
 	if !exists {
 		wrapped = &handlerWithErrorHook{
 			inner: handler,
 			bus:   bus,
 		}
-		bus.wrappedHandlers[handler] = wrapped
+		bus.wrappedHandlers[key] = wrapped
 	}
 	bus.mutex.Unlock()
 
@@ -94,9 +110,10 @@ func (bus *MessageBus) Subscribe(ctx context.Context, messageType string, handle
 // Unsubscribe 取消订阅消息处理器
 func (bus *MessageBus) Unsubscribe(ctx context.Context, messageType string, handler IMessageHandler) error {
 	bus.mutex.Lock()
-	wrapped, exists := bus.wrappedHandlers[handler]
+	key := bus.handlerKey(messageType, handler)
+	wrapped, exists := bus.wrappedHandlers[key]
 	if exists {
-		delete(bus.wrappedHandlers, handler)
+		delete(bus.wrappedHandlers, key)
 	}
 	bus.mutex.Unlock()
 
@@ -106,6 +123,16 @@ func (bus *MessageBus) Unsubscribe(ctx context.Context, messageType string, hand
 
 	// 如果找不到包装器，回退到原始 handler（兼容直接订阅 Transport 场景）
 	return bus.transport.Unsubscribe(messageType, handler)
+}
+
+// handlerKey 构造用于 wrappedHandlers 映射的 key
+// 组合 messageType、handler.Type() 与 handler 的动态类型字符串，尽量保证唯一且稳定。
+func (bus *MessageBus) handlerKey(messageType string, handler IMessageHandler) string {
+	if handler == nil {
+		return messageType + "|<nil>|"
+	}
+	// 使用 handler 的实例指针（%p）作为近似 identity，再附带类型信息和声明的 Type() 便于调试
+	return fmt.Sprintf("%s|%p|%s", messageType, handler, handler.Type())
 }
 
 // Publish 发布消息，并在发送到 Transport 前执行中间件

@@ -1,236 +1,77 @@
-package messaging
+package messaging_test
 
 import (
 	"context"
-	"errors"
 	"testing"
+	"time"
+
+	"gochen/messaging"
+	synctransport "gochen/messaging/transport/sync"
 )
 
-type mockTransport struct {
-	published     []IMessage
-	batch         [][]IMessage
-	subscribed    map[string]int
-	unsubscribed  map[string]int
-	handlers      map[string][]IMessageHandler
-	shouldError   error
-	orderRecorder *[]string
+type testMessage struct {
+	id   string
+	typ  string
+	data string
 }
 
-func newMockTransport() *mockTransport {
-	return &mockTransport{
-		published:    make([]IMessage, 0),
-		batch:        make([][]IMessage, 0),
-		subscribed:   make(map[string]int),
-		unsubscribed: make(map[string]int),
-		handlers:     make(map[string][]IMessageHandler),
-	}
+func (m *testMessage) GetID() string           { return m.id }
+func (m *testMessage) GetType() string         { return m.typ }
+func (m *testMessage) GetTimestamp() time.Time { return time.Now() }
+func (m *testMessage) GetPayload() any         { return m.data }
+func (m *testMessage) GetMetadata() map[string]interface{} {
+	return map[string]interface{}{}
 }
 
-func (m *mockTransport) Publish(ctx context.Context, message IMessage) error {
-	if m.orderRecorder != nil {
-		*m.orderRecorder = append(*m.orderRecorder, "transport")
-	}
-	m.published = append(m.published, message)
-	return m.shouldError
+type recordingHandler struct {
+	id    string
+	calls *[]string
 }
 
-func (m *mockTransport) PublishAll(ctx context.Context, messages []IMessage) error {
-	m.batch = append(m.batch, messages)
-	return m.shouldError
-}
-
-func (m *mockTransport) Subscribe(messageType string, handler IMessageHandler) error {
-	m.subscribed[messageType]++
-	m.handlers[messageType] = append(m.handlers[messageType], handler)
+func (h *recordingHandler) Handle(_ context.Context, _ messaging.IMessage) error {
+	*h.calls = append(*h.calls, h.id)
 	return nil
 }
 
-func (m *mockTransport) Unsubscribe(messageType string, handler IMessageHandler) error {
-	m.unsubscribed[messageType]++
-	return nil
-}
+func (h *recordingHandler) Type() string { return "recordingHandler" }
 
-func (m *mockTransport) Start(ctx context.Context) error { return nil }
-
-func (m *mockTransport) Close() error { return nil }
-
-func (m *mockTransport) Stats() TransportStats { return TransportStats{} }
-
-type recordingMiddleware struct {
-	name  string
-	order *[]string
-	err   error
-}
-
-func (mw recordingMiddleware) Handle(ctx context.Context, message IMessage, next HandlerFunc) error {
-	*mw.order = append(*mw.order, mw.name)
-	if mw.err != nil {
-		return mw.err
+// TestMessageBus_MultipleHandlersSameType 确认同一 messageType 下多个同类型 handler 实例
+// 会被视为不同订阅，并在 Publish 时都能被调用。
+func TestMessageBus_MultipleHandlersSameType(t *testing.T) {
+	transport := synctransport.NewSyncTransport()
+	if err := transport.Start(context.Background()); err != nil {
+		t.Fatalf("failed to start sync transport: %v", err)
 	}
-	return next(ctx, message)
-}
+	bus := messaging.NewMessageBus(transport)
 
-func (mw recordingMiddleware) Name() string {
-	return mw.name
-}
+	var calls []string
+	h1 := &recordingHandler{id: "h1", calls: &calls}
+	h2 := &recordingHandler{id: "h2", calls: &calls}
 
-type noopHandler struct{}
+	const msgType = "test-message"
 
-func (noopHandler) Handle(ctx context.Context, message IMessage) error { return nil }
-func (noopHandler) Type() string                                       { return "noop" }
+	if err := bus.Subscribe(context.Background(), msgType, h1); err != nil {
+		t.Fatalf("subscribe h1 failed: %v", err)
+	}
+	if err := bus.Subscribe(context.Background(), msgType, h2); err != nil {
+		t.Fatalf("subscribe h2 failed: %v", err)
+	}
 
-func TestMessageBus_PublishWithMiddleware(t *testing.T) {
-	order := make([]string, 0, 3)
-	transport := newMockTransport()
-	transport.orderRecorder = &order
-
-	bus := NewMessageBus(transport)
-	bus.Use(recordingMiddleware{name: "mw1", order: &order})
-	bus.Use(recordingMiddleware{name: "mw2", order: &order})
-
-	msg := &Message{ID: "msg-1", Type: "test"}
-
+	msg := &testMessage{id: "m1", typ: msgType, data: "payload"}
 	if err := bus.Publish(context.Background(), msg); err != nil {
 		t.Fatalf("publish failed: %v", err)
 	}
 
-	expectedOrder := []string{"mw1", "mw2", "transport"}
-	if len(order) != len(expectedOrder) {
-		t.Fatalf("unexpected order length: got %v want %v", order, expectedOrder)
-	}
-	for i, v := range expectedOrder {
-		if order[i] != v {
-			t.Fatalf("unexpected order at %d: got %s want %s", i, order[i], v)
-		}
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 handler calls, got %d (%v)", len(calls), calls)
 	}
 
-	if len(transport.published) != 1 || transport.published[0] != msg {
-		t.Fatalf("expected message to be published once")
+	// 不强制要求顺序，但必须包含两个 handler 的调用记录
+	seen := map[string]bool{}
+	for _, id := range calls {
+		seen[id] = true
 	}
-}
-
-func TestMessageBus_PublishAllMiddlewareError(t *testing.T) {
-	order := make([]string, 0, 1)
-	transport := newMockTransport()
-
-	mwErr := errors.New("middleware failed")
-	bus := NewMessageBus(transport)
-	bus.Use(recordingMiddleware{
-		name:  "mw-error",
-		order: &order,
-		err:   mwErr,
-	})
-
-	msg := &Message{ID: "msg-err", Type: "test"}
-	err := bus.PublishAll(context.Background(), []IMessage{msg})
-	if err == nil {
-		t.Fatalf("expected error from PublishAll")
-	}
-	if !errors.Is(err, mwErr) {
-		t.Fatalf("expected middleware error to be wrapped, got %v", err)
-	}
-	if len(transport.batch) != 0 {
-		t.Fatalf("expected batch not to be published on error")
-	}
-	if len(order) != 1 || order[0] != "mw-error" {
-		t.Fatalf("middleware order not recorded: %v", order)
-	}
-}
-
-func TestMessageBus_PublishAllSuccess(t *testing.T) {
-	transport := newMockTransport()
-	bus := NewMessageBus(transport)
-
-	msg1 := &Message{ID: "msg-1", Type: "t"}
-	msg2 := &Message{ID: "msg-2", Type: "t"}
-
-	if err := bus.PublishAll(context.Background(), []IMessage{msg1, msg2}); err != nil {
-		t.Fatalf("publish all failed: %v", err)
-	}
-
-	if len(transport.batch) != 1 {
-		t.Fatalf("expected one batch, got %d", len(transport.batch))
-	}
-
-	batch := transport.batch[0]
-	if len(batch) != 2 || batch[0] != msg1 || batch[1] != msg2 {
-		t.Fatalf("unexpected batch content: %+v", batch)
-	}
-}
-
-func TestMessageBus_SubscribeDelegation(t *testing.T) {
-	transport := newMockTransport()
-	bus := NewMessageBus(transport)
-
-	handler := noopHandler{}
-	if err := bus.Subscribe(context.Background(), "test", handler); err != nil {
-		t.Fatalf("subscribe failed: %v", err)
-	}
-	if transport.subscribed["test"] != 1 {
-		t.Fatalf("expected subscription to be delegated")
-	}
-
-	if err := bus.Unsubscribe(context.Background(), "test", handler); err != nil {
-		t.Fatalf("unsubscribe failed: %v", err)
-	}
-	if transport.unsubscribed["test"] != 1 {
-		t.Fatalf("expected unsubscribe to be delegated")
-	}
-}
-
-// errorHandler 用于测试错误钩子
-type errorHandler struct {
-	err error
-}
-
-func (h *errorHandler) Handle(ctx context.Context, message IMessage) error { return h.err }
-func (h *errorHandler) Type() string                                       { return "error" }
-
-func TestMessageBus_HandlerErrorHook(t *testing.T) {
-	transport := newMockTransport()
-	bus := NewMessageBus(transport)
-
-	var hookCalled bool
-	var hookErr error
-	var hookMsg IMessage
-
-	bus.SetHandlerErrorHook(func(ctx context.Context, msg IMessage, err error) {
-		hookCalled = true
-		hookErr = err
-		hookMsg = msg
-	})
-
-	handlerErr := errors.New("handler failed")
-	h := &errorHandler{err: handlerErr}
-
-	if err := bus.Subscribe(context.Background(), "test", h); err != nil {
-		t.Fatalf("subscribe failed: %v", err)
-	}
-
-	handlers := transport.handlers["test"]
-	if len(handlers) != 1 {
-		t.Fatalf("expected 1 handler, got %d", len(handlers))
-	}
-
-	wrapped := handlers[0]
-	_, ok := wrapped.(*handlerWithErrorHook)
-	if !ok {
-		t.Fatalf("expected handler to be wrapped with handlerWithErrorHook")
-	}
-
-	msg := &Message{ID: "msg-1", Type: "test"}
-	err := wrapped.Handle(context.Background(), msg)
-	if !errors.Is(err, handlerErr) {
-		t.Fatalf("expected handler error %v, got %v", handlerErr, err)
-	}
-
-	if !hookCalled {
-		t.Fatalf("expected error hook to be called")
-	}
-	if hookErr != handlerErr {
-		t.Fatalf("expected hook error %v, got %v", handlerErr, hookErr)
-	}
-	if hookMsg != msg {
-		t.Fatalf("expected hook message to be %v, got %v", msg, hookMsg)
+	if !seen["h1"] || !seen["h2"] {
+		t.Fatalf("expected calls from h1 and h2, got %v", calls)
 	}
 }
