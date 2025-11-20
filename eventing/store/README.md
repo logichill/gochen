@@ -215,10 +215,10 @@ nextCursor := stream.NextCursor
 为提升游标与类型过滤性能，建议在事件表上添加组合索引：
 - `(timestamp, id)`：支持时间窗口 + 游标的顺序扫描
 - `(type, timestamp)`：按事件类型过滤时减少回表
-- 常见 schema（`domain_events`）：可新增示例索引
+- 常见 schema（`event_store`）：可新增示例索引
 ```sql
-CREATE INDEX idx_domain_events_timestamp_id ON domain_events (timestamp, id);
-CREATE INDEX idx_domain_events_type_timestamp ON domain_events (type, timestamp);
+CREATE INDEX idx_event_store_timestamp_id ON event_store (timestamp, id);
+CREATE INDEX idx_event_store_type_timestamp ON event_store (type, timestamp);
 ```
 
 ### 1. 快照支持

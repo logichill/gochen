@@ -22,7 +22,7 @@ func setupTestDB(t *testing.T) database.IDatabase {
 	require.NoError(t, err)
 	ctx := context.Background()
 	_, err = db.Exec(ctx, `
-        CREATE TABLE domain_events (
+        CREATE TABLE event_store (
             id TEXT PRIMARY KEY,
             type TEXT NOT NULL,
             aggregate_id INTEGER NOT NULL,
@@ -59,7 +59,7 @@ func toStorableEvents(events []eventing.Event) []eventing.IStorableEvent {
 
 func TestSQLEventStore_AppendEvents(t *testing.T) {
 	db := setupTestDB(t)
-	store := NewSQLEventStore(db, "domain_events")
+	store := NewSQLEventStore(db, "event_store")
 
 	ctx := context.Background()
 	aggregateID := int64(123)
@@ -81,7 +81,7 @@ func TestSQLEventStore_AppendEvents(t *testing.T) {
 
 func TestSQLEventStore_VersionConflict(t *testing.T) {
 	db := setupTestDB(t)
-	store := NewSQLEventStore(db, "domain_events")
+	store := NewSQLEventStore(db, "event_store")
 
 	ctx := context.Background()
 	aggregateID := int64(456)
@@ -97,7 +97,7 @@ func TestSQLEventStore_VersionConflict(t *testing.T) {
 
 func TestSQLEventStore_Idempotency(t *testing.T) {
 	db := setupTestDB(t)
-	store := NewSQLEventStore(db, "domain_events")
+	store := NewSQLEventStore(db, "event_store")
 
 	ctx := context.Background()
 	aggregateID := int64(789)
@@ -117,7 +117,7 @@ func TestSQLEventStore_Idempotency(t *testing.T) {
 
 func TestSQLEventStore_LoadEventsByType(t *testing.T) {
 	db := setupTestDB(t)
-	store := NewSQLEventStore(db, "domain_events")
+	store := NewSQLEventStore(db, "event_store")
 
 	ctx := context.Background()
 
@@ -135,7 +135,7 @@ func TestSQLEventStore_LoadEventsByType(t *testing.T) {
 
 func TestSQLEventStore_AppendEventsWithDB(t *testing.T) {
 	db := setupTestDB(t)
-	store := NewSQLEventStore(db, "domain_events")
+	store := NewSQLEventStore(db, "event_store")
 
 	ctx := context.Background()
 	aggregateID := int64(100)
@@ -161,7 +161,7 @@ func TestSQLEventStore_AppendEventsWithDB(t *testing.T) {
 
 func TestSQLEventStore_HasAggregate(t *testing.T) {
 	db := setupTestDB(t)
-	store := NewSQLEventStore(db, "domain_events")
+	store := NewSQLEventStore(db, "event_store")
 
 	ctx := context.Background()
 	aggregateID := int64(200)
@@ -184,7 +184,7 @@ func TestSQLEventStore_HasAggregate(t *testing.T) {
 
 func TestSQLEventStore_GetAggregateVersion(t *testing.T) {
 	db := setupTestDB(t)
-	store := NewSQLEventStore(db, "domain_events")
+	store := NewSQLEventStore(db, "event_store")
 
 	ctx := context.Background()
 	aggregateID := int64(300)
@@ -211,7 +211,7 @@ func TestSQLEventStore_GetAggregateVersion(t *testing.T) {
 
 func TestSQLEventStore_StreamEvents(t *testing.T) {
 	db := setupTestDB(t)
-	store := NewSQLEventStore(db, "domain_events")
+	store := NewSQLEventStore(db, "event_store")
 
 	ctx := context.Background()
 
@@ -232,7 +232,7 @@ func TestSQLEventStore_StreamEvents(t *testing.T) {
 
 func TestSQLEventStore_GetEventStreamWithCursor(t *testing.T) {
 	db := setupTestDB(t)
-	store := NewSQLEventStore(db, "domain_events")
+	store := NewSQLEventStore(db, "event_store")
 
 	ctx := context.Background()
 
@@ -284,7 +284,7 @@ func TestSQLEventStore_GetEventStreamWithCursor(t *testing.T) {
 
 func TestSQLEventStore_LoadEventsAfterVersion(t *testing.T) {
 	db := setupTestDB(t)
-	store := NewSQLEventStore(db, "domain_events")
+	store := NewSQLEventStore(db, "event_store")
 
 	ctx := context.Background()
 	aggregateID := int64(400)
@@ -310,7 +310,7 @@ func TestSQLEventStore_LoadEventsAfterVersion(t *testing.T) {
 
 func TestSQLEventStore_EmptyEvents(t *testing.T) {
 	db := setupTestDB(t)
-	store := NewSQLEventStore(db, "domain_events")
+	store := NewSQLEventStore(db, "event_store")
 
 	ctx := context.Background()
 	aggregateID := int64(500)
@@ -327,7 +327,7 @@ func TestSQLEventStore_EmptyEvents(t *testing.T) {
 
 func TestSQLEventStore_MixedAggregateTypes(t *testing.T) {
 	db := setupTestDB(t)
-	store := NewSQLEventStore(db, "domain_events")
+	store := NewSQLEventStore(db, "event_store")
 
 	ctx := context.Background()
 	aggregateID := int64(600)
@@ -344,7 +344,7 @@ func TestSQLEventStore_MixedAggregateTypes(t *testing.T) {
 
 func TestSQLEventStore_VersionMismatch(t *testing.T) {
 	db := setupTestDB(t)
-	store := NewSQLEventStore(db, "domain_events")
+	store := NewSQLEventStore(db, "event_store")
 
 	ctx := context.Background()
 	aggregateID := int64(700)
@@ -360,7 +360,7 @@ func TestSQLEventStore_VersionMismatch(t *testing.T) {
 
 func TestSQLEventStore_ComplexPayload(t *testing.T) {
 	db := setupTestDB(t)
-	store := NewSQLEventStore(db, "domain_events")
+	store := NewSQLEventStore(db, "event_store")
 
 	ctx := context.Background()
 	aggregateID := int64(800)
@@ -395,7 +395,7 @@ func TestSQLEventStore_ComplexPayload(t *testing.T) {
 
 func TestSQLEventStore_Init(t *testing.T) {
 	db := setupTestDB(t)
-	store := NewSQLEventStore(db, "domain_events")
+	store := NewSQLEventStore(db, "event_store")
 
 	ctx := context.Background()
 	err := store.Init(ctx)
@@ -404,16 +404,16 @@ func TestSQLEventStore_Init(t *testing.T) {
 
 func TestSQLEventStore_Getters(t *testing.T) {
 	db := setupTestDB(t)
-	store := NewSQLEventStore(db, "domain_events")
+	store := NewSQLEventStore(db, "event_store")
 
-	assert.Equal(t, "domain_events", store.GetTableName())
+	assert.Equal(t, "event_store", store.GetTableName())
 	assert.NotNil(t, store.GetDB())
 	assert.Equal(t, db, store.GetDB())
 }
 
 func TestSQLEventStore_Stream(t *testing.T) {
 	db := setupTestDB(t)
-	store := NewSQLEventStore(db, "domain_events")
+	store := NewSQLEventStore(db, "event_store")
 
 	ctx := context.Background()
 
@@ -435,7 +435,7 @@ func TestSQLEventStore_Stream(t *testing.T) {
 
 func TestSQLEventStore_GetEventStreamWithCursor_TimeFilters(t *testing.T) {
 	db := setupTestDB(t)
-	store := NewSQLEventStore(db, "domain_events")
+	store := NewSQLEventStore(db, "event_store")
 
 	ctx := context.Background()
 
@@ -480,7 +480,7 @@ func TestSQLEventStore_GetEventStreamWithCursor_TimeFilters(t *testing.T) {
 
 func TestSQLEventStore_GetEventStreamWithCursor_TypeFilters(t *testing.T) {
 	db := setupTestDB(t)
-	store := NewSQLEventStore(db, "domain_events")
+	store := NewSQLEventStore(db, "event_store")
 
 	ctx := context.Background()
 
@@ -517,7 +517,7 @@ func TestSQLEventStore_GetEventStreamWithCursor_TypeFilters(t *testing.T) {
 
 func TestSQLEventStore_GetEventStreamWithCursor_EmptyResult(t *testing.T) {
 	db := setupTestDB(t)
-	store := NewSQLEventStore(db, "domain_events")
+	store := NewSQLEventStore(db, "event_store")
 
 	ctx := context.Background()
 
@@ -533,7 +533,7 @@ func TestSQLEventStore_GetEventStreamWithCursor_EmptyResult(t *testing.T) {
 
 func TestSQLEventStore_GetEventStreamWithCursor_InvalidCursor(t *testing.T) {
 	db := setupTestDB(t)
-	store := NewSQLEventStore(db, "domain_events")
+	store := NewSQLEventStore(db, "event_store")
 
 	ctx := context.Background()
 
@@ -557,12 +557,12 @@ func TestSQLEventStore_DefaultTableName(t *testing.T) {
 
 	// 使用空表名，应该使用默认值
 	store := NewSQLEventStore(db, "")
-	assert.Equal(t, "domain_events", store.GetTableName())
+	assert.Equal(t, "event_store", store.GetTableName())
 }
 
 func TestSQLEventStore_ConcurrencyConflict(t *testing.T) {
 	db := setupTestDB(t)
-	store := NewSQLEventStore(db, "domain_events")
+	store := NewSQLEventStore(db, "event_store")
 
 	ctx := context.Background()
 	aggregateID := int64(999)
@@ -581,7 +581,7 @@ func TestSQLEventStore_ConcurrencyConflict(t *testing.T) {
 
 func TestSQLEventStore_Stream_WithOptions(t *testing.T) {
 	db := setupTestDB(t)
-	store := NewSQLEventStore(db, "domain_events")
+	store := NewSQLEventStore(db, "event_store")
 
 	ctx := context.Background()
 
@@ -614,7 +614,7 @@ func BenchmarkSQLEventStore_AppendEvents(b *testing.B) {
 	require.NoError(b, err)
 	ctx := context.Background()
 	_, err = db.Exec(ctx, `
-        CREATE TABLE domain_events (
+        CREATE TABLE event_store (
             id TEXT PRIMARY KEY,
             type TEXT NOT NULL,
             aggregate_id INTEGER NOT NULL,
@@ -629,7 +629,7 @@ func BenchmarkSQLEventStore_AppendEvents(b *testing.B) {
     `)
 	require.NoError(b, err)
 
-	store := NewSQLEventStore(db, "domain_events")
+	store := NewSQLEventStore(db, "event_store")
 	events := []eventing.Event{makeEvent(1, "TestAggregate", "event-1", 1, nil)}
 
 	b.ResetTimer()

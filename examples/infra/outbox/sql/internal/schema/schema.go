@@ -9,9 +9,9 @@ import (
 
 // EnsureEventAndOutboxTables 创建演示所需的表（SQLite 兼容 DDL）
 func EnsureEventAndOutboxTables(ctx context.Context, db dbcore.IDatabase) error {
-	// 事件存储表（domain_events）
+	// 事件存储表（event_store）
 	eventDDL := `
-	CREATE TABLE IF NOT EXISTS domain_events (
+	CREATE TABLE IF NOT EXISTS event_store (
 		id TEXT PRIMARY KEY,
 		type TEXT NOT NULL,
 		aggregate_id INTEGER NOT NULL,
@@ -24,7 +24,7 @@ func EnsureEventAndOutboxTables(ctx context.Context, db dbcore.IDatabase) error 
 		UNIQUE(aggregate_id, aggregate_type, version)
 	);`
 	if _, err := db.Exec(ctx, eventDDL); err != nil {
-		return fmt.Errorf("create domain_events: %w", err)
+		return fmt.Errorf("create event_store: %w", err)
 	}
 
 	// Outbox 表（event_outbox）

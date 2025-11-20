@@ -86,7 +86,7 @@ type IEventStore interface {
 典型 SQL 实现会定义事件表（示意）：
 
 ```sql
-CREATE TABLE domain_events (
+CREATE TABLE event_store (
   id             BIGINT PRIMARY KEY auto_increment,
   aggregate_id   BIGINT       NOT NULL,
   aggregate_type VARCHAR(64)  NOT NULL,

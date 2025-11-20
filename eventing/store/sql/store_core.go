@@ -14,7 +14,7 @@ type SQLEventStore struct {
 
 func NewSQLEventStore(db database.IDatabase, tableName string) *SQLEventStore {
 	if tableName == "" {
-		tableName = "domain_events"
+		tableName = "event_store"
 	}
 	return &SQLEventStore{db: db, tableName: tableName}
 }

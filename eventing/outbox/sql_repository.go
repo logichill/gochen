@@ -61,7 +61,7 @@ func NewSimpleSQLOutboxRepository(db database.IDatabase, eventStore EventStoreWi
 	return &SimpleSQLOutboxRepository{
 		db:          db,
 		eventStore:  eventStore,
-		tableName:   "domain_events",
+		tableName:   "event_store",
 		outboxTable: "event_outbox",
 		logger:      logger,
 	}
