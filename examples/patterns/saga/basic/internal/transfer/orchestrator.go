@@ -34,7 +34,9 @@ func (o *Orchestrator) Debit(ctx context.Context, id string) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	s, ok := o.store[id]
-	if !ok { return fmt.Errorf("tx not found") }
+	if !ok {
+		return fmt.Errorf("tx not found")
+	}
 	s.Data["step"] = "debited"
 	return nil
 }
@@ -43,7 +45,9 @@ func (o *Orchestrator) Credit(ctx context.Context, id string, ok bool) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	s, exists := o.store[id]
-	if !exists { return fmt.Errorf("tx not found") }
+	if !exists {
+		return fmt.Errorf("tx not found")
+	}
 	if ok {
 		s.Data["step"] = "credited"
 		s.Data["status"] = "success"
@@ -58,7 +62,8 @@ func (o *Orchestrator) GetState(ctx context.Context, id string) (*State, error) 
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	s, ok := o.store[id]
-	if !ok { return nil, fmt.Errorf("tx not found") }
+	if !ok {
+		return nil, fmt.Errorf("tx not found")
+	}
 	return s, nil
 }
-

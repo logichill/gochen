@@ -62,4 +62,3 @@ func Normalize(err error) error {
 	// 未识别的错误保持原样
 	return err
 }
-

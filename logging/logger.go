@@ -2,10 +2,10 @@
 package logging
 
 import (
-    "context"
-    "fmt"
-    "log"
-    "time"
+	"context"
+	"fmt"
+	"log"
+	"time"
 )
 
 // Level 日志级别
@@ -80,16 +80,16 @@ func Bool(key string, value bool) Field {
 }
 
 func Any(key string, value interface{}) Field {
-    return Field{Key: key, Value: value}
+	return Field{Key: key, Value: value}
 }
 
 func Error(err error) Field {
-    return Field{Key: "error", Value: err}
+	return Field{Key: "error", Value: err}
 }
 
 // Duration 以 time.Duration 作为字段值，格式化输出
 func Duration(key string, value time.Duration) Field {
-    return Field{Key: key, Value: value}
+	return Field{Key: key, Value: value}
 }
 
 // StdLogger 标准库log实现
