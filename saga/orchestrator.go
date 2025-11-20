@@ -26,7 +26,7 @@ var sagaLogger = logging.GetLogger().WithFields(
 //
 // 注意：
 //   - Saga 依赖 CommandBus.Dispatch 的返回值来判断步骤是否成功；要获得可靠的错误语义，CommandBus 应该基于同步 Transport
-//    （例如 messaging/transport/sync），否则在异步 Transport 下，Dispatch 的 error 仅能反映“消息是否进入传输层”，而不能保证 handler 的业务错误被感知。
+//     （例如 messaging/transport/sync），否则在异步 Transport 下，Dispatch 的 error 仅能反映“消息是否进入传输层”，而不能保证 handler 的业务错误被感知。
 type SagaOrchestrator struct {
 	commandBus *command.CommandBus
 	eventBus   bus.IEventBus

@@ -8,13 +8,14 @@ import "context"
 // 适用于需要原子性操作的复杂业务场景。
 //
 // 使用模式：
-//   ctx, err := repo.BeginTx(ctx)
-//   if err != nil { return err }
-//   defer repo.Rollback(ctx)  // 确保异常时回滚
-//   
-//   // 执行多个操作...
-//   
-//   return repo.Commit(ctx)   // 成功时提交
+//
+//	ctx, err := repo.BeginTx(ctx)
+//	if err != nil { return err }
+//	defer repo.Rollback(ctx)  // 确保异常时回滚
+//
+//	// 执行多个操作...
+//
+//	return repo.Commit(ctx)   // 成功时提交
 //
 // 最佳实践：
 //   - 总是使用 defer Rollback 确保异常安全
