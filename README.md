@@ -2,7 +2,7 @@
 
 企业级 DDD + Event Sourcing + CQRS 共享库，提供可跨多个服务复用的核心组件。
 
-[![Go Version](https://img.shields.io/badge/Go-1.21%2B-blue)](https://golang.org)
+[![Go Version](https://img.shields.io/badge/Go-1.24%2B-blue)](https://golang.org)
 [![License](https://img.shields.io/badge/License-MIT-yellow)](./LICENSE)
 
 ## 特性概览
