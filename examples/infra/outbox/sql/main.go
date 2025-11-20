@@ -53,7 +53,7 @@ func main() {
 	must(schema.EnsureEventAndOutboxTables(ctx, db))
 
 	// 2) 构建 SQL EventStore 与 Outbox Repository
-	es := sqlstore.NewSQLEventStore(db, "domain_events")
+	es := sqlstore.NewSQLEventStore(db, "event_store")
 	ob := outbox.NewSimpleSQLOutboxRepository(db, es, nil)
 
 	// 3) 基础 ES 仓储 + Outbox 装饰器
