@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"gochen/eventing"
 	"gochen/eventing/bus"
@@ -171,6 +172,15 @@ func (m *MockEventBus) Use(middleware messaging.IMiddleware) {
 	// No-op for mock
 }
 
+// toStorableEvents 将事件切片转换为存储接口切片（测试辅助）
+func toStorableEvents(events []eventing.Event) []eventing.IStorableEvent {
+	storable := make([]eventing.IStorableEvent, len(events))
+	for i := range events {
+		storable[i] = &events[i]
+	}
+	return storable
+}
+
 // Test 2: Register projection
 func TestProjectionManager_RegisterProjection(t *testing.T) {
 	eventStore := store.NewMemoryEventStore()
@@ -185,12 +195,14 @@ func TestProjectionManager_RegisterProjection(t *testing.T) {
 	assert.Contains(t, manager.projections, "test-projection")
 }
 
-// Test 3: Register nil projection (should panic - defensive programming needed)
+// Test 3: Register nil projection should return error
 func TestProjectionManager_RegisterNilProjection(t *testing.T) {
-	t.Skip("Skipping - RegisterProjection should add nil check in product code")
+	eventStore := store.NewMemoryEventStore()
+	eventBus := &MockEventBus{}
+	manager := NewProjectionManager(eventStore, eventBus)
 
-	// This test reveals that RegisterProjection needs defensive nil checking
-	// TODO: Add nil check in manager.go RegisterProjection method
+	err := manager.RegisterProjection(nil)
+	assert.Error(t, err)
 }
 
 // Test 4: Get projection status - success
@@ -348,4 +360,42 @@ func TestProjectionEventHandler_ShouldProcessOnlyWhenRunning(t *testing.T) {
 	err = handler.HandleEvent(context.Background(), evt)
 	assert.NoError(t, err)
 	assert.Equal(t, 1, projection.processedEvents)
+}
+
+// Test 12: ResumeFromCheckpoint should replay events from EventStore after checkpoint
+func TestProjectionManager_ResumeFromCheckpoint_ReplaysFromStore(t *testing.T) {
+	ctx := context.Background()
+	eventStore := store.NewMemoryEventStore()
+	eventBus := &MockEventBus{}
+	checkpointStore := NewMemoryCheckpointStore()
+
+	manager := NewProjectionManager(eventStore, eventBus).WithCheckpointStore(checkpointStore)
+	projection := NewMockProjection("test-projection", []string{"TestEvent"})
+	require.NoError(t, manager.RegisterProjection(projection))
+
+	events := []eventing.Event{
+		*eventing.NewEvent(1, "Agg", "TestEvent", 1, map[string]any{"i": 1}),
+		*eventing.NewEvent(1, "Agg", "TestEvent", 2, map[string]any{"i": 2}),
+		*eventing.NewEvent(1, "Agg", "TestEvent", 3, map[string]any{"i": 3}),
+	}
+	// 统一时间戳，验证同时间戳下不会重复重放 checkpoint 前的事件
+	now := time.Now()
+	for i := range events {
+		events[i].Timestamp = now
+	}
+	require.NoError(t, eventStore.AppendEvents(ctx, 1, toStorableEvents(events), 0))
+
+	// checkpoint 在第二个事件
+	checkpoint := NewCheckpoint("test-projection", 2, events[1].ID, events[1].Timestamp)
+	require.NoError(t, checkpointStore.Save(ctx, checkpoint))
+
+	require.NoError(t, manager.ResumeFromCheckpoint(ctx, "test-projection"))
+
+	// 仅应重放 checkpoint 之后的事件
+	assert.Equal(t, 1, projection.processedEvents)
+
+	status, err := manager.GetProjectionStatus("test-projection")
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), status.ProcessedEvents)
+	assert.Equal(t, events[2].ID, status.LastEventID)
 }

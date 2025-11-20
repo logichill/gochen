@@ -170,6 +170,19 @@ func (m *MemoryEventStore) StreamEvents(ctx context.Context, from time.Time) ([]
 	return res, nil
 }
 
+// GetEventStreamWithCursor 基于游标/类型过滤读取事件流（实现 IEventStoreExtended）
+func (m *MemoryEventStore) GetEventStreamWithCursor(ctx context.Context, opts *StreamOptions) (*StreamResult, error) {
+	m.mu.RLock()
+	var all []eventing.Event
+	for _, arr := range m.events {
+		all = append(all, arr...)
+	}
+	m.mu.RUnlock()
+
+	result := FilterEventsWithOptions(all, opts)
+	return result, nil
+}
+
 // HasAggregate 检查聚合是否存在
 func (m *MemoryEventStore) HasAggregate(ctx context.Context, aggregateID int64) (bool, error) {
 	m.mu.RLock()
@@ -210,3 +223,6 @@ func (m *MemoryEventStore) getAggregateVersionUnsafe(key string) (uint64, error)
 	}
 	return aggregateEvents[len(aggregateEvents)-1].GetVersion(), nil
 }
+
+// 确认实现拓展接口
+var _ IEventStoreExtended = (*MemoryEventStore)(nil)

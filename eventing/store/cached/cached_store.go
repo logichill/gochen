@@ -174,6 +174,20 @@ func (s *CachedEventStore) StreamEvents(ctx context.Context, fromTimestamp time.
 	return s.store.StreamEvents(ctx, fromTimestamp)
 }
 
+// GetEventStreamWithCursor 基于游标/类型过滤读取事件流（如底层支持则委托，否则回退过滤）
+func (s *CachedEventStore) GetEventStreamWithCursor(ctx context.Context, opts *store.StreamOptions) (*store.StreamResult, error) {
+	if extended, ok := s.store.(store.IEventStoreExtended); ok {
+		return extended.GetEventStreamWithCursor(ctx, opts)
+	}
+
+	events, err := s.store.StreamEvents(ctx, opts.FromTime)
+	if err != nil {
+		return nil, err
+	}
+	result := store.FilterEventsWithOptions(events, opts)
+	return result, nil
+}
+
 // getCachedEvents 从缓存获取事件
 func (s *CachedEventStore) getCachedEvents(key string, fromVersion uint64) []eventing.Event {
 	s.cache.mutex.RLock()
@@ -395,3 +409,6 @@ func (s *CachedEventStore) GetHitRate() float64 {
 
 	return float64(s.stats.Hits) / float64(totalRequests)
 }
+
+// 接口断言
+var _ store.IEventStoreExtended = (*CachedEventStore)(nil)

@@ -142,6 +142,14 @@ func (bus *CommandBus) RegisterHandler(commandType string, handler CommandHandle
 		return fmt.Errorf("handler cannot be nil")
 	}
 
+	// 防止重复注册同一命令类型的处理器
+	bus.mutex.RLock()
+	if _, exists := bus.handlers[commandType]; exists {
+		bus.mutex.RUnlock()
+		return fmt.Errorf("handler for command type %s already registered", commandType)
+	}
+	bus.mutex.RUnlock()
+
 	// 基础命令处理器（直接处理 *Command 并回传结果）
 	baseHandler := handler.AsMessageHandler(commandType)
 

@@ -4,6 +4,7 @@ package memory
 import (
 	"context"
 	"fmt"
+	"time"
 )
 
 // Start 启动传输层
@@ -57,6 +58,17 @@ func (t *MemoryTransport) Close() error {
 	queue := t.queue
 	t.mutex.Unlock()
 
+	// 等待队列中的消息被消费，避免关闭时丢弃未处理的消息
+	drainDeadline := time.Now().Add(5 * time.Second)
+	var drainErr error
+	for len(queue) > 0 {
+		if time.Now().After(drainDeadline) {
+			drainErr = fmt.Errorf("memory transport close timed out with %d pending message(s)", len(queue))
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
 	// 停止所有工作协程
 	for _, stopCh := range workers {
 		if stopCh == nil {
@@ -73,10 +85,7 @@ func (t *MemoryTransport) Close() error {
 	// 等待所有工作协程结束
 	t.wg.Wait()
 
-	// 关闭队列
-	close(queue)
-
-	return nil
+	return drainErr
 }
 
 // worker 工作协程
