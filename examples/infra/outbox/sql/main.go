@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 
+	_ "modernc.org/sqlite"
+
 	sentity "gochen/domain/entity"
 	"gochen/domain/eventsourced"
 	"gochen/eventing"

@@ -1,3 +1,50 @@
+# Redis Streams Transport（参考实现说明）
+
+> 状态：**示例/文档**，非框架内置实现  
+> 完整参考实现已经下沉到本 README 的代码块中，不再以 `.go` 文件形式存在于仓库中。
+
+## 设计目标
+
+- 基于 `github.com/redis/go-redis/v9` 的 XADD/XREADGROUP 实现 `messaging.ITransport`。
+- 支持消费者组 + 多实例，至少一次投递语义。
+- 作为异步传输实现，用于配合 `messaging.MessageBus`。
+
+## 使用方式概览
+
+1. 在你的应用仓库中创建包（建议放在 `internal`）：
+
+   ```bash
+   internal/transport/redisstreams/
+   ```
+
+2. 从本 README 末尾的代码块中复制实现到你自己的包里，按项目需求裁剪。
+
+3. 在应用组装处注入 Transport：
+
+   ```go
+   import (
+       myredis "your-app/internal/transport/redisstreams"
+       "gochen/messaging"
+   )
+
+   func newRedisTransport() messaging.ITransport {
+       t, _ := myredis.NewTransport(myredis.Config{
+           Addr:         "127.0.0.1:6379",
+           StreamPrefix: "bus:",
+           GroupName:    "gochen",
+       })
+       _ = t.Start(context.Background())
+       return t
+   }
+   ```
+
+4. 将该 Transport 传给 `messaging.NewMessageBus` / `command.NewCommandBus` 即可。
+
+## 附录：参考实现完整代码
+
+下面是一个基于 Redis Streams 的完整 Transport 实现示例，你可以直接复制到业务仓库，并根据需要调整包名与依赖：
+
+```go
 package redisstreams
 
 import (
@@ -127,7 +174,7 @@ func (t *Transport) Publish(ctx context.Context, message messaging.IMessage) err
 	return t.publish(ctx, message)
 }
 
-// PublishAll writes messages sequentially. Redis Streams does not support multi append.
+// PublishAll writes multiple messages.
 func (t *Transport) PublishAll(ctx context.Context, messages []messaging.IMessage) error {
 	for _, msg := range messages {
 		if err := t.publish(ctx, msg); err != nil {
@@ -264,12 +311,12 @@ func (t *Transport) readLoop(messageType string) {
 			return
 		default:
 		}
-		res, err := t.client.XReadGroup(t.ctx, args).Result()
+		streams, err := t.client.XReadGroup(t.ctx, args).Result()
 		if err != nil {
-			if errors.Is(err, redis.Nil) {
-				continue
+			if errors.Is(err, context.Canceled) {
+				return
 			}
-			t.logger.Warn(t.ctx, "xreadgroup failed", logging.Duration("backoff", backoff), logging.Error(err))
+			t.logger.Warn(t.ctx, "XReadGroup failed", logging.Error(err))
 			time.Sleep(backoff)
 			backoff *= 2
 			if backoff > t.cfg.MaxReadBackoff {
@@ -278,59 +325,41 @@ func (t *Transport) readLoop(messageType string) {
 			continue
 		}
 		backoff = t.cfg.MinReadBackoff
-		for _, streamRes := range res {
-			for _, entry := range streamRes.Messages {
-				msg, decodeErr := decodeMessage(entry)
-				if decodeErr != nil {
-					t.logger.Warn(t.ctx, "decode redis stream entry failed", logging.Error(decodeErr))
-					_ = t.client.XAck(t.ctx, streamRes.Stream, t.cfg.GroupName, entry.ID).Err()
-					continue
-				}
-				t.dispatch(t.ctx, msg)
-				if ackErr := t.client.XAck(t.ctx, streamRes.Stream, t.cfg.GroupName, entry.ID).Err(); ackErr != nil {
-					t.logger.Warn(t.ctx, "xack failed", logging.Error(ackErr))
-				}
+		for _, s := range streams {
+			for _, msg := range s.Messages {
+				t.handleStreamMessage(stream, msg)
 			}
 		}
 	}
+}
+
+func (t *Transport) handleStreamMessage(stream string, xmsg redis.XMessage) {
+	var m messaging.Message
+	if err := decodeMessage(xmsg.Values, &m); err != nil {
+		t.logger.Error(t.ctx, "failed to decode message", logging.Error(err))
+		_ = t.client.XAck(t.ctx, stream, t.cfg.GroupName, xmsg.ID)
+		return
+	}
+	msgType := m.Type
+	t.mu.RLock()
+	handlers := append([]messaging.IMessageHandler(nil), t.handlers[msgType]...)
+	t.mu.RUnlock()
+
+	for _, h := range handlers {
+		if err := h.Handle(t.ctx, &m); err != nil {
+			t.logger.Error(t.ctx, "handler failed", logging.Error(err))
+		}
+	}
+
+	_ = t.client.XAck(t.ctx, stream, t.cfg.GroupName, xmsg.ID)
 }
 
 func (t *Transport) ensureGroup(stream string) error {
 	err := t.client.XGroupCreateMkStream(t.ctx, stream, t.cfg.GroupName, "0").Err()
-	if err == nil {
-		return nil
+	if err != nil && !strings.Contains(err.Error(), "BUSYGROUP") {
+		return err
 	}
-	if strings.Contains(strings.ToUpper(err.Error()), "BUSYGROUP") {
-		return nil
-	}
-	// 探测组是否已存在
-	type xinfo interface {
-		XInfoGroups(ctx context.Context, key string) *redis.XInfoGroupsCmd
-	}
-	if xi, ok := t.client.(xinfo); ok {
-		if groups, gerr := xi.XInfoGroups(t.ctx, stream).Result(); gerr == nil {
-			for _, g := range groups {
-				if g.Name == t.cfg.GroupName {
-					return nil
-				}
-			}
-		}
-	}
-	return err
-}
-
-func (t *Transport) dispatch(ctx context.Context, message messaging.IMessage) {
-	t.mu.RLock()
-	exact := t.handlers[message.GetType()]
-	wildcard := t.handlers["*"]
-	handlers := make([]messaging.IMessageHandler, 0, len(exact)+len(wildcard))
-	handlers = append(handlers, exact...)
-	handlers = append(handlers, wildcard...)
-	t.mu.RUnlock()
-
-	for _, h := range handlers {
-		_ = h.Handle(ctx, message)
-	}
+	return nil
 }
 
 func (t *Transport) streamName(messageType string) string {
@@ -338,70 +367,47 @@ func (t *Transport) streamName(messageType string) string {
 }
 
 func encodeMessage(msg messaging.IMessage) (map[string]interface{}, error) {
-	payload, err := json.Marshal(msg.GetPayload())
+	m, ok := msg.(*messaging.Message)
+	if !ok {
+		m = &messaging.Message{
+			ID:        msg.GetID(),
+			Type:      msg.GetType(),
+			Timestamp: msg.GetTimestamp(),
+			Payload:   msg.GetPayload(),
+			Metadata:  msg.GetMetadata(),
+		}
+	}
+	data, err := json.Marshal(m)
 	if err != nil {
 		return nil, err
-	}
-	metadata, err := json.Marshal(msg.GetMetadata())
-	if err != nil {
-		return nil, err
-	}
-	ts := msg.GetTimestamp()
-	if ts.IsZero() {
-		ts = time.Now()
 	}
 	return map[string]interface{}{
-		"id":        msg.GetID(),
-		"type":      msg.GetType(),
-		"timestamp": ts.UnixNano(),
-		"payload":   string(payload),
-		"metadata":  string(metadata),
+		"id":        m.ID,
+		"type":      m.Type,
+		"ts":        m.Timestamp.UnixNano(),
+		"payload":   string(data),
+		"aggregate": fmt.Sprintf("%d:%s", m.GetAggregateID(), m.GetAggregateType()),
 	}, nil
 }
 
-func decodeMessage(entry redis.XMessage) (messaging.IMessage, error) {
-	id, _ := entry.Values["id"].(string)
-	msgType, _ := entry.Values["type"].(string)
-
-	payloadRaw, _ := entry.Values["payload"].(string)
-	metadataRaw, _ := entry.Values["metadata"].(string)
-
-	var payload interface{}
-	if payloadRaw != "" {
-		if err := json.Unmarshal([]byte(payloadRaw), &payload); err != nil {
-			return nil, err
+func decodeMessage(values map[string]interface{}, out *messaging.Message) error {
+	raw, ok := values["payload"]
+	if !ok {
+		return errors.New("missing payload")
+	}
+	s, ok := raw.(string)
+	if !ok {
+		return errors.New("invalid payload type")
+	}
+	if err := json.Unmarshal([]byte(s), out); err != nil {
+		return err
+	}
+	if tsRaw, ok := values["ts"]; ok {
+		if tsNum, err := strconv.ParseInt(fmt.Sprint(tsRaw), 10, 64); err == nil {
+			out.Timestamp = time.Unix(0, tsNum)
 		}
 	}
-	metadata := make(map[string]interface{})
-	if metadataRaw != "" {
-		if err := json.Unmarshal([]byte(metadataRaw), &metadata); err != nil {
-			return nil, err
-		}
-	}
-
-	ts := time.Now()
-	switch v := entry.Values["timestamp"].(type) {
-	case int64:
-		ts = time.Unix(0, v)
-	case string:
-		if ns, err := parseNanoString(v); err == nil {
-			ts = time.Unix(0, ns)
-		}
-	}
-
-	if id == "" {
-		id = entry.ID
-	}
-
-	return &messaging.Message{
-		ID:        id,
-		Type:      msgType,
-		Timestamp: ts,
-		Payload:   payload,
-		Metadata:  metadata,
-	}, nil
+	return nil
 }
+```
 
-func parseNanoString(v string) (int64, error) {
-	return strconv.ParseInt(v, 10, 64)
-}

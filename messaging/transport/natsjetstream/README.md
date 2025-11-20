@@ -1,3 +1,59 @@
+# NATS JetStream Transport（参考实现说明）
+
+> 状态：**示例/文档**，非框架内置实现  
+> 完整参考实现已经下沉到本 README 的代码块中，不再以 `.go` 文件形式存在于仓库中。
+
+## 设计背景
+
+`gochen` 的消息总线通过 `messaging.ITransport` 抽象到底层传输。  
+核心仓库只内置了：
+
+- `messaging/transport/memory`：内存异步队列；
+- `messaging/transport/sync`：同步直呼 Handler。
+
+像 NATS JetStream 这种**具体基础设施绑定**的实现，最好放在业务仓库（或单独 infra 仓库）中，以避免：
+
+- 所有使用 gochen 的项目被迫依赖 `github.com/nats-io/nats.go`；
+- 框架对连接方式、认证、拓扑结构做过度假设。
+
+因此，这里只保留文档 + 完整代码示例，方便你在自己的项目里复制/裁剪。
+
+## 使用方式概览
+
+1. 在你的应用仓库中创建包（建议放在 `internal`）：
+
+   ```bash
+   internal/transport/natsjetstream/
+   ```
+
+2. 从本 README 末尾的“参考实现完整代码”代码块中复制实现到你自己的包里，按项目需求裁剪。
+
+3. 在应用组装处注入 Transport：
+
+   ```go
+   import (
+       mynats "your-app/internal/transport/natsjetstream"
+       "gochen/messaging"
+   )
+
+   func newNATSTransport() messaging.ITransport {
+       t := mynats.NewTransport(mynats.Config{
+           URL:           nats.DefaultURL,
+           Stream:        "GOCHEN",
+           SubjectPrefix: "bus.",
+       })
+       _ = t.Start(context.Background())
+       return t
+   }
+   ```
+
+4. 将该 Transport 传给 `messaging.NewMessageBus` / `command.NewCommandBus` 即可。
+
+## 附录：参考实现完整代码
+
+下面是一个基于 `github.com/nats-io/nats.go` 的完整 JetStream Transport 实现示例，你可以直接复制到业务仓库，并根据需要调整包名与依赖：
+
+```go
 package natsjetstream
 
 import (
@@ -259,9 +315,10 @@ func (t *Transport) subscribeLocked(messageType string) error {
 	durable := t.cfg.DurablePrefix + messageType
 	sub, err := t.js.QueueSubscribe(subject, durable, t.handleMessage(messageType),
 		nats.ManualAck(),
-		nats.Durable(durable),
 		nats.AckWait(t.cfg.AckWait),
-		nats.MaxAckPending(t.cfg.MaxAckPending))
+		nats.Durable(durable),
+		nats.MaxAckPending(t.cfg.MaxAckPending),
+	)
 	if err != nil {
 		return err
 	}
@@ -269,37 +326,24 @@ func (t *Transport) subscribeLocked(messageType string) error {
 	return nil
 }
 
-func (t *Transport) handleMessage(defaultType string) nats.MsgHandler {
+func (t *Transport) handleMessage(messageType string) nats.MsgHandler {
 	return func(msg *nats.Msg) {
-		decoded, err := unmarshalMessage(msg.Data)
-		if err != nil {
-			t.logger.Warn(context.Background(), "decode nats message failed", logging.Error(err))
-			_ = msg.Ack()
+		var m messaging.Message
+		if err := json.Unmarshal(msg.Data, &m); err != nil {
+			t.logger.Error(context.Background(), "failed to unmarshal message", logging.Error(err))
+			_ = msg.Nak()
 			return
 		}
-		if decoded.GetType() == "" {
-			if m, ok := decoded.(*messaging.Message); ok {
-				m.Type = defaultType
+		t.mu.RLock()
+		handlers := append([]messaging.IMessageHandler(nil), t.handlers[messageType]...)
+		t.mu.RUnlock()
+		ctx := context.Background()
+		for _, h := range handlers {
+			if err := h.Handle(ctx, &m); err != nil {
+				t.logger.Error(ctx, "handler failed", logging.Error(err))
 			}
 		}
-		t.dispatch(context.Background(), decoded)
-		if err := msg.Ack(); err != nil {
-			t.logger.Warn(context.Background(), "nats ack failed", logging.Error(err))
-		}
-	}
-}
-
-func (t *Transport) dispatch(ctx context.Context, message messaging.IMessage) {
-	t.mu.RLock()
-	exact := t.handlers[message.GetType()]
-	wildcard := t.handlers["*"]
-	handlers := make([]messaging.IMessageHandler, 0, len(exact)+len(wildcard))
-	handlers = append(handlers, exact...)
-	handlers = append(handlers, wildcard...)
-	t.mu.RUnlock()
-
-	for _, h := range handlers {
-		_ = h.Handle(ctx, message)
+		_ = msg.Ack()
 	}
 }
 
@@ -308,53 +352,17 @@ func (t *Transport) subjectName(messageType string) string {
 }
 
 func marshalMessage(msg messaging.IMessage) ([]byte, error) {
-	payload, err := json.Marshal(msg.GetPayload())
-	if err != nil {
-		return nil, err
-	}
-	metadata := msg.GetMetadata()
-	if metadata == nil {
-		metadata = make(map[string]interface{})
-	}
-	ts := msg.GetTimestamp()
-	if ts.IsZero() {
-		ts = time.Now()
-	}
-	return json.Marshal(struct {
-		ID        string                 `json:"id"`
-		Type      string                 `json:"type"`
-		Timestamp int64                  `json:"timestamp"`
-		Payload   json.RawMessage        `json:"payload"`
-		Metadata  map[string]interface{} `json:"metadata"`
-	}{ID: msg.GetID(), Type: msg.GetType(), Timestamp: ts.UnixNano(), Payload: payload, Metadata: metadata})
-}
-
-func unmarshalMessage(data []byte) (messaging.IMessage, error) {
-	var wire struct {
-		ID        string                 `json:"id"`
-		Type      string                 `json:"type"`
-		Timestamp int64                  `json:"timestamp"`
-		Payload   json.RawMessage        `json:"payload"`
-		Metadata  map[string]interface{} `json:"metadata"`
-	}
-	if err := json.Unmarshal(data, &wire); err != nil {
-		return nil, err
-	}
-	var payload interface{}
-	if len(wire.Payload) > 0 {
-		if err := json.Unmarshal(wire.Payload, &payload); err != nil {
-			return nil, err
+	m, ok := msg.(*messaging.Message)
+	if !ok {
+		m = &messaging.Message{
+			ID:        msg.GetID(),
+			Type:      msg.GetType(),
+			Timestamp: msg.GetTimestamp(),
+			.Payload:   msg.GetPayload(),
+			Metadata:  msg.GetMetadata(),
 		}
 	}
-	if wire.Metadata == nil {
-		wire.Metadata = make(map[string]interface{})
-	}
-	msg := &messaging.Message{
-		ID:        wire.ID,
-		Type:      wire.Type,
-		Timestamp: time.Unix(0, wire.Timestamp),
-		Payload:   payload,
-		Metadata:  wire.Metadata,
-	}
-	return msg, nil
+	return json.Marshal(m)
 }
+```
+

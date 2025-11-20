@@ -694,26 +694,12 @@ func main() {
     }
 }
 
-// Redis Streams 传输示例
-func newRedisTransport() messaging.Transport {
-    transport, _ := redisstreams.NewTransport(redisstreams.Config{
-        Addr:         "127.0.0.1:6379",
-        StreamPrefix: "bus:",
-        GroupName:    "gochen",
-    })
-    _ = transport.Start(context.Background())
-    return transport
-}
-
-// NATS JetStream 传输示例
-func newNATSTransport() messaging.Transport {
-    transport := natsjetstream.NewTransport(natsjetstream.Config{
-        URL:           nats.DefaultURL,
-        Stream:        "GOCHEN",
-        SubjectPrefix: "bus.",
-    })
-    _ = transport.Start(context.Background())
-    return transport
+// 自定义异步传输示例（伪代码）
+// 业务侧可以在自己的仓库中实现基于 Redis Streams / NATS JetStream 等的 Transport
+func newCustomAsyncTransport() messaging.Transport {
+    // return mypkg.NewRedisStreamsTransport(...)
+    // return mypkg.NewNATSJetStreamTransport(...)
+    panic("implement in application repo")
 }
 ```
 

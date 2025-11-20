@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	_ "modernc.org/sqlite" // 纯 Go sqlite 驱动，便于测试与内置使用
-
 	core "gochen/storage/database"
 	"gochen/storage/database/dialect"
 )
@@ -20,8 +18,8 @@ type DB struct {
 
 // New 根据 core.DBConfig 创建基础数据库实例
 // 仅做最小封装：
-// - sqlite: 使用 config.Database/DSN 作为数据源（例如 :memory: 或 文件路径）
-// - 其他驱动：直接使用 Database 字段作为 DSN（业务系统可自行扩展）
+// - 调用方必须确保所配置的 Driver 已通过空导入注册（例如在上层显式 `_ "modernc.org/sqlite"`）
+// - sqlite 场景下建议在应用或测试层自行 import 驱动，basic 层只负责最小抽象
 func New(config core.DBConfig) (core.IDatabase, error) {
 	var (
 		driver = config.Driver

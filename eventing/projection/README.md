@@ -10,42 +10,81 @@
 - **最终一致性** - 异步更新，保证最终一致
 - **多视图** - 同一事件流可生成多个不同视图
 
-## 核心接口
+## 核心接口（当前实现）
 
 ### IProjection - 投影接口
 
 ```go
 // IProjection 投影接口
 type IProjection interface {
-    // Handle 处理事件，更新读模型
-    Handle(ctx context.Context, event IEvent) error
-    
-    // GetName 获取投影名称
+    // 获取投影名称
     GetName() string
-    
-    // Reset 重置投影（重建）
-    Reset(ctx context.Context) error
+
+    // 处理单个事件，更新读模型
+    Handle(ctx context.Context, event eventing.IEvent) error
+
+    // 声明支持的事件类型（用于事件总线订阅）
+    GetSupportedEventTypes() []string
+
+    // 重建投影（通常基于事件存储中的历史事件）
+    Rebuild(ctx context.Context, events []eventing.Event) error
+
+    // 获取当前投影状态（监控/观测用）
+    GetStatus() ProjectionStatus
 }
 ```
 
-### IProjectionManager - 投影管理器接口
+### ProjectionManager - 投影管理器
 
 ```go
-// IProjectionManager 投影管理器接口
-type IProjectionManager interface {
-    // Register 注册投影
-    Register(projection IProjection) error
-    
-    // Start 启动投影更新
-    Start(ctx context.Context) error
-    
-    // Stop 停止投影更新
-    Stop() error
-    
-    // Rebuild 重建投影
-    Rebuild(ctx context.Context, projectionName string) error
+// ProjectionManager 负责：
+// - 管理多个 IProjection 实例
+// - 通过 event bus 订阅事件并分发给对应投影
+// - 维护每个投影的状态（Processed/Failed/LastEvent 等）
+// - 可选：基于 CheckpointStore 进行检查点管理
+type ProjectionManager struct {
+    // ...
 }
+
+// NewProjectionManager 创建默认配置的投影管理器
+func NewProjectionManager(
+    eventStore store.IEventStore,
+    eventBus   bus.IEventBus,
+) *ProjectionManager
+
+// WithCheckpointStore 启用检查点存储（可选）
+func (pm *ProjectionManager) WithCheckpointStore(store ICheckpointStore) *ProjectionManager
+
+// RegisterProjection 注册投影并自动在 event bus 上订阅其声明的事件类型
+func (pm *ProjectionManager) RegisterProjection(projection IProjection) error
+
+// UnregisterProjection 取消注册并取消订阅
+func (pm *ProjectionManager) UnregisterProjection(name string) error
+
+// StartProjection/StopProjection 控制单个投影的运行状态
+func (pm *ProjectionManager) StartProjection(name string) error
+func (pm *ProjectionManager) StopProjection(name string) error
 ```
+
+### 兼容的旧 Manager（已废弃）
+
+`projection.Manager` 是较早期基于本地事件发布的简化实现，仅支持基本注册/启动/重建能力：
+
+```go
+// Manager 投影管理器（Deprecated）
+//
+// Deprecated: 请使用功能更完整、支持检查点和事件总线集成的 ProjectionManager。
+type Manager struct {
+    // ...
+}
+
+// NewManager 创建投影管理器
+//
+// Deprecated: 请改用 NewProjectionManager 或 NewProjectionManagerWithConfig。
+func NewManager(eventStore store.IEventStore, config interface{}) *Manager
+```
+
+新代码应优先使用 `ProjectionManager`，旧 `Manager` 仅为向后兼容保留。
 
 ## 使用示例
 
@@ -116,22 +155,25 @@ func (p *UserViewProjection) Reset(ctx context.Context) error {
 }
 ```
 
-### 2. 注册和启动投影
+### 2. 注册和启动投影（基于 ProjectionManager）
 
 ```go
-// 创建投影管理器
-projectionManager := projection.NewManager(eventBus, eventStore)
+// 创建投影管理器（集成事件总线和事件存储）
+eventStore := store.NewMemoryEventStore()
+eventBus   := bus.NewInMemoryEventBus()
 
-// 注册投影
-projectionManager.Register(NewUserViewProjection(db))
-projectionManager.Register(NewOrderStatisticsProjection(db))
-projectionManager.Register(NewProductCatalogProjection(db))
+projectionManager := projection.NewProjectionManager(eventStore, eventBus)
 
-// 启动投影更新
-if err := projectionManager.Start(ctx); err != nil {
+// 注册投影（会根据 GetSupportedEventTypes 自动在 event bus 上订阅）
+if err := projectionManager.RegisterProjection(NewUserViewProjection(db)); err != nil {
     log.Fatal(err)
 }
-defer projectionManager.Stop()
+
+// 启动指定投影
+if err := projectionManager.StartProjection("user_view"); err != nil {
+    log.Fatal(err)
+}
+defer projectionManager.StopProjection("user_view")
 ```
 
 ### 3. 读模型查询

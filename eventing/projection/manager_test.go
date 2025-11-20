@@ -311,3 +311,41 @@ func BenchmarkProjectionManager_RegisterProjection(b *testing.B) {
 		manager.RegisterProjection(projection)
 	}
 }
+
+// Test 11: projectionEventHandler respects running status
+func TestProjectionEventHandler_ShouldProcessOnlyWhenRunning(t *testing.T) {
+	eventStore := store.NewMemoryEventStore()
+	eventBus := &MockEventBus{}
+	manager := NewProjectionManager(eventStore, eventBus)
+
+	projection := NewMockProjection("test-projection", []string{"TestEvent"})
+	err := manager.RegisterProjection(projection)
+	assert.NoError(t, err)
+
+	handler := &projectionEventHandler{
+		projection: projection,
+		manager:    manager,
+	}
+
+	evt := &eventing.Event{
+		Message: messaging.Message{
+			ID:        "event-1",
+			Type:      "TestEvent",
+			Timestamp: time.Now(),
+			Metadata:  make(map[string]interface{}),
+		},
+	}
+
+	// stopped 状态下不应处理事件
+	err = handler.HandleEvent(context.Background(), evt)
+	assert.NoError(t, err)
+	assert.Equal(t, 0, projection.processedEvents)
+
+	// 启动后应处理事件
+	err = manager.StartProjection("test-projection")
+	assert.NoError(t, err)
+
+	err = handler.HandleEvent(context.Background(), evt)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, projection.processedEvents)
+}

@@ -6,6 +6,8 @@ import (
 	"log"
 	"time"
 
+	_ "modernc.org/sqlite"
+
 	"gochen/eventing"
 	ebus "gochen/eventing/bus"
 	"gochen/eventing/projection"
