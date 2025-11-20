@@ -107,6 +107,11 @@ func (s *TimeDurationStrategy) UpdateLastSnapshotTime(aggregateType string, aggr
 type AggregateSizeStrategy struct {
 	MaxEvents    int // 最大事件数量
 	MaxSizeBytes int // 最大数据大小（字节）
+
+	// SizeEstimator 可选：估算聚合大小的函数
+	// 返回聚合占用的字节数，用于判断是否超过 MaxSizeBytes。
+	// 若未提供，则仅基于事件数量判断。
+	SizeEstimator func(aggregate ISnapshotAggregate) (int, error)
 }
 
 // NewAggregateSizeStrategy 创建聚合大小策略
@@ -132,7 +137,16 @@ func (s *AggregateSizeStrategy) ShouldCreateSnapshot(ctx context.Context, aggreg
 		return true, nil
 	}
 
-	// TODO: 可以添加数据大小检查，需要聚合根提供大小估算接口
+	// 检查数据大小是否超过阈值（若提供估算器）
+	if s.SizeEstimator != nil && s.MaxSizeBytes > 0 {
+		size, err := s.SizeEstimator(aggregate)
+		if err != nil {
+			return false, err
+		}
+		if size >= s.MaxSizeBytes {
+			return true, nil
+		}
+	}
 
 	return false, nil
 }
