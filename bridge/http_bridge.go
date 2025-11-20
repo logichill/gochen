@@ -3,6 +3,7 @@ package bridge
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -139,7 +140,7 @@ func (b *HTTPBridge) SendCommand(ctx context.Context, serviceURL string, cmd *co
 	// 创建请求
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrRemoteCallFailed, err)
+		return errors.Join(ErrRemoteCallFailed, err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -147,7 +148,7 @@ func (b *HTTPBridge) SendCommand(ctx context.Context, serviceURL string, cmd *co
 	// 发送请求
 	resp, err := b.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrRemoteCallFailed, err)
+		return errors.Join(ErrRemoteCallFailed, err)
 	}
 	defer resp.Body.Close()
 
@@ -182,7 +183,7 @@ func (b *HTTPBridge) SendEvent(ctx context.Context, serviceURL string, event eve
 	// 创建请求
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrRemoteCallFailed, err)
+		return errors.Join(ErrRemoteCallFailed, err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -190,7 +191,7 @@ func (b *HTTPBridge) SendEvent(ctx context.Context, serviceURL string, event eve
 	// 发送请求
 	resp, err := b.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrRemoteCallFailed, err)
+		return errors.Join(ErrRemoteCallFailed, err)
 	}
 	defer resp.Body.Close()
 

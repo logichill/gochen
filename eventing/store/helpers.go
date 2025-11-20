@@ -108,7 +108,7 @@ func LoadAggregatesHelper(ctx context.Context, store IEventStore, aggregateIDs [
 		errs = append(errs, err)
 	}
 	if len(errs) > 0 {
-		return nil, fmt.Errorf("load aggregates failed with %d errors: %v", len(errs), errs[0])
+		return nil, fmt.Errorf("load aggregates failed with %d errors, first error: %w", len(errs), errs[0])
 	}
 
 	return results, nil

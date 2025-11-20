@@ -2,6 +2,7 @@ package saga
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"gochen/eventing/bus"
@@ -123,7 +124,7 @@ func (o *SagaOrchestrator) Execute(ctx context.Context, saga ISaga) error {
 					logging.String("saga_id", sagaID))
 
 				// 调用失败回调
-				saga.OnFailed(ctx, fmt.Errorf("step failed: %w, compensation failed: %v", err, compErr))
+				saga.OnFailed(ctx, fmt.Errorf("step failed and compensation failed: %w", errors.Join(err, compErr)))
 
 				// 发布 Saga 失败事件
 				o.publishEvent(ctx, "SagaFailed", sagaID, map[string]interface{}{
@@ -131,7 +132,7 @@ func (o *SagaOrchestrator) Execute(ctx context.Context, saga ISaga) error {
 					"compensation_error": compErr.Error(),
 				})
 
-				return fmt.Errorf("%w: %v, compensation error: %v", ErrSagaStepFailed, err, compErr)
+				return errors.Join(ErrSagaStepFailed, err, compErr)
 			}
 
 			// 调用失败回调
@@ -142,7 +143,7 @@ func (o *SagaOrchestrator) Execute(ctx context.Context, saga ISaga) error {
 				"error": err.Error(),
 			})
 
-			return fmt.Errorf("%w: %v", ErrSagaStepFailed, err)
+			return errors.Join(ErrSagaStepFailed, err)
 		}
 
 		// 标记步骤完成
@@ -353,12 +354,12 @@ func (o *SagaOrchestrator) Resume(ctx context.Context, saga ISaga, state *SagaSt
 
 			// 执行补偿
 			if compErr := o.compensate(ctx, saga, state, i); compErr != nil {
-				saga.OnFailed(ctx, fmt.Errorf("step failed: %w, compensation failed: %v", err, compErr))
-				return fmt.Errorf("%w: %v, compensation error: %v", ErrSagaStepFailed, err, compErr)
+				saga.OnFailed(ctx, fmt.Errorf("step failed and compensation failed: %w", errors.Join(err, compErr)))
+				return errors.Join(ErrSagaStepFailed, err, compErr)
 			}
 
 			saga.OnFailed(ctx, err)
-			return fmt.Errorf("%w: %v", ErrSagaStepFailed, err)
+			return errors.Join(ErrSagaStepFailed, err)
 		}
 
 		state.MarkStepCompleted(step.Name)
