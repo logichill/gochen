@@ -53,6 +53,9 @@ messaging/                   # 消息总线与传输层
   command/                   # 命令模型与命令总线适配
   transport/                 # 传输实现（memory / natsjetstream / redisstreams / sync）
 
+saga/                        # Saga 编排
+  orchestrator.go            # SagaOrchestrator（发布 Saga 生命周期事件，见 docs/eventing-saga-events.md）
+
 storage/database/            # 数据库抽象
   basic/                     # 最小 DB 接口实现
   dialect/                   # 方言抽象（DELETE LIMIT 等兼容）
