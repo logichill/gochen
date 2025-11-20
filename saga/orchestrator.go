@@ -304,20 +304,42 @@ func (o *SagaOrchestrator) compensate(ctx context.Context, saga ISaga, state *Sa
 }
 
 // publishEvent 发布事件
+type sagaEventPayload struct {
+	SagaID    string         `json:"saga_id"`
+	Step      string         `json:"step,omitempty"`
+	Status    string         `json:"status,omitempty"`
+	Error     string         `json:"error,omitempty"`
+	Timestamp time.Time      `json:"timestamp"`
+	Extra     map[string]any `json:"extra,omitempty"`
+}
+
 func (o *SagaOrchestrator) publishEvent(ctx context.Context, eventType string, sagaID string, data map[string]any) {
 	if o.eventBus == nil {
 		return
 	}
 
-	payload := make(map[string]any, len(data)+1)
-	payload["saga_id"] = sagaID
-	for k, v := range data {
-		payload[k] = v
+	payload := sagaEventPayload{
+		SagaID:    sagaID,
+		Status:    eventType,
+		Timestamp: time.Now(),
+	}
+	if data != nil {
+		payload.Extra = data
+		if step, ok := data["step"].(string); ok {
+			payload.Step = step
+		}
+		if errStr, ok := data["error"].(string); ok {
+			payload.Error = errStr
+		}
 	}
 
-	evt := eventing.NewEvent(1, "Saga", eventType, uint64(time.Now().UnixNano()), payload)
-	metadata := evt.GetMetadata()
-	metadata["saga_id"] = sagaID
+	evt := eventing.NewEvent(0, "Saga", eventType, uint64(payload.Timestamp.UnixNano()), payload)
+	meta := evt.GetMetadata()
+	meta["saga_id"] = sagaID
+	meta["status"] = eventType
+	if payload.Step != "" {
+		meta["step"] = payload.Step
+	}
 
 	if err := o.eventBus.PublishEvent(ctx, evt); err != nil {
 		sagaLogger.Warn(ctx, "发布 Saga 事件失败", logging.Error(err),
