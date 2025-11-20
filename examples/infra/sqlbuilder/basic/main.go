@@ -6,6 +6,8 @@ import (
 	"log"
 	"time"
 
+	_ "modernc.org/sqlite"
+
 	coredb "gochen/storage/database"
 	basicdb "gochen/storage/database/basic"
 	sqlbuilder "gochen/storage/database/sql"

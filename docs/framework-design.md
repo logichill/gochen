@@ -267,8 +267,12 @@ type IMessageHandler interface {
 当前提供：
 
 - `memory`：基于内存队列 + worker 池的异步传输；
-- `sync`：同步传输（调用 `Publish` 时在当前 goroutine 内执行 handler）；
-- `natsjetstream` / `redisstreams`：基于 NATS JetStream / Redis Streams 的消息传输。
+- `sync`：同步传输（调用 `Publish` 时在当前 goroutine 内执行 handler）。
+
+本仓库不再内置 NATS/Redis 等具体网络传输实现，推荐在业务仓库中基于 `messaging.ITransport` 自行封装，例如：
+
+- `internal/transport/natsjetstream`：封装 `github.com/nats-io/nats.go`；
+- `internal/transport/redisstreams`：封装 `github.com/redis/go-redis/v9`。
 
 所有传输都实现统一的 `Transport` 接口（见 `messaging/transport.go`）。
 
@@ -353,4 +357,3 @@ type IMessageHandler interface {
 - 传输层（如 `messaging/transport/memory`）提供 `Stats` 方法查看队列深度、处理器数量、worker 数等运行状态。
 
 这些监控点可以集成到 Prometheus 或其他监控系统，用于观测 EventStore、Outbox、投影和消息总线的健康状况。
-
