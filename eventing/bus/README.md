@@ -322,12 +322,12 @@ func (h *Handler) Handle(ctx context.Context, event eventing.IEvent) error {
     if err != nil {
         // 网络错误可重试
         if isNetworkError(err) {
-            return fmt.Errorf("%w: %v", ErrRetryable, err)
+            return errors.Join(ErrRetryable, err)
         }
         
         // 验证错误不可重试
         if isValidationError(err) {
-            return fmt.Errorf("%w: %v", ErrNonRetryable, err)
+            return errors.Join(ErrNonRetryable, err)
         }
     }
     

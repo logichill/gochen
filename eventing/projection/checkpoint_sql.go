@@ -3,6 +3,7 @@ package projection
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -69,7 +70,7 @@ func (s *SQLCheckpointStore) Load(ctx context.Context, projectionName string) (*
 		return nil, ErrCheckpointNotFound
 	}
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrCheckpointStoreFailed, err)
+		return nil, errors.Join(ErrCheckpointStoreFailed, err)
 	}
 
 	if lastEventTime.Valid {
@@ -101,7 +102,7 @@ func (s *SQLCheckpointStore) Save(ctx context.Context, checkpoint *Checkpoint) e
 		Key("projection_name").
 		Exec(ctx)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrCheckpointStoreFailed, err)
+		return errors.Join(ErrCheckpointStoreFailed, err)
 	}
 	return nil
 }
@@ -112,7 +113,7 @@ func (s *SQLCheckpointStore) Delete(ctx context.Context, projectionName string) 
 		Where("projection_name = ?", projectionName).
 		Exec(ctx)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrCheckpointStoreFailed, err)
+		return errors.Join(ErrCheckpointStoreFailed, err)
 	}
 
 	return nil
@@ -199,7 +200,7 @@ func (s *SQLCheckpointStore) List(ctx context.Context) ([]*Checkpoint, error) {
 
 	rows, err := builder.Query(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrCheckpointStoreFailed, err)
+		return nil, errors.Join(ErrCheckpointStoreFailed, err)
 	}
 	defer rows.Close()
 
@@ -216,7 +217,7 @@ func (s *SQLCheckpointStore) List(ctx context.Context) ([]*Checkpoint, error) {
 			&checkpoint.UpdatedAt,
 		)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrCheckpointStoreFailed, err)
+			return nil, errors.Join(ErrCheckpointStoreFailed, err)
 		}
 
 		if lastEventTime.Valid {
@@ -227,7 +228,7 @@ func (s *SQLCheckpointStore) List(ctx context.Context) ([]*Checkpoint, error) {
 	}
 
 	if err = rows.Err(); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrCheckpointStoreFailed, err)
+		return nil, errors.Join(ErrCheckpointStoreFailed, err)
 	}
 
 	return checkpoints, nil
@@ -273,7 +274,7 @@ func (s *SQLCheckpointStore) SaveBatch(ctx context.Context, checkpoints []*Check
 			).
 			Key("projection_name").
 			Exec(ctx); err != nil {
-			return fmt.Errorf("%w: %v", ErrCheckpointStoreFailed, err)
+			return errors.Join(ErrCheckpointStoreFailed, err)
 		}
 	}
 

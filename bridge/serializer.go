@@ -2,7 +2,7 @@ package bridge
 
 import (
 	"encoding/json"
-	"fmt"
+	"errors"
 
 	"gochen/eventing"
 	"gochen/messaging/command"
@@ -48,7 +48,7 @@ func (s *JSONSerializer) SerializeCommand(cmd *command.Command) ([]byte, error) 
 
 	data, err := json.Marshal(cmd)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrSerializationFailed, err)
+		return nil, errors.Join(ErrSerializationFailed, err)
 	}
 
 	return data, nil
@@ -62,7 +62,7 @@ func (s *JSONSerializer) DeserializeCommand(data []byte) (*command.Command, erro
 
 	var cmd command.Command
 	if err := json.Unmarshal(data, &cmd); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrDeserializationFailed, err)
+		return nil, errors.Join(ErrDeserializationFailed, err)
 	}
 
 	return &cmd, nil
@@ -78,7 +78,7 @@ func (s *JSONSerializer) SerializeEvent(event eventing.IEvent) ([]byte, error) {
 	if e, ok := event.(*eventing.Event); ok {
 		data, err := json.Marshal(e)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrSerializationFailed, err)
+			return nil, errors.Join(ErrSerializationFailed, err)
 		}
 		return data, nil
 	}
@@ -95,7 +95,7 @@ func (s *JSONSerializer) SerializeEvent(event eventing.IEvent) ([]byte, error) {
 
 	data, err := json.Marshal(simplified)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrSerializationFailed, err)
+		return nil, errors.Join(ErrSerializationFailed, err)
 	}
 
 	return data, nil
@@ -109,7 +109,7 @@ func (s *JSONSerializer) DeserializeEvent(data []byte) (eventing.IEvent, error) 
 
 	var event eventing.Event
 	if err := json.Unmarshal(data, &event); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrDeserializationFailed, err)
+		return nil, errors.Join(ErrDeserializationFailed, err)
 	}
 
 	return &event, nil
