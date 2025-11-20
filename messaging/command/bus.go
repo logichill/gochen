@@ -134,6 +134,15 @@ func NewCommandBus(messageBus messaging.IMessageBus, config *CommandBusConfig) *
 // 返回：
 //   - error: 注册失败时返回错误
 func (bus *CommandBus) RegisterHandler(commandType string, handler CommandHandlerFunc) error {
+	return bus.RegisterHandlerWithContext(context.Background(), commandType, handler)
+}
+
+// RegisterHandlerWithContext 注册命令处理器（支持上下文透传，并替换已存在的处理器）
+func (bus *CommandBus) RegisterHandlerWithContext(ctx context.Context, commandType string, handler CommandHandlerFunc) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	if commandType == "" {
 		return fmt.Errorf("command type cannot be empty")
 	}
@@ -141,14 +150,6 @@ func (bus *CommandBus) RegisterHandler(commandType string, handler CommandHandle
 	if handler == nil {
 		return fmt.Errorf("handler cannot be nil")
 	}
-
-	// 防止重复注册同一命令类型的处理器
-	bus.mutex.RLock()
-	if _, exists := bus.handlers[commandType]; exists {
-		bus.mutex.RUnlock()
-		return fmt.Errorf("handler for command type %s already registered", commandType)
-	}
-	bus.mutex.RUnlock()
 
 	// 基础命令处理器（直接处理 *Command 并回传结果）
 	baseHandler := handler.AsMessageHandler(commandType)
@@ -160,8 +161,18 @@ func (bus *CommandBus) RegisterHandler(commandType string, handler CommandHandle
 		inner:       baseHandler,
 	}
 
+	// 若已存在同类型处理器，先移除旧订阅，避免重复消费
+	bus.mutex.RLock()
+	existing := bus.handlers[commandType]
+	bus.mutex.RUnlock()
+	if existing != nil {
+		if err := bus.messageBus.Unsubscribe(ctx, messaging.MessageTypeCommand, existing); err != nil {
+			return fmt.Errorf("failed to replace existing handler for %s: %w", commandType, err)
+		}
+	}
+
 	// 订阅到消息总线
-	if err := bus.messageBus.Subscribe(context.Background(), messaging.MessageTypeCommand, routingHandler); err != nil {
+	if err := bus.messageBus.Subscribe(ctx, messaging.MessageTypeCommand, routingHandler); err != nil {
 		return fmt.Errorf("failed to subscribe command handler: %w", err)
 	}
 

@@ -2,6 +2,7 @@ package projection
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -398,4 +399,40 @@ func TestProjectionManager_ResumeFromCheckpoint_ReplaysFromStore(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), status.ProcessedEvents)
 	assert.Equal(t, events[2].ID, status.LastEventID)
+}
+
+// Test 13: Replay failure should mark status error and stop processing
+func TestProjectionManager_ResumeFromCheckpoint_ReplayFailureStops(t *testing.T) {
+	ctx := context.Background()
+	eventStore := store.NewMemoryEventStore()
+	eventBus := &MockEventBus{}
+	checkpointStore := NewMemoryCheckpointStore()
+
+	manager := NewProjectionManager(eventStore, eventBus).WithCheckpointStore(checkpointStore)
+	projection := NewMockProjection("test-projection", []string{"TestEvent"})
+	// 处理时故意失败
+	projection.handleFunc = func(ctx context.Context, event eventing.IEvent) error {
+		return fmt.Errorf("fail:%s", event.GetID())
+	}
+	require.NoError(t, manager.RegisterProjection(projection))
+
+	e1 := eventing.NewEvent(1, "Agg", "TestEvent", 1, nil)
+	e2 := eventing.NewEvent(1, "Agg", "TestEvent", 2, nil)
+	now := time.Now()
+	e1.Timestamp = now
+	e2.Timestamp = now
+	require.NoError(t, eventStore.AppendEvents(ctx, 1, []eventing.IStorableEvent{e1, e2}, 0))
+
+	// checkpoint 在第一个事件
+	checkpoint := NewCheckpoint("test-projection", 1, e1.ID, e1.Timestamp)
+	require.NoError(t, checkpointStore.Save(ctx, checkpoint))
+
+	err := manager.ResumeFromCheckpoint(ctx, "test-projection")
+	require.Error(t, err)
+
+	status, sErr := manager.GetProjectionStatus("test-projection")
+	require.NoError(t, sErr)
+	assert.Equal(t, "error", status.Status)
+	assert.Equal(t, int64(1), status.ProcessedEvents) // 未推进
+	assert.Contains(t, status.LastError, "fail")
 }
