@@ -69,9 +69,9 @@ func (m *MockEventStoreWithDB) StreamEvents(ctx context.Context, from time.Time)
 	return m.events, nil
 }
 
-func newTestEvent(aggregateID int64, version uint64, id string, payload map[string]interface{}) eventing.Event {
+func newTestEvent(aggregateID int64, version uint64, id string, payload map[string]any) eventing.Event {
 	if payload == nil {
-		payload = make(map[string]interface{})
+		payload = make(map[string]any)
 	}
 
 	evt := eventing.NewEvent(aggregateID, "TestAggregate", "TestEvent", version, payload)
@@ -120,7 +120,7 @@ func TestOutboxEntry_TableName(t *testing.T) {
 }
 
 func TestOutboxEntry_ToEvent(t *testing.T) {
-	evt := newTestEvent(123, 1, "event-1", map[string]interface{}{"value": 100})
+	evt := newTestEvent(123, 1, "event-1", map[string]any{"value": 100})
 	entry, err := EventToOutboxEntry(123, evt)
 	require.NoError(t, err)
 
@@ -225,7 +225,7 @@ func TestOutboxEntry_CalculateNextRetryTime(t *testing.T) {
 // ========== 工具函数测试 ==========
 
 func TestEventToOutboxEntry(t *testing.T) {
-	evt := newTestEvent(123, 1, "event-1", map[string]interface{}{
+	evt := newTestEvent(123, 1, "event-1", map[string]any{
 		"user":  "alice",
 		"value": 100,
 	})
@@ -261,8 +261,8 @@ func TestSQLOutboxRepository_SaveWithEvents(t *testing.T) {
 
 	// 创建测试事件
 	events := []eventing.Event{
-		newTestEvent(aggregateID, 1, "event-1", map[string]interface{}{"value": 100}),
-		newTestEvent(aggregateID, 2, "event-2", map[string]interface{}{"value": 200}),
+		newTestEvent(aggregateID, 1, "event-1", map[string]any{"value": 100}),
+		newTestEvent(aggregateID, 2, "event-2", map[string]any{"value": 200}),
 	}
 
 	// 保存事件和 Outbox 记录

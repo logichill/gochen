@@ -271,7 +271,7 @@ func (r *SimpleSQLOutboxRepository) calculateExpectedVersion(events []eventing.E
 
 // serializeEvent 序列化事件
 func (r *SimpleSQLOutboxRepository) serializeEvent(event eventing.IStorableEvent) (string, error) {
-	data := map[string]interface{}{
+	data := map[string]any{
 		"id":             event.GetID(),
 		"type":           event.GetType(),
 		"aggregate_id":   event.GetAggregateID(),

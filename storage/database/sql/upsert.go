@@ -16,9 +16,9 @@ type upsertBuilder struct {
 
 	table        string
 	columns      []string
-	values       []interface{}
+	values       []any
 	keyColumns   []string
-	updateValues map[string]interface{}
+	updateValues map[string]any
 }
 
 func (b *upsertBuilder) Columns(cols ...string) IUpsertBuilder {
@@ -26,7 +26,7 @@ func (b *upsertBuilder) Columns(cols ...string) IUpsertBuilder {
 	return b
 }
 
-func (b *upsertBuilder) Values(vals ...interface{}) IUpsertBuilder {
+func (b *upsertBuilder) Values(vals ...any) IUpsertBuilder {
 	b.values = vals
 	return b
 }
@@ -36,17 +36,17 @@ func (b *upsertBuilder) Key(cols ...string) IUpsertBuilder {
 	return b
 }
 
-func (b *upsertBuilder) UpdateSet(col string, val interface{}) IUpsertBuilder {
+func (b *upsertBuilder) UpdateSet(col string, val any) IUpsertBuilder {
 	if b.updateValues == nil {
-		b.updateValues = make(map[string]interface{})
+		b.updateValues = make(map[string]any)
 	}
 	b.updateValues[col] = val
 	return b
 }
 
-func (b *upsertBuilder) UpdateSetMap(values map[string]interface{}) IUpsertBuilder {
+func (b *upsertBuilder) UpdateSetMap(values map[string]any) IUpsertBuilder {
 	if b.updateValues == nil {
-		b.updateValues = make(map[string]interface{})
+		b.updateValues = make(map[string]any)
 	}
 	for k, v := range values {
 		b.updateValues[k] = v
@@ -70,7 +70,7 @@ func (b *upsertBuilder) Exec(ctx context.Context) (sql.Result, error) {
 		dialect: b.dialect,
 		table:   b.table,
 		columns: b.columns,
-		rows:    [][]interface{}{b.values},
+		rows:    [][]any{b.values},
 	}
 
 	insertSQL, insertArgs := ins.Build()
@@ -84,7 +84,7 @@ func (b *upsertBuilder) Exec(ctx context.Context) (sql.Result, error) {
 	}
 
 	whereParts := make([]string, 0, len(b.keyColumns))
-	whereArgs := make([]interface{}, 0, len(b.keyColumns))
+	whereArgs := make([]any, 0, len(b.keyColumns))
 
 	colIndex := func(col string) int {
 		for i, c := range b.columns {
@@ -104,7 +104,7 @@ func (b *upsertBuilder) Exec(ctx context.Context) (sql.Result, error) {
 		whereArgs = append(whereArgs, b.values[idx])
 	}
 
-	updateVals := make(map[string]interface{})
+	updateVals := make(map[string]any)
 	if len(b.updateValues) == 0 {
 		for i, col := range b.columns {
 			skip := false

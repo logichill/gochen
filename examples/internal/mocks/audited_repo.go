@@ -26,7 +26,7 @@ func NewMockAuditedRepository[T entity.Entity[int64]]() *MockAuditedRepository[T
 	}
 }
 
-func (r *MockAuditedRepository[T]) record(id int64, op, by string, changes map[string]interface{}) {
+func (r *MockAuditedRepository[T]) record(id int64, op, by string, changes map[string]any) {
 	rec := srepo.AuditRecord{
 		ID:        time.Now().UnixNano(),
 		EntityID:  fmt.Sprintf("%d", id),

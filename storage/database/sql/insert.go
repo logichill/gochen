@@ -15,7 +15,7 @@ type insertBuilder struct {
 
 	table   string
 	columns []string
-	rows    [][]interface{}
+	rows    [][]any
 }
 
 func (b *insertBuilder) Columns(cols ...string) IInsertBuilder {
@@ -23,7 +23,7 @@ func (b *insertBuilder) Columns(cols ...string) IInsertBuilder {
 	return b
 }
 
-func (b *insertBuilder) Values(vals ...interface{}) IInsertBuilder {
+func (b *insertBuilder) Values(vals ...any) IInsertBuilder {
 	if len(vals) == 0 {
 		return b
 	}
@@ -31,7 +31,7 @@ func (b *insertBuilder) Values(vals ...interface{}) IInsertBuilder {
 	return b
 }
 
-func (b *insertBuilder) Build() (string, []interface{}) {
+func (b *insertBuilder) Build() (string, []any) {
 	if len(b.columns) == 0 {
 		panic("insertBuilder: Columns is required")
 	}
@@ -40,7 +40,7 @@ func (b *insertBuilder) Build() (string, []interface{}) {
 	}
 
 	var sb strings.Builder
-	args := make([]interface{}, 0, len(b.rows)*len(b.columns))
+	args := make([]any, 0, len(b.rows)*len(b.columns))
 
 	sb.WriteString("INSERT INTO ")
 	sb.WriteString(b.table)

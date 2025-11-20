@@ -14,22 +14,22 @@ import (
 // 提供更强的适配版本；本文件同时提供最简实现 BasicContainer。
 type IContainer interface {
 	// 注册依赖提供者（构造函数），以第一个返回值类型名作为服务名
-	RegisterConstructor(constructor interface{}) error
+	RegisterConstructor(constructor any) error
 
 	// 注册单例
-	RegisterSingleton(name string, factory interface{}) error
+	RegisterSingleton(name string, factory any) error
 
 	// 注册瞬态（最简实现按单例处理）
-	RegisterTransient(name string, factory interface{}) error
+	RegisterTransient(name string, factory any) error
 
 	// 注册实例
-	RegisterInstance(name string, instance interface{}) error
+	RegisterInstance(name string, instance any) error
 
 	// 解析依赖
-	Resolve(name string) (interface{}, error)
+	Resolve(name string) (any, error)
 
 	// 解析到指定类型
-	ResolveTo(name string, target interface{}) error
+	ResolveTo(name string, target any) error
 
 	// 检查是否已注册
 	IsRegistered(name string) bool
@@ -38,7 +38,7 @@ type IContainer interface {
 	GetRegisteredNames() []string
 
 	// 调用函数并按参数类型注入
-	Invoke(function interface{}) error
+	Invoke(function any) error
 
 	// 清空容器
 	Clear()
@@ -46,20 +46,20 @@ type IContainer interface {
 
 // Container 依赖注入容器
 type Container struct {
-	services map[reflect.Type]interface{}
+	services map[reflect.Type]any
 	mutex    sync.RWMutex
 }
 
 // New 创建容器
 func New() *Container {
 	return &Container{
-		services: make(map[reflect.Type]interface{}),
+		services: make(map[reflect.Type]any),
 	}
 }
 
 // Register 注册服务
 // 注意：service 必须是指针类型，会自动提取元素类型作为key
-func (c *Container) Register(service interface{}) error {
+func (c *Container) Register(service any) error {
 	if service == nil {
 		return fmt.Errorf("service cannot be nil")
 	}
@@ -78,7 +78,7 @@ func (c *Container) Register(service interface{}) error {
 }
 
 // RegisterAs 注册服务并指定接口类型
-func (c *Container) RegisterAs(serviceType interface{}, service interface{}) error {
+func (c *Container) RegisterAs(serviceType any, service any) error {
 	if service == nil {
 		return fmt.Errorf("service cannot be nil")
 	}
@@ -93,7 +93,7 @@ func (c *Container) RegisterAs(serviceType interface{}, service interface{}) err
 }
 
 // Resolve 解析服务
-func (c *Container) Resolve(serviceType interface{}) (interface{}, error) {
+func (c *Container) Resolve(serviceType any) (any, error) {
 	c.mutex.RLock()
 	defer c.mutex.RUnlock()
 
@@ -107,7 +107,7 @@ func (c *Container) Resolve(serviceType interface{}) (interface{}, error) {
 }
 
 // MustResolve 解析服务（panic版本）
-func (c *Container) MustResolve(serviceType interface{}) interface{} {
+func (c *Container) MustResolve(serviceType any) any {
 	service, err := c.Resolve(serviceType)
 	if err != nil {
 		panic(err)
@@ -116,7 +116,7 @@ func (c *Container) MustResolve(serviceType interface{}) interface{} {
 }
 
 // Has 检查服务是否存在
-func (c *Container) Has(serviceType interface{}) bool {
+func (c *Container) Has(serviceType any) bool {
 	c.mutex.RLock()
 	defer c.mutex.RUnlock()
 
@@ -129,22 +129,22 @@ func (c *Container) Has(serviceType interface{}) bool {
 var globalContainer = New()
 
 // RegisterGlobal 注册到全局容器
-func RegisterGlobal(service interface{}) error {
+func RegisterGlobal(service any) error {
 	return globalContainer.Register(service)
 }
 
 // RegisterAsGlobal 注册到全局容器（指定接口）
-func RegisterAsGlobal(serviceType interface{}, service interface{}) error {
+func RegisterAsGlobal(serviceType any, service any) error {
 	return globalContainer.RegisterAs(serviceType, service)
 }
 
 // ResolveGlobal 从全局容器解析
-func ResolveGlobal(serviceType interface{}) (interface{}, error) {
+func ResolveGlobal(serviceType any) (any, error) {
 	return globalContainer.Resolve(serviceType)
 }
 
 // MustResolveGlobal 从全局容器解析（panic版本）
-func MustResolveGlobal(serviceType interface{}) interface{} {
+func MustResolveGlobal(serviceType any) any {
 	return globalContainer.MustResolve(serviceType)
 }
 
@@ -154,20 +154,20 @@ func MustResolveGlobal(serviceType interface{}) interface{} {
 // - RegisterTransient 等价于 RegisterSingleton（保持简单）
 // - constructor 的服务名取第一个返回值类型字符串
 type BasicContainer struct {
-	services  map[string]interface{}
-	instances map[string]interface{}
+	services  map[string]any
+	instances map[string]any
 	mutex     sync.RWMutex
 }
 
 // NewBasic 创建最简容器
 func NewBasic() *BasicContainer {
 	return &BasicContainer{
-		services:  make(map[string]interface{}),
-		instances: make(map[string]interface{}),
+		services:  make(map[string]any),
+		instances: make(map[string]any),
 	}
 }
 
-func (c *BasicContainer) RegisterConstructor(constructor interface{}) error {
+func (c *BasicContainer) RegisterConstructor(constructor any) error {
 	if constructor == nil {
 		return errors.NewError(errors.ErrCodeInvalidInput, "构造函数不能为空")
 	}
@@ -182,7 +182,7 @@ func (c *BasicContainer) RegisterConstructor(constructor interface{}) error {
 	return c.RegisterSingleton(name, constructor)
 }
 
-func (c *BasicContainer) RegisterSingleton(name string, factory interface{}) error {
+func (c *BasicContainer) RegisterSingleton(name string, factory any) error {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	if _, exists := c.services[name]; exists {
@@ -192,11 +192,11 @@ func (c *BasicContainer) RegisterSingleton(name string, factory interface{}) err
 	return nil
 }
 
-func (c *BasicContainer) RegisterTransient(name string, factory interface{}) error {
+func (c *BasicContainer) RegisterTransient(name string, factory any) error {
 	return c.RegisterSingleton(name, factory)
 }
 
-func (c *BasicContainer) RegisterInstance(name string, instance interface{}) error {
+func (c *BasicContainer) RegisterInstance(name string, instance any) error {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	if _, exists := c.services[name]; exists {
@@ -207,7 +207,7 @@ func (c *BasicContainer) RegisterInstance(name string, instance interface{}) err
 	return nil
 }
 
-func (c *BasicContainer) Resolve(name string) (interface{}, error) {
+func (c *BasicContainer) Resolve(name string) (any, error) {
 	c.mutex.RLock()
 	_, exists := c.services[name]
 	c.mutex.RUnlock()
@@ -238,7 +238,7 @@ func (c *BasicContainer) Resolve(name string) (interface{}, error) {
 	return inst, nil
 }
 
-func (c *BasicContainer) ResolveTo(name string, target interface{}) error {
+func (c *BasicContainer) ResolveTo(name string, target any) error {
 	inst, err := c.Resolve(name)
 	if err != nil {
 		return err
@@ -275,7 +275,7 @@ func (c *BasicContainer) GetRegisteredNames() []string {
 	return names
 }
 
-func (c *BasicContainer) Invoke(function interface{}) error {
+func (c *BasicContainer) Invoke(function any) error {
 	if function == nil {
 		return errors.NewError(errors.ErrCodeInvalidInput, "函数不能为空")
 	}
@@ -307,11 +307,11 @@ func (c *BasicContainer) Invoke(function interface{}) error {
 func (c *BasicContainer) Clear() {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	c.services = make(map[string]interface{})
-	c.instances = make(map[string]interface{})
+	c.services = make(map[string]any)
+	c.instances = make(map[string]any)
 }
 
-func (c *BasicContainer) createInstance(factory interface{}) (interface{}, error) {
+func (c *BasicContainer) createInstance(factory any) (any, error) {
 	fv := reflect.ValueOf(factory)
 	ft := fv.Type()
 	if ft.Kind() != reflect.Func {
@@ -338,7 +338,7 @@ func (c *BasicContainer) createInstance(factory interface{}) (interface{}, error
 	return results[0].Interface(), nil
 }
 
-func (c *BasicContainer) resolveParameter(paramType reflect.Type) (interface{}, error) {
+func (c *BasicContainer) resolveParameter(paramType reflect.Type) (any, error) {
 	// 先按完整类型名查找
 	if c.IsRegistered(paramType.String()) {
 		return c.Resolve(paramType.String())

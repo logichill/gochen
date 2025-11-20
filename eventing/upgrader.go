@@ -13,7 +13,7 @@ type EventUpgrader interface {
 	// ToVersion 目标模式版本
 	ToVersion() int
 	// Upgrade 将旧版本事件数据升级为新版本
-	Upgrade(data map[string]interface{}) (map[string]interface{}, error)
+	Upgrade(data map[string]any) (map[string]any, error)
 }
 
 type upgraderRegistry struct {
@@ -66,7 +66,7 @@ func MustRegisterEventUpgrader(eventType string, upgrader EventUpgrader) {
 }
 
 // UpgradeEventData 根据注册的升级器升级事件数据，返回升级后的数据与最终版本
-func UpgradeEventData(eventType string, currentVersion int, data map[string]interface{}) (map[string]interface{}, int, error) {
+func UpgradeEventData(eventType string, currentVersion int, data map[string]any) (map[string]any, int, error) {
 	targetVersion := GetEventSchemaVersion(eventType)
 	if targetVersion <= 0 {
 		targetVersion = 1
@@ -114,11 +114,11 @@ func findNextUpgrader(upgraders []EventUpgrader, fromVersion int) EventUpgrader 
 	return nil
 }
 
-func cloneMap(src map[string]interface{}) map[string]interface{} {
+func cloneMap(src map[string]any) map[string]any {
 	if src == nil {
-		return map[string]interface{}{}
+		return map[string]any{}
 	}
-	dst := make(map[string]interface{}, len(src))
+	dst := make(map[string]any, len(src))
 	for k, v := range src {
 		dst[k] = v
 	}

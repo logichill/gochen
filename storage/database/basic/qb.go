@@ -10,7 +10,7 @@ type SelectBuilder struct {
 	cols   []string
 	table  string
 	where  []string
-	args   []interface{}
+	args   []any
 	order  string
 	limit  int
 	offset int
@@ -25,7 +25,7 @@ func (b *SelectBuilder) Select(columns ...string) *SelectBuilder {
 	return b
 }
 func (b *SelectBuilder) From(table string) *SelectBuilder { b.table = table; return b }
-func (b *SelectBuilder) Where(cond string, args ...interface{}) *SelectBuilder {
+func (b *SelectBuilder) Where(cond string, args ...any) *SelectBuilder {
 	if cond != "" {
 		b.where = append(b.where, cond)
 		b.args = append(b.args, args...)
@@ -44,7 +44,7 @@ func (b *SelectBuilder) OrderBy(col string, desc bool) *SelectBuilder {
 func (b *SelectBuilder) Limit(n int) *SelectBuilder  { b.limit = n; return b }
 func (b *SelectBuilder) Offset(n int) *SelectBuilder { b.offset = n; return b }
 
-func (b *SelectBuilder) Build() (string, []interface{}) {
+func (b *SelectBuilder) Build() (string, []any) {
 	var sb strings.Builder
 	sb.WriteString("SELECT ")
 	sb.WriteString(strings.Join(b.cols, ","))

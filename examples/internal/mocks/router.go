@@ -72,11 +72,11 @@ func (r *MockRouter) Use(middlewares ...httpx.Middleware) httpx.IRouteGroup {
 	return r
 }
 
-func (r *MockRouter) RegisterRoute(method, path string, handler interface{}) {
+func (r *MockRouter) RegisterRoute(method, path string, handler any) {
 	// 简化实现
 }
 
-func (r *MockRouter) RegisterMiddleware(middleware interface{}) {
+func (r *MockRouter) RegisterMiddleware(middleware any) {
 	// 简化实现
 }
 
@@ -186,10 +186,10 @@ func (r *MockAdvancedRouter) Use(middlewares ...httpx.Middleware) httpx.IRouteGr
 	return r
 }
 
-func (r *MockAdvancedRouter) RegisterRoute(method, path string, handler interface{}) {
+func (r *MockAdvancedRouter) RegisterRoute(method, path string, handler any) {
 }
 
-func (r *MockAdvancedRouter) RegisterMiddleware(middleware interface{}) {
+func (r *MockAdvancedRouter) RegisterMiddleware(middleware any) {
 }
 
 // PrintRoutes 打印路由信息
@@ -298,10 +298,10 @@ func (r *MockRouterWithMiddleware) Use(middlewares ...httpx.Middleware) httpx.IR
 	return r
 }
 
-func (r *MockRouterWithMiddleware) RegisterRoute(method, path string, handler interface{}) {
+func (r *MockRouterWithMiddleware) RegisterRoute(method, path string, handler any) {
 }
 
-func (r *MockRouterWithMiddleware) RegisterMiddleware(middleware interface{}) {
+func (r *MockRouterWithMiddleware) RegisterMiddleware(middleware any) {
 }
 
 // PrintRoutes 打印路由信息

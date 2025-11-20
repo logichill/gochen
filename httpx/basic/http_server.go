@@ -131,22 +131,22 @@ func (s *HttpServer) Stop(ctx context.Context) error {
 }
 
 // 动态注册（兼容不同框架）
-func (s *HttpServer) RegisterRoute(method, path string, handler interface{}) {
+func (s *HttpServer) RegisterRoute(method, path string, handler any) {
 	if h, ok := handler.(httpx.HttpHandler); ok {
 		_ = s.addRoute(method, path, h)
 	}
 }
 func (s *HttpServer) RegisterGroup(prefix string) httpx.IRouteGroup { return s.Group(prefix) }
-func (s *HttpServer) RegisterGlobalMiddleware(middleware interface{}) {
+func (s *HttpServer) RegisterGlobalMiddleware(middleware any) {
 	if mw, ok := middleware.(httpx.Middleware); ok {
 		s.Use(mw)
 	}
 }
-func (s *HttpServer) RegisterMiddleware(path string, middleware interface{}) { /* 标准库不支持路径级中间件，忽略 */
+func (s *HttpServer) RegisterMiddleware(path string, middleware any) { /* 标准库不支持路径级中间件，忽略 */
 }
 
-func (s *HttpServer) HealthCheck() error  { return nil }
-func (s *HttpServer) GetRaw() interface{} { return s.mux }
+func (s *HttpServer) HealthCheck() error { return nil }
+func (s *HttpServer) GetRaw() any        { return s.mux }
 
 // 内部：注册全部路由
 func (s *HttpServer) registerRoutes() {
@@ -249,12 +249,12 @@ func (g *RouteGroup) Use(mw ...httpx.Middleware) httpx.IRouteGroup {
 	g.middlewares = append(g.middlewares, mw...)
 	return g
 }
-func (g *RouteGroup) RegisterRoute(method, path string, handler interface{}) {
+func (g *RouteGroup) RegisterRoute(method, path string, handler any) {
 	if h, ok := handler.(httpx.HttpHandler); ok {
 		_ = g.add(method, path, h)
 	}
 }
-func (g *RouteGroup) RegisterMiddleware(middleware interface{}) {
+func (g *RouteGroup) RegisterMiddleware(middleware any) {
 	if mw, ok := middleware.(httpx.Middleware); ok {
 		g.Use(mw)
 	}

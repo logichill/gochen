@@ -16,10 +16,10 @@ type IMessageHandler interface {
 
 // MessageResult 消息处理结果
 type MessageResult struct {
-	Success   bool                   `json:"success"`
-	MessageID string                 `json:"message_id"`
-	Result    interface{}            `json:"result,omitempty"`
-	Error     error                  `json:"error,omitempty"`
-	Metadata  map[string]interface{} `json:"metadata,omitempty"`
-	Duration  int64                  `json:"duration"` // 执行时间（毫秒）
+	Success   bool           `json:"success"`
+	MessageID string         `json:"message_id"`
+	Result    any            `json:"result,omitempty"`
+	Error     error          `json:"error,omitempty"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
+	Duration  int64          `json:"duration"` // 执行时间（毫秒）
 }

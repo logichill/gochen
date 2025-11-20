@@ -96,7 +96,7 @@ func TestInjectTraceContext(t *testing.T) {
 	ctx = WithCorrelationID(ctx, correlationID)
 	ctx = WithCausationID(ctx, causationID)
 
-	metadata := make(map[string]interface{})
+	metadata := make(map[string]any)
 	InjectTraceContext(ctx, metadata)
 
 	assert.Equal(t, correlationID, metadata["correlation_id"])
@@ -106,7 +106,7 @@ func TestInjectTraceContext(t *testing.T) {
 // TestInjectTraceContext_EmptyContext 测试空 context
 func TestInjectTraceContext_EmptyContext(t *testing.T) {
 	ctx := context.Background()
-	metadata := make(map[string]interface{})
+	metadata := make(map[string]any)
 
 	InjectTraceContext(ctx, metadata)
 
@@ -115,7 +115,7 @@ func TestInjectTraceContext_EmptyContext(t *testing.T) {
 
 // TestInjectTraceContext_NilContext 测试 nil context
 func TestInjectTraceContext_NilContext(t *testing.T) {
-	metadata := make(map[string]interface{})
+	metadata := make(map[string]any)
 	InjectTraceContext(nil, metadata)
 
 	assert.Empty(t, metadata)
@@ -129,7 +129,7 @@ func TestInjectTraceContext_NilMetadata(t *testing.T) {
 
 // TestExtractTraceContext 测试提取追踪上下文
 func TestExtractTraceContext(t *testing.T) {
-	metadata := map[string]interface{}{
+	metadata := map[string]any{
 		"correlation_id": "cor-123",
 		"causation_id":   "cau-456",
 	}
@@ -142,7 +142,7 @@ func TestExtractTraceContext(t *testing.T) {
 
 // TestExtractTraceContext_EmptyMetadata 测试空 metadata
 func TestExtractTraceContext_EmptyMetadata(t *testing.T) {
-	metadata := make(map[string]interface{})
+	metadata := make(map[string]any)
 	ctx := ExtractTraceContext(context.Background(), metadata)
 
 	assert.Empty(t, GetCorrelationID(ctx))
@@ -165,7 +165,7 @@ func TestRoundTrip(t *testing.T) {
 	ctx = WithCorrelationID(ctx, "cor-123")
 	ctx = WithCausationID(ctx, "cau-456")
 
-	metadata := make(map[string]interface{})
+	metadata := make(map[string]any)
 	InjectTraceContext(ctx, metadata)
 
 	// Metadata -> Context
@@ -199,7 +199,7 @@ func BenchmarkInjectTraceContext(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		metadata := make(map[string]interface{})
+		metadata := make(map[string]any)
 		InjectTraceContext(ctx, metadata)
 	}
 }

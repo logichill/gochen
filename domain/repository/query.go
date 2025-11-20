@@ -24,7 +24,7 @@ type QueryOptions struct {
 	IncludeDeleted bool
 
 	// Filters 过滤条件
-	Filters map[string]interface{}
+	Filters map[string]any
 }
 
 // IQueryableRepository 可查询仓储接口（扩展接口）

@@ -11,7 +11,7 @@ import (
 
 // TestNewCommand 测试命令创建
 func TestNewCommand(t *testing.T) {
-	payload := map[string]interface{}{"name": "test"}
+	payload := map[string]any{"name": "test"}
 	cmd := NewCommand("cmd-1", "CreateUser", 123, "User", payload)
 
 	assert.Equal(t, "cmd-1", cmd.GetID())
@@ -156,7 +156,7 @@ func TestTypedCommandHandler_InvalidPayloadType(t *testing.T) {
 
 // BenchmarkCommand_Creation 命令创建性能测试
 func BenchmarkCommand_Creation(b *testing.B) {
-	payload := map[string]interface{}{"name": "test"}
+	payload := map[string]any{"name": "test"}
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {

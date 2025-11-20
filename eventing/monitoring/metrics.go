@@ -216,10 +216,10 @@ func (m *Metrics) Reset() {
 }
 
 // ToMap 转换为map格式（便于JSON序列化）
-func (s MetricsSnapshot) ToMap() map[string]interface{} {
-	result := map[string]interface{}{
+func (s MetricsSnapshot) ToMap() map[string]any {
+	result := map[string]any{
 		"uptime_seconds": s.Uptime.Seconds(),
-		"event_store": map[string]interface{}{
+		"event_store": map[string]any{
 			"events_saved":         s.EventsSaved,
 			"events_loaded":        s.EventsLoaded,
 			"store_duration_ms":    s.EventStoreDuration.Milliseconds(),
@@ -229,7 +229,7 @@ func (s MetricsSnapshot) ToMap() map[string]interface{} {
 			"avg_load_duration_ms": avgDuration(s.EventLoadDuration, s.EventsLoaded),
 			"error_rate":           errorRate(s.EventStoreErrors, s.EventsSaved),
 		},
-		"snapshot": map[string]interface{}{
+		"snapshot": map[string]any{
 			"created":         s.SnapshotsCreated,
 			"loaded":          s.SnapshotsLoaded,
 			"hits":            s.SnapshotHits,
@@ -238,7 +238,7 @@ func (s MetricsSnapshot) ToMap() map[string]interface{} {
 			"hit_rate":        hitRate(s.SnapshotHits, s.SnapshotMisses),
 			"avg_duration_ms": avgDuration(s.SnapshotDuration, s.SnapshotsCreated+s.SnapshotsLoaded),
 		},
-		"event_processing": map[string]interface{}{
+		"event_processing": map[string]any{
 			"processed":          s.EventsProcessed,
 			"duration_ms":        s.EventProcessingTime.Milliseconds(),
 			"errors":             s.EventProcessingErrors,
@@ -246,13 +246,13 @@ func (s MetricsSnapshot) ToMap() map[string]interface{} {
 			"error_rate":         errorRate(s.EventProcessingErrors, s.EventsProcessed),
 			"throughput_per_sec": throughput(s.EventsProcessed, s.Uptime),
 		},
-		"projection": map[string]interface{}{
+		"projection": map[string]any{
 			"updates":    s.ProjectionUpdates,
 			"errors":     s.ProjectionErrors,
 			"lag_ms":     s.ProjectionLag.Milliseconds(),
 			"error_rate": errorRate(s.ProjectionErrors, s.ProjectionUpdates),
 		},
-		"cache": map[string]interface{}{
+		"cache": map[string]any{
 			"hits":      s.CacheHits,
 			"misses":    s.CacheMisses,
 			"evictions": s.CacheEvictions,

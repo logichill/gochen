@@ -11,7 +11,7 @@ type ID string
 // State 流程状态最小模型
 type State struct {
 	ID        ID
-	Data      map[string]interface{}
+	Data      map[string]any
 	UpdatedAt time.Time
 }
 
@@ -34,7 +34,7 @@ func NewManager(store Store) *Manager { return &Manager{store: store} }
 func (m *Manager) HandleCommand(ctx context.Context, instance ID, update func(st *State) error) error {
 	st, _ := m.store.Get(ctx, instance)
 	if st == nil {
-		st = &State{ID: instance, Data: map[string]interface{}{}, UpdatedAt: time.Now()}
+		st = &State{ID: instance, Data: map[string]any{}, UpdatedAt: time.Now()}
 	}
 	if err := update(st); err != nil {
 		return err

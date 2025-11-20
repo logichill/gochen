@@ -9,13 +9,13 @@ import (
 
 // AuditRecord 审计记录
 type AuditRecord struct {
-	ID        int64                  `json:"id"`
-	EntityID  string                 `json:"entity_id"`
-	Operation string                 `json:"operation"` // CREATE, UPDATE, DELETE, RESTORE
-	Operator  string                 `json:"operator"`
-	Timestamp time.Time              `json:"timestamp"`
-	Changes   map[string]interface{} `json:"changes"` // 字段变更详情
-	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+	ID        int64          `json:"id"`
+	EntityID  string         `json:"entity_id"`
+	Operation string         `json:"operation"` // CREATE, UPDATE, DELETE, RESTORE
+	Operator  string         `json:"operator"`
+	Timestamp time.Time      `json:"timestamp"`
+	Changes   map[string]any `json:"changes"` // 字段变更详情
+	Metadata  map[string]any `json:"metadata,omitempty"`
 }
 
 // IAuditedRepository 带审计的仓储接口

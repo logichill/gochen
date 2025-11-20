@@ -74,10 +74,10 @@ func ExtractTenantIDFromRequest(r *http.Request) string {
 //
 // 示例:
 //
-//	metadata := make(map[string]interface{})
+//	metadata := make(map[string]any)
 //	httpx.InjectTenantID(ctx, metadata)
 //	// metadata["tenant_id"] = "tenant-123"
-func InjectTenantID(ctx context.Context, metadata map[string]interface{}) {
+func InjectTenantID(ctx context.Context, metadata map[string]any) {
 	if ctx == nil || metadata == nil {
 		return
 	}
@@ -93,11 +93,11 @@ func InjectTenantID(ctx context.Context, metadata map[string]interface{}) {
 //
 // 示例:
 //
-//	metadata := map[string]interface{}{
+//	metadata := map[string]any{
 //	    "tenant_id": "tenant-123",
 //	}
 //	tenantID := httpx.ExtractTenantIDFromMetadata(metadata) // "tenant-123"
-func ExtractTenantIDFromMetadata(metadata map[string]interface{}) string {
+func ExtractTenantIDFromMetadata(metadata map[string]any) string {
 	if metadata == nil {
 		return ""
 	}
@@ -115,10 +115,10 @@ func ExtractTenantIDFromMetadata(metadata map[string]interface{}) string {
 //
 // 示例:
 //
-//	metadata := map[string]interface{}{"tenant_id": "tenant-123"}
+//	metadata := map[string]any{"tenant_id": "tenant-123"}
 //	ctx := httpx.WithTenantIDFromMetadata(context.Background(), metadata)
 //	tenantID := httpx.GetTenantID(ctx) // "tenant-123"
-func WithTenantIDFromMetadata(ctx context.Context, metadata map[string]interface{}) context.Context {
+func WithTenantIDFromMetadata(ctx context.Context, metadata map[string]any) context.Context {
 	if ctx == nil || metadata == nil {
 		return ctx
 	}

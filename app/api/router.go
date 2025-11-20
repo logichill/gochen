@@ -216,7 +216,7 @@ func (rb *RouteBuilder[T]) handleCreate(c core.IHttpContext) error {
 		return err
 	}
 
-	result := map[string]interface{}{
+	result := map[string]any{
 		"id": entity.GetID(),
 	}
 	wrappedData := rb.config.ResponseWrapper(result)

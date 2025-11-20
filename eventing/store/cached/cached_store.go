@@ -313,7 +313,7 @@ func (s *CachedEventStore) ClearCache() {
 }
 
 // GetCacheStats 获取缓存统计信息
-func (s *CachedEventStore) GetCacheStats() map[string]interface{} {
+func (s *CachedEventStore) GetCacheStats() map[string]any {
 	s.stats.mutex.RLock()
 	defer s.stats.mutex.RUnlock()
 
@@ -327,7 +327,7 @@ func (s *CachedEventStore) GetCacheStats() map[string]interface{} {
 		hitRate = float64(s.stats.Hits) / float64(totalRequests) * 100
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"hits":          s.stats.Hits,
 		"misses":        s.stats.Misses,
 		"hit_rate":      fmt.Sprintf("%.2f%%", hitRate),

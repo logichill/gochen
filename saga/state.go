@@ -60,7 +60,7 @@ type SagaState struct {
 	Error string `json:"error,omitempty" db:"error"`
 
 	// Data 自定义数据（JSON 格式）
-	Data map[string]interface{} `json:"data,omitempty" db:"data"`
+	Data map[string]any `json:"data,omitempty" db:"data"`
 
 	// CreatedAt 创建时间
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
@@ -85,7 +85,7 @@ func NewSagaState(sagaID, sagaType string) *SagaState {
 		CurrentStep:    0,
 		Status:         SagaStatusPending,
 		CompletedSteps: []string{},
-		Data:           make(map[string]interface{}),
+		Data:           make(map[string]any),
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
@@ -161,9 +161,9 @@ func (s *SagaState) IsRunning() bool {
 // 参数：
 //   - key: 键
 //   - value: 值
-func (s *SagaState) SetData(key string, value interface{}) {
+func (s *SagaState) SetData(key string, value any) {
 	if s.Data == nil {
-		s.Data = make(map[string]interface{})
+		s.Data = make(map[string]any)
 	}
 	s.Data[key] = value
 	s.UpdatedAt = time.Now()
@@ -175,9 +175,9 @@ func (s *SagaState) SetData(key string, value interface{}) {
 //   - key: 键
 //
 // 返回：
-//   - interface{}: 值
+//   - any: 值
 //   - bool: 是否存在
-func (s *SagaState) GetData(key string) (interface{}, bool) {
+func (s *SagaState) GetData(key string) (any, bool) {
 	if s.Data == nil {
 		return nil, false
 	}
@@ -207,7 +207,7 @@ func (s *SagaState) Clone() *SagaState {
 
 	// 克隆 Data
 	if s.Data != nil {
-		clone.Data = make(map[string]interface{})
+		clone.Data = make(map[string]any)
 		for k, v := range s.Data {
 			clone.Data[k] = v
 		}

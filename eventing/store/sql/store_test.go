@@ -39,9 +39,9 @@ func setupTestDB(t *testing.T) database.IDatabase {
 	return db
 }
 
-func makeEvent(aggregateID int64, aggregateType, id string, version uint64, payload map[string]interface{}) eventing.Event {
+func makeEvent(aggregateID int64, aggregateType, id string, version uint64, payload map[string]any) eventing.Event {
 	if payload == nil {
-		payload = make(map[string]interface{})
+		payload = make(map[string]any)
 	}
 	e := eventing.NewEvent(aggregateID, aggregateType, "TestEvent", version, payload)
 	e.ID = id
@@ -65,8 +65,8 @@ func TestSQLEventStore_AppendEvents(t *testing.T) {
 	aggregateID := int64(123)
 
 	events := []eventing.Event{
-		makeEvent(aggregateID, "TestAggregate", "event-1", 1, map[string]interface{}{"value": 100}),
-		makeEvent(aggregateID, "TestAggregate", "event-2", 2, map[string]interface{}{"value": 200}),
+		makeEvent(aggregateID, "TestAggregate", "event-1", 1, map[string]any{"value": 100}),
+		makeEvent(aggregateID, "TestAggregate", "event-2", 2, map[string]any{"value": 200}),
 	}
 
 	err := store.AppendEvents(ctx, aggregateID, toStorableEvents(events), 0)
@@ -366,14 +366,14 @@ func TestSQLEventStore_ComplexPayload(t *testing.T) {
 	aggregateID := int64(800)
 
 	// 复杂载荷
-	payload := map[string]interface{}{
-		"user": map[string]interface{}{
+	payload := map[string]any{
+		"user": map[string]any{
 			"id":   123,
 			"name": "Alice",
 		},
-		"items": []interface{}{
-			map[string]interface{}{"id": 1, "qty": 5},
-			map[string]interface{}{"id": 2, "qty": 3},
+		"items": []any{
+			map[string]any{"id": 1, "qty": 5},
+			map[string]any{"id": 2, "qty": 3},
 		},
 		"total": 99.99,
 	}
@@ -388,7 +388,7 @@ func TestSQLEventStore_ComplexPayload(t *testing.T) {
 	assert.Len(t, loaded, 1)
 	assert.NotNil(t, loaded[0].Payload)
 
-	payloadMap, ok := loaded[0].Payload.(map[string]interface{})
+	payloadMap, ok := loaded[0].Payload.(map[string]any)
 	assert.True(t, ok)
 	assert.Equal(t, 99.99, payloadMap["total"])
 }

@@ -332,7 +332,7 @@ func TestProjectionEventHandler_ShouldProcessOnlyWhenRunning(t *testing.T) {
 			ID:        "event-1",
 			Type:      "TestEvent",
 			Timestamp: time.Now(),
-			Metadata:  make(map[string]interface{}),
+			Metadata:  make(map[string]any),
 		},
 	}
 

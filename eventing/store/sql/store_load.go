@@ -57,7 +57,7 @@ func (s *SQLEventStore) StreamAggregate(ctx context.Context, opts *store.Aggrega
 
 	// 构建查询：按版本升序读取指定聚合的事件，限制条数
 	base := fmt.Sprintf("SELECT id, type, aggregate_id, aggregate_type, version, schema_version, timestamp, payload, metadata FROM %s WHERE aggregate_id = ?", s.tableName)
-	args := []interface{}{opts.AggregateID}
+	args := []any{opts.AggregateID}
 	if opts.AggregateType != "" {
 		base += " AND aggregate_type = ?"
 		args = append(args, opts.AggregateType)
@@ -92,7 +92,7 @@ func (s *SQLEventStore) StreamAggregate(ctx context.Context, opts *store.Aggrega
 
 type rowScanner interface {
 	Next() bool
-	Scan(dest ...interface{}) error
+	Scan(dest ...any) error
 	Close() error
 }
 
@@ -112,11 +112,11 @@ func (s *SQLEventStore) scanEvents(rows rowScanner) ([]eventing.Event, error) {
 		if err := rows.Scan(&id, &typ, &aggID, &aggType, &ver, &schema, &ts, &payloadJSON, &metadataJSON); err != nil {
 			return nil, err
 		}
-		var payload map[string]interface{}
+		var payload map[string]any
 		if payloadJSON != "" {
 			_ = json.Unmarshal([]byte(payloadJSON), &payload)
 		}
-		var metadata map[string]interface{}
+		var metadata map[string]any
 		if metadataJSON != "" {
 			_ = json.Unmarshal([]byte(metadataJSON), &metadata)
 		}

@@ -79,8 +79,8 @@ type Config struct {
 	EnableStats bool
 
 	// OnEvict 驱逐回调（可选）
-	// 使用 interface{} 以支持不同的键值类型
-	OnEvict func(key, value interface{})
+	// 使用 any 以支持不同的键值类型
+	OnEvict func(key, value any)
 }
 
 // CacheStats 缓存统计信息

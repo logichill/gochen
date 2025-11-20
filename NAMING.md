@@ -295,13 +295,13 @@ import "gochen/util"    // ❌ 太泛化
 type UserID int64
 func GetByID(id int64) (*User, error)
 func ParseURL(rawURL string) (*URL, error)
-func ToJSON(v interface{}) ([]byte, error)
+func ToJSON(v any) ([]byte, error)
 
 // ❌ 错误
 type UserId int64
 func GetById(id int64) (*User, error)
 func ParseUrl(rawUrl string) (*URL, error)
-func ToJson(v interface{}) ([]byte, error)
+func ToJson(v any) ([]byte, error)
 ```
 
 ### 规则 14: 多个缩写连用时保持一致

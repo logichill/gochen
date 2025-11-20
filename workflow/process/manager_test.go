@@ -2,8 +2,9 @@ package process
 
 import (
 	"context"
-	"github.com/stretchr/testify/require"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestManager_HandleCommand_WithMemoryStore(t *testing.T) {
@@ -14,7 +15,7 @@ func TestManager_HandleCommand_WithMemoryStore(t *testing.T) {
 
 	err := mgr.HandleCommand(ctx, id, func(st *State) error {
 		if st.Data == nil {
-			st.Data = map[string]interface{}{}
+			st.Data = map[string]any{}
 		}
 		st.Data["step"] = "debit_done"
 		return nil

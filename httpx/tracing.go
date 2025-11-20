@@ -90,11 +90,11 @@ func GenerateCausationID() string {
 //
 // 示例:
 //
-//	metadata := make(map[string]interface{})
+//	metadata := make(map[string]any)
 //	httpx.InjectTraceContext(ctx, metadata)
 //	// metadata["correlation_id"] = "cor-123"
 //	// metadata["causation_id"] = "cau-456"
-func InjectTraceContext(ctx context.Context, metadata map[string]interface{}) {
+func InjectTraceContext(ctx context.Context, metadata map[string]any) {
 	if ctx == nil || metadata == nil {
 		return
 	}
@@ -115,12 +115,12 @@ func InjectTraceContext(ctx context.Context, metadata map[string]interface{}) {
 //
 // 示例:
 //
-//	metadata := map[string]interface{}{
+//	metadata := map[string]any{
 //	    "correlation_id": "cor-123",
 //	    "causation_id": "cau-456",
 //	}
 //	ctx := httpx.ExtractTraceContext(context.Background(), metadata)
-func ExtractTraceContext(ctx context.Context, metadata map[string]interface{}) context.Context {
+func ExtractTraceContext(ctx context.Context, metadata map[string]any) context.Context {
 	if ctx == nil || metadata == nil {
 		return ctx
 	}

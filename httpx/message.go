@@ -13,13 +13,13 @@ const (
 )
 
 type Message struct {
-	Code int         `json:"code"`
-	Msg  string      `json:"msg"`
-	Data interface{} `json:"data"`
-	Time time.Time   `json:"time"`
+	Code int       `json:"code"`
+	Msg  string    `json:"msg"`
+	Data any       `json:"data"`
+	Time time.Time `json:"time"`
 }
 
-func SuccessMessage(data interface{}) *Message {
+func SuccessMessage(data any) *Message {
 	return &Message{
 		Code: OK,
 		Data: data,

@@ -42,16 +42,16 @@ type Logger interface {
 	ErrorWithError(ctx context.Context, err error, msg string, fields ...Field)
 
 	// 格式化日志方法（用于兼容旧代码）
-	Debugf(ctx context.Context, format string, args ...interface{})
-	Infof(ctx context.Context, format string, args ...interface{})
-	Warnf(ctx context.Context, format string, args ...interface{})
-	Errorf(ctx context.Context, format string, args ...interface{})
+	Debugf(ctx context.Context, format string, args ...any)
+	Infof(ctx context.Context, format string, args ...any)
+	Warnf(ctx context.Context, format string, args ...any)
+	Errorf(ctx context.Context, format string, args ...any)
 }
 
 // Field 日志字段
 type Field struct {
 	Key   string
-	Value interface{}
+	Value any
 }
 
 // 字段构造函数
@@ -79,7 +79,7 @@ func Bool(key string, value bool) Field {
 	return Field{Key: key, Value: value}
 }
 
-func Any(key string, value interface{}) Field {
+func Any(key string, value any) Field {
 	return Field{Key: key, Value: value}
 }
 
@@ -115,7 +115,7 @@ func (l *StdLogger) format(msg string, fields ...Field) string {
 	return result
 }
 
-func formatValue(v interface{}) string {
+func formatValue(v any) string {
 	switch val := v.(type) {
 	case string:
 		return val
@@ -174,19 +174,19 @@ func (l *StdLogger) ErrorWithError(ctx context.Context, err error, msg string, f
 }
 
 // 格式化日志方法实现
-func (l *StdLogger) Debugf(ctx context.Context, format string, args ...interface{}) {
+func (l *StdLogger) Debugf(ctx context.Context, format string, args ...any) {
 	l.Debug(ctx, fmt.Sprintf(format, args...))
 }
 
-func (l *StdLogger) Infof(ctx context.Context, format string, args ...interface{}) {
+func (l *StdLogger) Infof(ctx context.Context, format string, args ...any) {
 	l.Info(ctx, fmt.Sprintf(format, args...))
 }
 
-func (l *StdLogger) Warnf(ctx context.Context, format string, args ...interface{}) {
+func (l *StdLogger) Warnf(ctx context.Context, format string, args ...any) {
 	l.Warn(ctx, fmt.Sprintf(format, args...))
 }
 
-func (l *StdLogger) Errorf(ctx context.Context, format string, args ...interface{}) {
+func (l *StdLogger) Errorf(ctx context.Context, format string, args ...any) {
 	l.Error(ctx, fmt.Sprintf(format, args...))
 }
 
@@ -210,10 +210,10 @@ func (l *NoopLogger) WarnWithError(ctx context.Context, err error, msg string, f
 func (l *NoopLogger) ErrorWithError(ctx context.Context, err error, msg string, fields ...Field) {}
 
 // 格式化日志方法（空实现）
-func (l *NoopLogger) Debugf(ctx context.Context, format string, args ...interface{}) {}
-func (l *NoopLogger) Infof(ctx context.Context, format string, args ...interface{})  {}
-func (l *NoopLogger) Warnf(ctx context.Context, format string, args ...interface{})  {}
-func (l *NoopLogger) Errorf(ctx context.Context, format string, args ...interface{}) {}
+func (l *NoopLogger) Debugf(ctx context.Context, format string, args ...any) {}
+func (l *NoopLogger) Infof(ctx context.Context, format string, args ...any)  {}
+func (l *NoopLogger) Warnf(ctx context.Context, format string, args ...any)  {}
+func (l *NoopLogger) Errorf(ctx context.Context, format string, args ...any) {}
 
 // 全局Logger
 var globalLogger Logger = NewStdLogger("")

@@ -81,7 +81,7 @@ type Manager struct {
 // NewManager 创建投影管理器
 //
 // Deprecated: 请改用 NewProjectionManager 或 NewProjectionManagerWithConfig。
-func NewManager(eventStore store.IEventStore, config interface{}) *Manager
+func NewManager(eventStore store.IEventStore, config any) *Manager
 ```
 
 新代码应优先使用 `ProjectionManager`，旧 `Manager` 仅为向后兼容保留。
@@ -137,7 +137,7 @@ func (p *UserViewProjection) handleUserCreated(ctx context.Context, e *UserCreat
 
 func (p *UserViewProjection) handleUserUpdated(ctx context.Context, e *UserUpdated) error {
     return p.db.Update(ctx, "user_views", 
-        map[string]interface{}{
+        map[string]any{
             "name":       e.Name,
             "email":      e.Email,
             "updated_at": e.GetTimestamp(),
@@ -193,7 +193,7 @@ func (r *UserViewRepository) GetByID(ctx context.Context, id int64) (*UserView, 
 
 func (r *UserViewRepository) List(ctx context.Context, opts *QueryOptions) ([]*UserView, error) {
     query := "SELECT * FROM user_views WHERE 1=1"
-    args := []interface{}{}
+    args := []any{}
     
     // 应用过滤
     if opts.Status != "" {

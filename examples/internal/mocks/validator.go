@@ -19,7 +19,7 @@ func NewGenericValidator[T entity.IEntity[int64]](validateFunc func(T) error) *G
 	}
 }
 
-func (v *GenericValidator[T]) Validate(entity interface{}) error {
+func (v *GenericValidator[T]) Validate(entity any) error {
 	if typedEntity, ok := entity.(T); ok {
 		return v.validateFunc(typedEntity)
 	}
@@ -28,24 +28,24 @@ func (v *GenericValidator[T]) Validate(entity interface{}) error {
 
 // SimpleEntityValidator 简单实体验证器
 type SimpleEntityValidator struct {
-	validateFunc func(interface{}) error
+	validateFunc func(any) error
 }
 
 // NewSimpleEntityValidator 创建简单实体验证器
-func NewSimpleEntityValidator(validateFunc func(interface{}) error) *SimpleEntityValidator {
+func NewSimpleEntityValidator(validateFunc func(any) error) *SimpleEntityValidator {
 	return &SimpleEntityValidator{
 		validateFunc: validateFunc,
 	}
 }
 
-func (v *SimpleEntityValidator) Validate(entity interface{}) error {
+func (v *SimpleEntityValidator) Validate(entity any) error {
 	return v.validateFunc(entity)
 }
 
 // noopValidator 一个什么都不做的验证器，实现 validation.IValidator
 type noopValidator struct{}
 
-func (n *noopValidator) Validate(interface{}) error { return nil }
+func (n *noopValidator) Validate(any) error { return nil }
 
 // NewNoopValidator 返回一个总是通过的验证器，便于示例快速接线
 func NewNoopValidator() validation.IValidator { return &noopValidator{} }

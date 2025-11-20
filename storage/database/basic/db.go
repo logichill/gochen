@@ -59,7 +59,7 @@ func New(config core.DBConfig) (core.IDatabase, error) {
 	return &DB{db: db, driver: driver}, nil
 }
 
-func (d *DB) Query(ctx context.Context, query string, args ...interface{}) (core.IRows, error) {
+func (d *DB) Query(ctx context.Context, query string, args ...any) (core.IRows, error) {
 	dial := dialect.New(d.driver)
 	q := dial.Rebind(query)
 	rows, err := d.db.QueryContext(ctx, q, args...)
@@ -69,13 +69,13 @@ func (d *DB) Query(ctx context.Context, query string, args ...interface{}) (core
 	return &Rows{rows: rows}, nil
 }
 
-func (d *DB) QueryRow(ctx context.Context, query string, args ...interface{}) core.IRow {
+func (d *DB) QueryRow(ctx context.Context, query string, args ...any) core.IRow {
 	dial := dialect.New(d.driver)
 	q := dial.Rebind(query)
 	return &Row{row: d.db.QueryRowContext(ctx, q, args...)}
 }
 
-func (d *DB) Exec(ctx context.Context, query string, args ...interface{}) (sql.Result, error) {
+func (d *DB) Exec(ctx context.Context, query string, args ...any) (sql.Result, error) {
 	dial := dialect.New(d.driver)
 	q := dial.Rebind(query)
 	return d.db.ExecContext(ctx, q, args...)
@@ -99,7 +99,7 @@ func (d *DB) BeginTx(ctx context.Context, opts *sql.TxOptions) (core.ITransactio
 
 func (d *DB) Ping(ctx context.Context) error { return d.db.PingContext(ctx) }
 func (d *DB) Close() error                   { return d.db.Close() }
-func (d *DB) Raw() interface{}               { return d.db }
+func (d *DB) Raw() any                       { return d.db }
 
 // GetDialectName 实现 core.DialectNameProvider 接口，返回底层 driver 名
 func (d *DB) GetDialectName() string {

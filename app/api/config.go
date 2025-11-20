@@ -21,7 +21,7 @@ type RouteConfig struct {
 	EnablePagination bool
 
 	// 自定义验证器
-	Validator func(interface{}) error
+	Validator func(any) error
 
 	// 自定义错误处理器
 	ErrorHandler func(error) core.IResponse
@@ -45,7 +45,7 @@ type RouteConfig struct {
 	Middlewares []core.Middleware
 
 	// 响应包装器
-	ResponseWrapper func(data interface{}) interface{}
+	ResponseWrapper func(data any) any
 }
 
 // CORSConfig CORS 配置
@@ -108,8 +108,8 @@ func DefaultErrorHandler(err error) core.IResponse {
 }
 
 // DefaultResponseWrapper 默认响应包装器
-func DefaultResponseWrapper(data interface{}) interface{} {
-	return map[string]interface{}{
+func DefaultResponseWrapper(data any) any {
+	return map[string]any{
 		"code":    0,
 		"message": "success",
 		"data":    data,

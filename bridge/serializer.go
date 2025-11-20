@@ -84,7 +84,7 @@ func (s *JSONSerializer) SerializeEvent(event eventing.IEvent) ([]byte, error) {
 	}
 
 	// 否则，创建简化的事件结构
-	simplified := map[string]interface{}{
+	simplified := map[string]any{
 		"id":             event.GetID(),
 		"type":           event.GetType(),
 		"aggregate_id":   event.GetAggregateID(),

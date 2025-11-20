@@ -60,7 +60,7 @@ func NewApiBuilder[T entity.IEntity[int64]](
 ) *ApiBuilder[T] {
 	routeCfg := DefaultRouteConfig()
 	if validator != nil && routeCfg.Validator == nil {
-		routeCfg.Validator = func(value interface{}) error {
+		routeCfg.Validator = func(value any) error {
 			return validator.Validate(value)
 		}
 	}
@@ -173,7 +173,7 @@ func WithPagination[T entity.IEntity[int64]](defaultSize, maxSize int) func(*Api
 	}
 }
 
-func WithCustomValidator[T entity.IEntity[int64]](validator func(interface{}) error) func(*ApiBuilder[T]) {
+func WithCustomValidator[T entity.IEntity[int64]](validator func(any) error) func(*ApiBuilder[T]) {
 	return func(rb *ApiBuilder[T]) {
 		rb.Route(func(config *RouteConfig) {
 			config.Validator = validator

@@ -74,7 +74,7 @@ func (s *TracingEventStore) injectTraceContext(ctx context.Context, event IStora
 	// 注入到事件的 Metadata
 	if e, ok := event.(*Event); ok {
 		if e.Metadata == nil {
-			e.Metadata = make(map[string]interface{})
+			e.Metadata = make(map[string]any)
 		}
 		if correlationID != "" {
 			e.Metadata["correlation_id"] = correlationID

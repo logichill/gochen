@@ -50,7 +50,7 @@ type IError interface {
 	Cause() error
 
 	// 获取错误详情
-	Details() map[string]interface{}
+	Details() map[string]any
 
 	// 获取堆栈信息
 	Stack() string
@@ -62,10 +62,10 @@ type IError interface {
 	Wrap(msg string) IError
 
 	// 添加详情
-	WithDetails(details map[string]interface{}) IError
+	WithDetails(details map[string]any) IError
 
 	// 添加上下文
-	WithContext(key string, value interface{}) IError
+	WithContext(key string, value any) IError
 }
 
 // AppError 应用错误实现
@@ -73,7 +73,7 @@ type AppError struct {
 	code    ErrorCode
 	message string
 	cause   error
-	details map[string]interface{}
+	details map[string]any
 	stack   string
 }
 
@@ -82,7 +82,7 @@ func NewError(code ErrorCode, message string) IError {
 	return &AppError{
 		code:    code,
 		message: message,
-		details: make(map[string]interface{}),
+		details: make(map[string]any),
 		stack:   captureStack(),
 	}
 }
@@ -93,7 +93,7 @@ func NewErrorWithCause(code ErrorCode, message string, cause error) IError {
 		code:    code,
 		message: message,
 		cause:   cause,
-		details: make(map[string]interface{}),
+		details: make(map[string]any),
 		stack:   captureStack(),
 	}
 }
@@ -108,7 +108,7 @@ func WrapError(err error, code ErrorCode, message string) IError {
 		code:    code,
 		message: message,
 		cause:   err,
-		details: make(map[string]interface{}),
+		details: make(map[string]any),
 		stack:   captureStack(),
 	}
 }
@@ -137,9 +137,9 @@ func (e *AppError) Cause() error {
 }
 
 // Details 获取错误详情
-func (e *AppError) Details() map[string]interface{} {
+func (e *AppError) Details() map[string]any {
 	if e.details == nil {
-		e.details = make(map[string]interface{})
+		e.details = make(map[string]any)
 	}
 	return e.details
 }
@@ -183,7 +183,7 @@ func (e *AppError) Wrap(msg string) IError {
 }
 
 // WithDetails 添加详情
-func (e *AppError) WithDetails(details map[string]interface{}) IError {
+func (e *AppError) WithDetails(details map[string]any) IError {
 	newDetails := copyMap(e.details)
 	for k, v := range details {
 		newDetails[k] = v
@@ -199,7 +199,7 @@ func (e *AppError) WithDetails(details map[string]interface{}) IError {
 }
 
 // WithContext 添加上下文
-func (e *AppError) WithContext(key string, value interface{}) IError {
+func (e *AppError) WithContext(key string, value any) IError {
 	newDetails := copyMap(e.details)
 	newDetails[key] = value
 
@@ -296,12 +296,12 @@ func captureStack() string {
 }
 
 // copyMap 复制映射
-func copyMap(original map[string]interface{}) map[string]interface{} {
+func copyMap(original map[string]any) map[string]any {
 	if original == nil {
-		return make(map[string]interface{})
+		return make(map[string]any)
 	}
 
-	copied := make(map[string]interface{}, len(original))
+	copied := make(map[string]any, len(original))
 	for k, v := range original {
 		copied[k] = v
 	}

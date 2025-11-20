@@ -16,14 +16,14 @@ type mockValidator struct {
 	shouldFail bool
 }
 
-func (v *mockValidator) Struct(s interface{}) error {
+func (v *mockValidator) Struct(s any) error {
 	if v.shouldFail {
 		return errors.New("validation failed")
 	}
 	return nil
 }
 
-func (v *mockValidator) Var(field interface{}, tag string) error {
+func (v *mockValidator) Var(field any, tag string) error {
 	return nil
 }
 
@@ -38,7 +38,7 @@ func TestValidationMiddleware_Success(t *testing.T) {
 		return nil
 	}
 
-	payload := map[string]interface{}{"name": "test"}
+	payload := map[string]any{"name": "test"}
 	cmd := command.NewCommand("cmd-1", "CreateUser", 1, "User", payload)
 
 	err := middleware.Handle(context.Background(), cmd, next)
@@ -58,7 +58,7 @@ func TestValidationMiddleware_Failure(t *testing.T) {
 		return nil
 	}
 
-	payload := map[string]interface{}{"name": "test"}
+	payload := map[string]any{"name": "test"}
 	cmd := command.NewCommand("cmd-1", "CreateUser", 1, "User", payload)
 
 	err := middleware.Handle(context.Background(), cmd, next)

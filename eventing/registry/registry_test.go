@@ -10,7 +10,7 @@ type sampleEvent struct {
 
 func TestRegistry_RegisterAndDeserialize(t *testing.T) {
 	r := NewRegistry()
-	if err := r.RegisterWithVersion("TestEvent", 2, func() interface{} { return &sampleEvent{} }); err != nil {
+	if err := r.RegisterWithVersion("TestEvent", 2, func() any { return &sampleEvent{} }); err != nil {
 		t.Fatalf("register: %v", err)
 	}
 	if !r.HasEvent("TestEvent") {
@@ -20,7 +20,7 @@ func TestRegistry_RegisterAndDeserialize(t *testing.T) {
 		t.Fatalf("unexpected schema version: %d", got)
 	}
 
-	payload := map[string]interface{}{"name": "demo"}
+	payload := map[string]any{"name": "demo"}
 	typed, err := r.DeserializeFromMap("TestEvent", payload)
 	if err != nil {
 		t.Fatalf("deserialize: %v", err)

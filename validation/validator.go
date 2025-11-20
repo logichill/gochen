@@ -15,14 +15,14 @@ var (
 
 // IValidator 定义通用验证器接口
 type IValidator interface {
-	Validate(value interface{}) error
+	Validate(value any) error
 }
 
 // NoopValidator 默认验证器，实现为空操作
 type NoopValidator struct{}
 
 // Validate 实现 IValidator 接口
-func (NoopValidator) Validate(value interface{}) error {
+func (NoopValidator) Validate(value any) error {
 	return nil
 }
 

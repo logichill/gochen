@@ -95,8 +95,8 @@ func (sm *Manager) CreateSnapshot(ctx context.Context, aggregateID int64, aggreg
 		return nil
 	}
 	start := time.Now()
-	var snapshotData interface{} = data
-	if lightweight, ok := data.(interface{ GetSnapshotData() interface{} }); ok {
+	var snapshotData any = data
+	if lightweight, ok := data.(interface{ GetSnapshotData() any }); ok {
 		snapshotData = lightweight.GetSnapshotData()
 		snapshotLogger.Debug(ctx, "[SnapshotManager] 使用轻量快照",
 			logging.Int64("aggregate_id", aggregateID), logging.String("aggregate_type", aggregateType))
@@ -126,8 +126,8 @@ func (sm *Manager) LoadSnapshot(ctx context.Context, aggregateID int64, target a
 		eventing.GlobalMetrics().RecordSnapshotLoaded(time.Since(start), false)
 		return nil, err
 	}
-	if restorer, ok := target.(interface{ RestoreFromSnapshotData(data interface{}) error }); ok {
-		var snapshotData interface{}
+	if restorer, ok := target.(interface{ RestoreFromSnapshotData(data any) error }); ok {
+		var snapshotData any
 		if err := json.Unmarshal(snapshot.Data, &snapshotData); err != nil {
 			eventing.GlobalMetrics().RecordSnapshotLoaded(time.Since(start), false)
 			return nil, fmt.Errorf("failed to deserialize lightweight snapshot data: %w", err)

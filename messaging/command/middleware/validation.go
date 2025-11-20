@@ -13,7 +13,7 @@ import (
 // 定义最小化的验证接口，第三方可以实现自己的验证器
 type IValidator interface {
 	// Struct 验证结构体
-	Struct(s interface{}) error
+	Struct(s any) error
 }
 
 // ValidationMiddleware 命令验证中间件

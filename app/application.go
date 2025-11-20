@@ -201,7 +201,7 @@ func (s *Application[T]) ListByQuery(ctx context.Context, query *QueryParams) ([
 
 	// 构建查询选项
 	options := &repo.QueryOptions{
-		Filters: make(map[string]interface{}),
+		Filters: make(map[string]any),
 	}
 
 	// 转换过滤条件
@@ -252,7 +252,7 @@ func (s *Application[T]) ListPage(ctx context.Context, options *PaginationOption
 	queryOpts := &repo.QueryOptions{
 		Offset:  (options.Page - 1) * options.Size,
 		Limit:   options.Size,
-		Filters: make(map[string]interface{}),
+		Filters: make(map[string]any),
 	}
 
 	// 转换过滤条件
@@ -326,7 +326,7 @@ func (s *Application[T]) CountByQuery(ctx context.Context, query *QueryParams) (
 
 	// 构建查询选项
 	options := &repo.QueryOptions{
-		Filters: make(map[string]interface{}),
+		Filters: make(map[string]any),
 	}
 
 	// 转换过滤条件

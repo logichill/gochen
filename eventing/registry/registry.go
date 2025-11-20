@@ -9,7 +9,7 @@ import (
 )
 
 // EventFactory 事件工厂函数
-type EventFactory func() interface{}
+type EventFactory func() any
 
 // Registry 事件注册表
 type Registry struct {
@@ -87,7 +87,7 @@ func (r *Registry) Unregister(eventType string) {
 }
 
 // Deserialize 通过注册表反序列化事件数据
-func (r *Registry) Deserialize(eventType string, data []byte) (interface{}, error) {
+func (r *Registry) Deserialize(eventType string, data []byte) (any, error) {
 	r.mutex.RLock()
 	factory, exists := r.factories[eventType]
 	r.mutex.RUnlock()
@@ -104,7 +104,7 @@ func (r *Registry) Deserialize(eventType string, data []byte) (interface{}, erro
 }
 
 // DeserializeFromMap 将 map 数据转换为强类型事件
-func (r *Registry) DeserializeFromMap(eventType string, data map[string]interface{}) (interface{}, error) {
+func (r *Registry) DeserializeFromMap(eventType string, data map[string]any) (any, error) {
 	if data == nil {
 		return nil, fmt.Errorf("event data map cannot be nil")
 	}
@@ -170,12 +170,12 @@ func MustRegisterGlobalWithVersion(eventType string, schemaVersion int, factory 
 }
 
 // DeserializeGlobal 通过全局注册表反序列化
-func DeserializeGlobal(eventType string, data []byte) (interface{}, error) {
+func DeserializeGlobal(eventType string, data []byte) (any, error) {
 	return globalRegistry.Deserialize(eventType, data)
 }
 
 // DeserializeMapGlobal 通过全局注册表从 map 反序列化
-func DeserializeMapGlobal(eventType string, data map[string]interface{}) (interface{}, error) {
+func DeserializeMapGlobal(eventType string, data map[string]any) (any, error) {
 	return globalRegistry.DeserializeFromMap(eventType, data)
 }
 
@@ -212,11 +212,11 @@ func MustRegisterEventTypeWithVersion(eventType string, schemaVersion int, facto
 	MustRegisterGlobalWithVersion(eventType, schemaVersion, factory)
 }
 
-func DeserializeEvent(eventType string, data []byte) (interface{}, error) {
+func DeserializeEvent(eventType string, data []byte) (any, error) {
 	return DeserializeGlobal(eventType, data)
 }
 
-func DeserializeEventFromMap(eventType string, data map[string]interface{}) (interface{}, error) {
+func DeserializeEventFromMap(eventType string, data map[string]any) (any, error) {
 	return DeserializeMapGlobal(eventType, data)
 }
 
