@@ -38,13 +38,13 @@ type IHttpContext interface {
     SetHeader(key, value string)
     
     // Bind 绑定请求体到结构体
-    Bind(v interface{}) error
+    Bind(v any) error
     
     // JSON 返回 JSON 响应
-    JSON(code int, data interface{}) error
+    JSON(code int, data any) error
     
     // String 返回字符串响应
-    String(code int, format string, values ...interface{}) error
+    String(code int, format string, values ...any) error
     
     // GetContext 获取 context.Context
     GetContext() context.Context
@@ -83,7 +83,7 @@ type IHttpRequest interface {
     Body() ([]byte, error)
     
     // BindJSON 绑定 JSON 请求体
-    BindJSON(v interface{}) error
+    BindJSON(v any) error
 }
 ```
 
@@ -101,7 +101,7 @@ type IHttpResponse interface {
     Header(key, value string) IHttpResponse
     
     // JSON 返回 JSON 响应
-    JSON(data interface{}) error
+    JSON(data any) error
     
     // String 返回字符串响应
     String(text string) error
@@ -326,7 +326,7 @@ func listUsers(ctx httpx.IHttpContext) error {
     users, total, err := userService.List(ctx.GetContext(), &QueryOptions{
         Page:   parseInt(page),
         Size:   parseInt(size),
-        Filter: map[string]interface{}{"status": status},
+        Filter: map[string]any{"status": status},
     })
     if err != nil {
         return ctx.JSON(500, map[string]string{
@@ -334,7 +334,7 @@ func listUsers(ctx httpx.IHttpContext) error {
         })
     }
     
-    return ctx.JSON(200, map[string]interface{}{
+    return ctx.JSON(200, map[string]any{
         "data":  users,
         "total": total,
         "page":  page,
@@ -368,11 +368,11 @@ func (a *GinAdapter) Query(key string) string {
     return a.Context.Query(key)
 }
 
-func (a *GinAdapter) Bind(v interface{}) error {
+func (a *GinAdapter) Bind(v any) error {
     return a.Context.ShouldBindJSON(v)
 }
 
-func (a *GinAdapter) JSON(code int, data interface{}) error {
+func (a *GinAdapter) JSON(code int, data any) error {
     a.Context.JSON(code, data)
     return nil
 }
@@ -396,10 +396,10 @@ func WrapGinHandler(handler func(httpx.IHttpContext) error) gin.HandlerFunc {
 type Response struct {
     Code    int         `json:"code"`
     Message string      `json:"message"`
-    Data    interface{} `json:"data,omitempty"`
+    Data    any `json:"data,omitempty"`
 }
 
-func Success(ctx httpx.IHttpContext, data interface{}) error {
+func Success(ctx httpx.IHttpContext, data any) error {
     return ctx.JSON(200, Response{
         Code:    0,
         Message: "success",

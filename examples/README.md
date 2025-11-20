@@ -549,7 +549,7 @@ type IRepository[T IEntity[ID], ID comparable] interface {
     Save(ctx context.Context, entity T) error
     Delete(ctx context.Context, id ID) error
     List(ctx context.Context, opts *QueryOptions) ([]T, error)
-    Count(ctx context.Context, filters map[string]interface{}) (int64, error)
+    Count(ctx context.Context, filters map[string]any) (int64, error)
 }
 
 // IBatchOperations 批量操作接口
@@ -730,7 +730,7 @@ type IWriter interface { ... }
 ```go
 // 使用 QueryOptions
 opts := &repository.QueryOptions{
-    Filters: map[string]interface{}{
+    Filters: map[string]any{
         "status": "active",
         "age_gt": 18,  // 大于18岁
     },

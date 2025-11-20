@@ -84,7 +84,7 @@ func TestFieldConstructors(t *testing.T) {
 func TestFormatValue(t *testing.T) {
 	tests := []struct {
 		name  string
-		value interface{}
+		value any
 		want  string
 	}{
 		{

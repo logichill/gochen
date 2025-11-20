@@ -15,7 +15,7 @@ type selectBuilder struct {
 	cols    []string
 	table   string
 	where   []string
-	args    []interface{}
+	args    []any
 	groupBy []string
 	orderBy string
 	limit   int
@@ -27,7 +27,7 @@ func (b *selectBuilder) From(table string) ISelectBuilder {
 	return b
 }
 
-func (b *selectBuilder) Where(cond string, args ...interface{}) ISelectBuilder {
+func (b *selectBuilder) Where(cond string, args ...any) ISelectBuilder {
 	if cond != "" {
 		b.where = append(b.where, cond)
 		b.args = append(b.args, args...)
@@ -35,11 +35,11 @@ func (b *selectBuilder) Where(cond string, args ...interface{}) ISelectBuilder {
 	return b
 }
 
-func (b *selectBuilder) And(cond string, args ...interface{}) ISelectBuilder {
+func (b *selectBuilder) And(cond string, args ...any) ISelectBuilder {
 	return b.Where(cond, args...)
 }
 
-func (b *selectBuilder) Or(cond string, args ...interface{}) ISelectBuilder {
+func (b *selectBuilder) Or(cond string, args ...any) ISelectBuilder {
 	if cond == "" {
 		return b
 	}
@@ -76,7 +76,7 @@ func (b *selectBuilder) Offset(n int) ISelectBuilder {
 	return b
 }
 
-func (b *selectBuilder) Build() (string, []interface{}) {
+func (b *selectBuilder) Build() (string, []any) {
 	var sb strings.Builder
 	sb.WriteString("SELECT ")
 	sb.WriteString(strings.Join(b.cols, ", "))

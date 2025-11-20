@@ -15,14 +15,14 @@ type updateBuilder struct {
 
 	table     string
 	setCols   []string
-	setArgs   []interface{}
+	setArgs   []any
 	exprSet   []string
-	exprArgs  []interface{}
+	exprArgs  []any
 	whereExpr []string
-	whereArgs []interface{}
+	whereArgs []any
 }
 
-func (b *updateBuilder) Set(col string, val interface{}) IUpdateBuilder {
+func (b *updateBuilder) Set(col string, val any) IUpdateBuilder {
 	if col == "" {
 		return b
 	}
@@ -31,14 +31,14 @@ func (b *updateBuilder) Set(col string, val interface{}) IUpdateBuilder {
 	return b
 }
 
-func (b *updateBuilder) SetMap(values map[string]interface{}) IUpdateBuilder {
+func (b *updateBuilder) SetMap(values map[string]any) IUpdateBuilder {
 	for k, v := range values {
 		b.Set(k, v)
 	}
 	return b
 }
 
-func (b *updateBuilder) SetExpr(expr string, args ...interface{}) IUpdateBuilder {
+func (b *updateBuilder) SetExpr(expr string, args ...any) IUpdateBuilder {
 	if expr == "" {
 		return b
 	}
@@ -49,7 +49,7 @@ func (b *updateBuilder) SetExpr(expr string, args ...interface{}) IUpdateBuilder
 	return b
 }
 
-func (b *updateBuilder) Where(cond string, args ...interface{}) IUpdateBuilder {
+func (b *updateBuilder) Where(cond string, args ...any) IUpdateBuilder {
 	if cond != "" {
 		b.whereExpr = append(b.whereExpr, cond)
 		b.whereArgs = append(b.whereArgs, args...)
@@ -57,13 +57,13 @@ func (b *updateBuilder) Where(cond string, args ...interface{}) IUpdateBuilder {
 	return b
 }
 
-func (b *updateBuilder) Build() (string, []interface{}) {
+func (b *updateBuilder) Build() (string, []any) {
 	if len(b.setCols) == 0 && len(b.exprSet) == 0 {
 		panic("updateBuilder: no columns or expressions to set")
 	}
 
 	var sb strings.Builder
-	args := make([]interface{}, 0, len(b.setArgs)+len(b.exprArgs)+len(b.whereArgs))
+	args := make([]any, 0, len(b.setArgs)+len(b.exprArgs)+len(b.whereArgs))
 
 	sb.WriteString("UPDATE ")
 	sb.WriteString(b.table)

@@ -20,7 +20,7 @@ func TestEventSourcedAggregate_ConcurrentAccess(t *testing.T) {
 			ID:        "evt-1",
 			Type:      "TestEvent",
 			Timestamp: time.Now(),
-			Metadata:  make(map[string]interface{}),
+			Metadata:  make(map[string]any),
 		},
 		AggregateID:   1,
 		AggregateType: "TestAggregate",
@@ -69,7 +69,7 @@ func TestEventSourcedAggregate_ApplyAndRecord(t *testing.T) {
 			ID:        "evt-1",
 			Type:      "TestEvent",
 			Timestamp: time.Now(),
-			Metadata:  make(map[string]interface{}),
+			Metadata:  make(map[string]any),
 		},
 		AggregateID:   1,
 		AggregateType: "TestAggregate",
@@ -110,15 +110,15 @@ func TestEventSourcedAggregate_LoadFromHistory(t *testing.T) {
 	// 创建历史事件
 	events := []eventing.IEvent{
 		&eventing.Event{
-			Message: msg.Message{ID: "evt-1", Type: "Event1", Timestamp: time.Now(), Metadata: make(map[string]interface{})},
+			Message: msg.Message{ID: "evt-1", Type: "Event1", Timestamp: time.Now(), Metadata: make(map[string]any)},
 			Version: 1,
 		},
 		&eventing.Event{
-			Message: msg.Message{ID: "evt-2", Type: "Event2", Timestamp: time.Now(), Metadata: make(map[string]interface{})},
+			Message: msg.Message{ID: "evt-2", Type: "Event2", Timestamp: time.Now(), Metadata: make(map[string]any)},
 			Version: 2,
 		},
 		&eventing.Event{
-			Message: msg.Message{ID: "evt-3", Type: "Event3", Timestamp: time.Now(), Metadata: make(map[string]interface{})},
+			Message: msg.Message{ID: "evt-3", Type: "Event3", Timestamp: time.Now(), Metadata: make(map[string]any)},
 			Version: 3,
 		},
 	}

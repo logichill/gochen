@@ -45,7 +45,7 @@ type Manager struct {
 // NewManager 创建投影管理器
 //
 // Deprecated: 请改用 NewProjectionManager 或 NewProjectionManagerWithConfig。
-func NewManager(eventStore store.IEventStore, config interface{}) *Manager {
+func NewManager(eventStore store.IEventStore, config any) *Manager {
 	return &Manager{
 		projectors: make(map[string]Projector),
 		statuses:   make(map[string]*Status),

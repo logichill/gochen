@@ -89,7 +89,7 @@ func (s *TenantAwareEventStore) StreamEvents(ctx context.Context, fromTime time.
 func (s *TenantAwareEventStore) injectTenantID(tenantID string, event IStorableEvent) {
 	if e, ok := event.(*Event); ok {
 		if e.Metadata == nil {
-			e.Metadata = make(map[string]interface{})
+			e.Metadata = make(map[string]any)
 		}
 		e.Metadata["tenant_id"] = tenantID
 	}

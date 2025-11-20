@@ -9,14 +9,14 @@ import (
 // MonitoringService 监控服务
 type MonitoringService struct {
 	metrics     *Metrics
-	eventStore  interface{} // 事件存储接口
-	snapshotMgr interface{} // 快照管理器接口
+	eventStore  any         // 事件存储接口
+	snapshotMgr any         // 快照管理器接口
 	cachedStore CachedStore // 可选
 	mutex       sync.RWMutex
 }
 
 // NewMonitoringService 创建监控服务
-func NewMonitoringService(eventStore interface{}, snapshotMgr interface{}, cachedStore CachedStore) *MonitoringService {
+func NewMonitoringService(eventStore any, snapshotMgr any, cachedStore CachedStore) *MonitoringService {
 	return &MonitoringService{
 		metrics:     NewMetrics(),
 		eventStore:  eventStore,
@@ -29,7 +29,7 @@ func NewMonitoringService(eventStore interface{}, snapshotMgr interface{}, cache
 func (s *MonitoringService) GetMetrics() *Metrics { return s.metrics }
 
 // GetHealthStatus 获取健康状态
-func (s *MonitoringService) GetHealthStatus(ctx context.Context) map[string]interface{} {
+func (s *MonitoringService) GetHealthStatus(ctx context.Context) map[string]any {
 	snapshot := s.metrics.GetSnapshot()
 
 	healthy := true
@@ -61,7 +61,7 @@ func (s *MonitoringService) GetHealthStatus(ctx context.Context) map[string]inte
 		status = "degraded"
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"status":  status,
 		"healthy": healthy,
 		"issues":  issues,
@@ -71,13 +71,13 @@ func (s *MonitoringService) GetHealthStatus(ctx context.Context) map[string]inte
 }
 
 // GetDetailedStats 获取详细统计信息
-func (s *MonitoringService) GetDetailedStats(ctx context.Context) map[string]interface{} {
-	result := make(map[string]interface{})
+func (s *MonitoringService) GetDetailedStats(ctx context.Context) map[string]any {
+	result := make(map[string]any)
 	result["metrics"] = s.metrics.GetSnapshot().ToMap()
 
 	if s.snapshotMgr != nil {
 		if snapshotter, ok := s.snapshotMgr.(interface {
-			GetSnapshotStats(context.Context) map[string]interface{}
+			GetSnapshotStats(context.Context) map[string]any
 		}); ok {
 			snapshotStats := snapshotter.GetSnapshotStats(ctx)
 			result["snapshot_manager"] = snapshotStats

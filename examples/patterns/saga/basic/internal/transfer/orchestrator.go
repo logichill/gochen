@@ -9,7 +9,7 @@ import (
 // State 简化状态存储（demo 用，直接内存）
 type State struct {
 	ID   string
-	Data map[string]interface{}
+	Data map[string]any
 }
 
 // Orchestrator 最小 Saga 编排器
@@ -25,7 +25,7 @@ func NewOrchestrator() *Orchestrator {
 func (o *Orchestrator) StartTransfer(ctx context.Context, from, to int64, amount int) (string, error) {
 	id := fmt.Sprintf("tx-%d-%d-%d", from, to, amount)
 	o.mu.Lock()
-	o.store[id] = &State{ID: id, Data: map[string]interface{}{"from": from, "to": to, "amount": amount, "step": "started", "status": "pending"}}
+	o.store[id] = &State{ID: id, Data: map[string]any{"from": from, "to": to, "amount": amount, "step": "started", "status": "pending"}}
 	o.mu.Unlock()
 	return id, nil
 }

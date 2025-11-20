@@ -9,30 +9,30 @@ type IResponseWriter interface {
 	Header(key, value string) // 兼容性方法
 
 	// 响应内容
-	JSON(code int, obj interface{}) error
+	JSON(code int, obj any) error
 	String(code int, text string) error
 	Data(code int, contentType string, data []byte) error
 }
 
 // IContextStorage 上下文存储接口 - 只负责键值存储
 type IContextStorage interface {
-	Set(key string, value interface{})
-	Get(key string) (interface{}, bool)
-	MustGet(key string) interface{}
+	Set(key string, value any)
+	Get(key string) (any, bool)
+	MustGet(key string) any
 }
 
 // IFlowControl 流程控制接口 - 只负责请求流程控制
 type IFlowControl interface {
 	Abort()
 	AbortWithStatus(code int)
-	AbortWithStatusJSON(code int, jsonObj interface{})
+	AbortWithStatusJSON(code int, jsonObj any)
 	IsAborted() bool
 }
 
 // IFileHandler 文件处理接口 - 只负责文件操作
 type IFileHandler interface {
-	FormFile(name string) (interface{}, error)
-	SaveUploadedFile(file interface{}, dst string) error
+	FormFile(name string) (any, error)
+	SaveUploadedFile(file any, dst string) error
 }
 
 // IHttpContext 组合接口 - 通过组合而非继承
@@ -48,7 +48,7 @@ type IHttpContext interface {
 	SetContext(ctx IRequestContext)
 
 	// 原始对象访问（用于特殊情况）
-	GetRaw() interface{}
+	GetRaw() any
 }
 
 // IHttpContextLite 轻量级接口 - 只包含最常用的方法
@@ -56,10 +56,10 @@ type IHttpContextLite interface {
 	// 最常用的请求方法
 	GetParam(key string) string
 	GetQuery(key string) string
-	BindJSON(obj interface{}) error
+	BindJSON(obj any) error
 
 	// 最常用的响应方法
-	JSON(code int, obj interface{}) error
+	JSON(code int, obj any) error
 	String(code int, text string) error
 
 	// 基础流程控制

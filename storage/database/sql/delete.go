@@ -15,11 +15,11 @@ type deleteBuilder struct {
 
 	table string
 	where []string
-	args  []interface{}
+	args  []any
 	limit int
 }
 
-func (b *deleteBuilder) Where(cond string, args ...interface{}) IDeleteBuilder {
+func (b *deleteBuilder) Where(cond string, args ...any) IDeleteBuilder {
 	if cond != "" {
 		b.where = append(b.where, cond)
 		b.args = append(b.args, args...)
@@ -32,9 +32,9 @@ func (b *deleteBuilder) Limit(n int) IDeleteBuilder {
 	return b
 }
 
-func (b *deleteBuilder) Build() (string, []interface{}) {
+func (b *deleteBuilder) Build() (string, []any) {
 	var sb strings.Builder
-	args := make([]interface{}, len(b.args))
+	args := make([]any, len(b.args))
 	copy(args, b.args)
 
 	sb.WriteString("DELETE FROM ")

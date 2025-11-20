@@ -275,7 +275,7 @@ func TestCache_OnEvict(t *testing.T) {
 	cache := New[int, string](Config{
 		Name:    "test",
 		MaxSize: 2,
-		OnEvict: func(key, value interface{}) {
+		OnEvict: func(key, value any) {
 			evicted[key.(int)] = value.(string)
 		},
 	})

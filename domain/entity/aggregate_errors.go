@@ -13,7 +13,7 @@ var (
 type AggregateError struct {
 	Code        string
 	Message     string
-	AggregateID interface{}
+	AggregateID any
 	EventID     string
 	Cause       error
 }

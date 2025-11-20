@@ -79,7 +79,7 @@ func (e *Event) Validate() error {
 }
 
 // NewEvent 创建事件
-func NewEvent(aggregateID int64, aggregateType, eventType string, version uint64, data interface{}, schemaVersion ...int) *Event {
+func NewEvent(aggregateID int64, aggregateType, eventType string, version uint64, data any, schemaVersion ...int) *Event {
 	id := snowflake.Generate()
 	sVersion := 1
 	if len(schemaVersion) > 0 && schemaVersion[0] > 0 {
@@ -91,7 +91,7 @@ func NewEvent(aggregateID int64, aggregateType, eventType string, version uint64
 			Type:      eventType,
 			Timestamp: time.Now(),
 			Payload:   data,
-			Metadata:  make(map[string]interface{}),
+			Metadata:  make(map[string]any),
 		},
 		AggregateID:   aggregateID,
 		AggregateType: aggregateType,
@@ -101,7 +101,7 @@ func NewEvent(aggregateID int64, aggregateType, eventType string, version uint64
 }
 
 // NewDomainEvent 语义化别名
-func NewDomainEvent(aggregateID int64, aggregateType, eventType string, version uint64, data interface{}, schemaVersion ...int) *Event {
+func NewDomainEvent(aggregateID int64, aggregateType, eventType string, version uint64, data any, schemaVersion ...int) *Event {
 	e := NewEvent(aggregateID, aggregateType, eventType, version, data, schemaVersion...)
 	metadata := e.GetMetadata()
 	metadata["source"] = "domain"

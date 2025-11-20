@@ -251,16 +251,16 @@ func (r *EventSourcedRepository[T]) GetEventHistoryAfter(ctx context.Context, id
 // - ActorID 通常从事件 Metadata 中提取（例如 "actor_id"），由领域层的 mapper 决定；
 // - RawPayload 可选携带原始载荷，便于调试或高级展示（可为 nil）。
 type EventHistoryEntry struct {
-	EventID       string                 `json:"event_id"`
-	AggregateID   int64                  `json:"aggregate_id"`
-	AggregateType string                 `json:"aggregate_type"`
-	Version       uint64                 `json:"version"`
-	EventType     string                 `json:"event_type"`
-	OccurredAt    time.Time              `json:"occurred_at"`
-	ActorID       string                 `json:"actor_id,omitempty"`
-	SummaryKey    string                 `json:"summary_key"`
-	SummaryParams map[string]interface{} `json:"summary_params,omitempty"`
-	RawPayload    interface{}            `json:"raw_payload,omitempty"`
+	EventID       string         `json:"event_id"`
+	AggregateID   int64          `json:"aggregate_id"`
+	AggregateType string         `json:"aggregate_type"`
+	Version       uint64         `json:"version"`
+	EventType     string         `json:"event_type"`
+	OccurredAt    time.Time      `json:"occurred_at"`
+	ActorID       string         `json:"actor_id,omitempty"`
+	SummaryKey    string         `json:"summary_key"`
+	SummaryParams map[string]any `json:"summary_params,omitempty"`
+	RawPayload    any            `json:"raw_payload,omitempty"`
 }
 
 // EventHistoryPage 封装分页后的历史记录结果
@@ -303,7 +303,7 @@ func defaultEventHistoryMapper(evt eventing.IEvent) *EventHistoryEntry {
 		OccurredAt:    base.GetTimestamp(),
 		ActorID:       actor,
 		SummaryKey:    base.GetType(),
-		SummaryParams: map[string]interface{}{"payload": base.GetPayload()},
+		SummaryParams: map[string]any{"payload": base.GetPayload()},
 		RawPayload:    base.GetPayload(),
 	}
 }

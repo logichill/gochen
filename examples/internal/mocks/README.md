@@ -97,7 +97,7 @@ validator := mocks.NewGenericValidator[*User](func(user *User) error {
 简单的实体验证器。
 
 ```go
-validator := mocks.NewSimpleEntityValidator(func(entity interface{}) error {
+validator := mocks.NewSimpleEntityValidator(func(entity any) error {
     // 自定义验证逻辑
     return nil
 })

@@ -15,11 +15,11 @@ import (
 // IDatabase 通用数据库接口
 type IDatabase interface {
 	// 查询操作
-	Query(ctx context.Context, query string, args ...interface{}) (IRows, error)
-	QueryRow(ctx context.Context, query string, args ...interface{}) IRow
+	Query(ctx context.Context, query string, args ...any) (IRows, error)
+	QueryRow(ctx context.Context, query string, args ...any) IRow
 
 	// 执行操作
-	Exec(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
+	Exec(ctx context.Context, query string, args ...any) (sql.Result, error)
 
 	// 事务操作
 	Begin(ctx context.Context) (ITransaction, error)
@@ -30,7 +30,7 @@ type IDatabase interface {
 	Close() error
 
 	// 获取原始连接（用于特殊场景）
-	Raw() interface{}
+	Raw() any
 }
 
 // DialectNameProvider 可选接口：提供底层数据库方言名称
@@ -55,7 +55,7 @@ type ITransaction interface {
 type IRows interface {
 	// 遍历结果
 	Next() bool
-	Scan(dest ...interface{}) error
+	Scan(dest ...any) error
 	Close() error
 	Err() error
 
@@ -66,7 +66,7 @@ type IRows interface {
 
 // IRow 单行结果接口
 type IRow interface {
-	Scan(dest ...interface{}) error
+	Scan(dest ...any) error
 	Err() error
 }
 
@@ -74,12 +74,12 @@ type IRow interface {
 type QueryBuilder interface {
 	Select(columns ...string) QueryBuilder
 	From(table string) QueryBuilder
-	Where(condition string, args ...interface{}) QueryBuilder
+	Where(condition string, args ...any) QueryBuilder
 	OrderBy(column string, desc bool) QueryBuilder
 	Limit(limit int) QueryBuilder
 	Offset(offset int) QueryBuilder
 
-	Build() (query string, args []interface{})
+	Build() (query string, args []any)
 }
 
 // DBConfig 数据库配置

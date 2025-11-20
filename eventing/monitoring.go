@@ -12,10 +12,10 @@ type (
 	CachedStore       = mon.CachedStore
 )
 
-func NewMonitoringService(eventStore interface{}, snapshotMgr interface{}, cachedStore CachedStore) *MonitoringService {
+func NewMonitoringService(eventStore any, snapshotMgr any, cachedStore CachedStore) *MonitoringService {
 	return mon.NewMonitoringService(eventStore, snapshotMgr, cachedStore)
 }
-func InitGlobalMonitoring(eventStore interface{}, snapshotMgr interface{}, cachedStore CachedStore) {
+func InitGlobalMonitoring(eventStore any, snapshotMgr any, cachedStore CachedStore) {
 	mon.InitGlobalMonitoring(eventStore, snapshotMgr, cachedStore)
 }
 func GlobalMetrics() *Metrics              { return mon.GlobalMetrics() }

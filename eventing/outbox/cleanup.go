@@ -162,7 +162,7 @@ func (s *CleanupService) deleteOldRecords(ctx context.Context, olderThan time.Ti
 	for {
 		var (
 			sqlQuery string
-			args     []interface{}
+			args     []any
 		)
 
 		// 构造方言兼容的 DELETE 语句
@@ -172,7 +172,7 @@ func (s *CleanupService) deleteOldRecords(ctx context.Context, olderThan time.Ti
 				WHERE status = ? AND published_at < ?
 				LIMIT ?
 			`
-			args = []interface{}{OutboxStatusPublished, olderThan, s.policy.BatchSize}
+			args = []any{OutboxStatusPublished, olderThan, s.policy.BatchSize}
 		} else {
 			// Postgres 等不支持 DELETE ... LIMIT 的方言：
 			// 通过子查询按主键限制删除数量。
@@ -185,7 +185,7 @@ func (s *CleanupService) deleteOldRecords(ctx context.Context, olderThan time.Ti
 					LIMIT ?
 				)
 			`
-			args = []interface{}{OutboxStatusPublished, olderThan, s.policy.BatchSize}
+			args = []any{OutboxStatusPublished, olderThan, s.policy.BatchSize}
 		}
 
 		rawResult, err := s.db.Exec(ctx, sqlQuery, args...)
@@ -261,7 +261,7 @@ func (s *CleanupService) archiveOldRecords(ctx context.Context, olderThan time.T
 
 		// 2. 删除已归档的记录（DELETE LIMIT 由方言兼容）
 		var deleteQuery string
-		var deleteArgs []interface{}
+		var deleteArgs []any
 
 		if s.dialect.SupportsDeleteLimit() {
 			deleteQuery = `
@@ -269,7 +269,7 @@ func (s *CleanupService) archiveOldRecords(ctx context.Context, olderThan time.T
 				WHERE status = ? AND published_at < ?
 				LIMIT ?
 			`
-			deleteArgs = []interface{}{OutboxStatusPublished, olderThan, affected}
+			deleteArgs = []any{OutboxStatusPublished, olderThan, affected}
 		} else {
 			deleteQuery = `
 				DELETE FROM event_outbox
@@ -280,7 +280,7 @@ func (s *CleanupService) archiveOldRecords(ctx context.Context, olderThan time.T
 					LIMIT ?
 				)
 			`
-			deleteArgs = []interface{}{OutboxStatusPublished, olderThan, affected}
+			deleteArgs = []any{OutboxStatusPublished, olderThan, affected}
 		}
 
 		_, err = s.db.Exec(ctx, deleteQuery, deleteArgs...)

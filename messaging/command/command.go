@@ -39,14 +39,14 @@ type Command struct {
 //
 // 返回：
 //   - *Command: 初始化的命令实例
-func NewCommand(id, commandType string, aggregateID int64, aggregateType string, payload interface{}) *Command {
+func NewCommand(id, commandType string, aggregateID int64, aggregateType string, payload any) *Command {
 	cmd := &Command{
 		Message: messaging.Message{
 			ID:        id,
 			Type:      messaging.MessageTypeCommand, // 使用预定义的命令类型
 			Timestamp: time.Now(),
 			Payload:   payload,
-			Metadata:  make(map[string]interface{}),
+			Metadata:  make(map[string]any),
 		},
 		AggregateID:   aggregateID,
 		AggregateType: aggregateType,
@@ -79,7 +79,7 @@ func (c *Command) GetCommandType() string {
 }
 
 // WithMetadata 添加元数据（链式调用）
-func (c *Command) WithMetadata(key string, value interface{}) *Command {
+func (c *Command) WithMetadata(key string, value any) *Command {
 	c.SetMetadata(key, value)
 	return c
 }

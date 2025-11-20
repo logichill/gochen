@@ -36,7 +36,7 @@ func TestCommandBus_RegisterAndDispatch(t *testing.T) {
 	require.NoError(t, err)
 
 	// 分发命令
-	cmd := NewCommand("cmd-1", "CreateUser", 123, "User", map[string]interface{}{"name": "test"})
+	cmd := NewCommand("cmd-1", "CreateUser", 123, "User", map[string]any{"name": "test"})
 	err = commandBus.Dispatch(context.Background(), cmd)
 
 	assert.NoError(t, err)

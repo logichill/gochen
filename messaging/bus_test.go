@@ -19,8 +19,8 @@ func (m *testMessage) GetID() string           { return m.id }
 func (m *testMessage) GetType() string         { return m.typ }
 func (m *testMessage) GetTimestamp() time.Time { return time.Now() }
 func (m *testMessage) GetPayload() any         { return m.data }
-func (m *testMessage) GetMetadata() map[string]interface{} {
-	return map[string]interface{}{}
+func (m *testMessage) GetMetadata() map[string]any {
+	return map[string]any{}
 }
 
 type recordingHandler struct {

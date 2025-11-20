@@ -29,9 +29,9 @@ type IRequestReader interface {
 
 // IRequestBinder 请求绑定接口 - 只负责数据绑定
 type IRequestBinder interface {
-	BindJSON(obj interface{}) error
-	BindQuery(obj interface{}) error
-	ShouldBindJSON(obj interface{}) error
+	BindJSON(obj any) error
+	BindQuery(obj any) error
+	ShouldBindJSON(obj any) error
 }
 
 // 预定义上下文键（供实现与调用方共享）
@@ -59,7 +59,7 @@ type IRequestContext interface {
 	GetUserAgent() string
 	GetCorrelationID() string
 
-	WithValue(key interface{}, value interface{}) IRequestContext
+	WithValue(key any, value any) IRequestContext
 	WithTimeout(timeout time.Duration) (IRequestContext, context.CancelFunc)
 	WithCancel() (IRequestContext, context.CancelFunc)
 	WithDeadline(deadline time.Time) (IRequestContext, context.CancelFunc)

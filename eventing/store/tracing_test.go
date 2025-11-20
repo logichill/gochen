@@ -26,7 +26,7 @@ func TestEndToEndTracing(t *testing.T) {
 		"CreateOrder",
 		100,
 		"Order",
-		map[string]interface{}{
+		map[string]any{
 			"product": "test",
 		},
 	)
@@ -39,7 +39,7 @@ func TestEndToEndTracing(t *testing.T) {
 	ctx = httpx.WithCausationID(ctx, cmd.GetID())
 
 	// 4. 创建事件
-	event := eventing.NewEvent(100, "Order", "OrderCreated", 1, map[string]interface{}{
+	event := eventing.NewEvent(100, "Order", "OrderCreated", 1, map[string]any{
 		"order_id": 100,
 	})
 
@@ -70,9 +70,9 @@ func TestTracingStore_MultipleEvents(t *testing.T) {
 
 	// 创建多个事件
 	events := []eventing.IStorableEvent{
-		eventing.NewEvent(100, "Order", "OrderCreated", 1, map[string]interface{}{"order_id": 100}),
-		eventing.NewEvent(100, "Order", "OrderPaid", 2, map[string]interface{}{"amount": 99.99}),
-		eventing.NewEvent(100, "Order", "OrderShipped", 3, map[string]interface{}{"tracking": "ABC123"}),
+		eventing.NewEvent(100, "Order", "OrderCreated", 1, map[string]any{"order_id": 100}),
+		eventing.NewEvent(100, "Order", "OrderPaid", 2, map[string]any{"amount": 99.99}),
+		eventing.NewEvent(100, "Order", "OrderShipped", 3, map[string]any{"tracking": "ABC123"}),
 	}
 
 	// 保存

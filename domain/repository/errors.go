@@ -13,7 +13,7 @@ var (
 type RepositoryError struct {
 	Code     string
 	Message  string
-	EntityID interface{}
+	EntityID any
 	Cause    error
 }
 

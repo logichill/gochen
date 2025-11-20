@@ -24,14 +24,14 @@ type ISql interface {
 // ISelectBuilder 构建 SELECT 语句。
 type ISelectBuilder interface {
 	From(table string) ISelectBuilder
-	Where(cond string, args ...interface{}) ISelectBuilder
-	And(cond string, args ...interface{}) ISelectBuilder
-	Or(cond string, args ...interface{}) ISelectBuilder
+	Where(cond string, args ...any) ISelectBuilder
+	And(cond string, args ...any) ISelectBuilder
+	Or(cond string, args ...any) ISelectBuilder
 	GroupBy(cols ...string) ISelectBuilder
 	OrderBy(expr string) ISelectBuilder
 	Limit(n int) ISelectBuilder
 	Offset(n int) ISelectBuilder
-	Build() (query string, args []interface{})
+	Build() (query string, args []any)
 	Query(ctx context.Context) (core.IRows, error)
 	QueryRow(ctx context.Context) core.IRow
 }
@@ -39,38 +39,38 @@ type ISelectBuilder interface {
 // IInsertBuilder 构建 INSERT 语句。
 type IInsertBuilder interface {
 	Columns(cols ...string) IInsertBuilder
-	Values(vals ...interface{}) IInsertBuilder
-	Build() (query string, args []interface{})
+	Values(vals ...any) IInsertBuilder
+	Build() (query string, args []any)
 	Exec(ctx context.Context) (sql.Result, error)
 }
 
 // IUpdateBuilder 构建 UPDATE 语句。
 type IUpdateBuilder interface {
-	Set(column string, val interface{}) IUpdateBuilder
-	SetMap(values map[string]interface{}) IUpdateBuilder
+	Set(column string, val any) IUpdateBuilder
+	SetMap(values map[string]any) IUpdateBuilder
 	// SetExpr 直接追加原始 SET 片段（例如 "retry_count = retry_count + 1" 或包含 CASE 表达式），
 	// 由调用方保证表达式合法性与参数顺序安全。
-	SetExpr(expr string, args ...interface{}) IUpdateBuilder
-	Where(cond string, args ...interface{}) IUpdateBuilder
-	Build() (query string, args []interface{})
+	SetExpr(expr string, args ...any) IUpdateBuilder
+	Where(cond string, args ...any) IUpdateBuilder
+	Build() (query string, args []any)
 	Exec(ctx context.Context) (sql.Result, error)
 }
 
 // IDeleteBuilder 构建 DELETE 语句。
 type IDeleteBuilder interface {
-	Where(cond string, args ...interface{}) IDeleteBuilder
+	Where(cond string, args ...any) IDeleteBuilder
 	Limit(n int) IDeleteBuilder
-	Build() (query string, args []interface{})
+	Build() (query string, args []any)
 	Exec(ctx context.Context) (sql.Result, error)
 }
 
 // IUpsertBuilder 构建 UPSERT 语句。
 type IUpsertBuilder interface {
 	Columns(cols ...string) IUpsertBuilder
-	Values(vals ...interface{}) IUpsertBuilder
+	Values(vals ...any) IUpsertBuilder
 	Key(cols ...string) IUpsertBuilder
-	UpdateSet(col string, val interface{}) IUpsertBuilder
-	UpdateSetMap(values map[string]interface{}) IUpsertBuilder
+	UpdateSet(col string, val any) IUpsertBuilder
+	UpdateSetMap(values map[string]any) IUpsertBuilder
 	Exec(ctx context.Context) (sql.Result, error)
 }
 

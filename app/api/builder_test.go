@@ -39,7 +39,7 @@ type trackingValidator struct {
 	called int
 }
 
-func (t *trackingValidator) Validate(interface{}) error {
+func (t *trackingValidator) Validate(any) error {
 	t.called++
 	return t.err
 }
@@ -237,9 +237,9 @@ func (m *mockRouteGroup) Use(...httpx.Middleware) httpx.IRouteGroup {
 	return m
 }
 
-func (m *mockRouteGroup) RegisterRoute(string, string, interface{}) {}
+func (m *mockRouteGroup) RegisterRoute(string, string, any) {}
 
-func (m *mockRouteGroup) RegisterMiddleware(interface{}) {}
+func (m *mockRouteGroup) RegisterMiddleware(any) {}
 
 func TestServiceConfigOverride(t *testing.T) {
 	var order []string

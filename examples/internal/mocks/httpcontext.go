@@ -67,11 +67,11 @@ func (m *MockHttpContext) GetContext() httpx.IRequestContext {
 func (m *MockHttpContext) SetContext(ctx httpx.IRequestContext) {
 }
 
-func (m *MockHttpContext) ShouldBindJSON(v interface{}) error {
+func (m *MockHttpContext) ShouldBindJSON(v any) error {
 	return nil
 }
 
-func (m *MockHttpContext) JSON(code int, data interface{}) error {
+func (m *MockHttpContext) JSON(code int, data any) error {
 	log.Printf("JSON Response: %d - %+v", code, data)
 	return nil
 }
@@ -106,15 +106,15 @@ func (m *MockHttpContext) AbortWithStatus(code int) {
 	log.Printf("Request aborted with status: %d", code)
 }
 
-func (m *MockHttpContext) AbortWithStatusJSON(code int, jsonObj interface{}) {
+func (m *MockHttpContext) AbortWithStatusJSON(code int, jsonObj any) {
 	log.Printf("Request aborted with status %d and JSON: %+v", code, jsonObj)
 }
 
-func (m *MockHttpContext) BindJSON(obj interface{}) error {
+func (m *MockHttpContext) BindJSON(obj any) error {
 	return m.ShouldBindJSON(obj)
 }
 
-func (m *MockHttpContext) BindQuery(obj interface{}) error {
+func (m *MockHttpContext) BindQuery(obj any) error {
 	return nil
 }
 
@@ -122,19 +122,19 @@ func (m *MockHttpContext) IsAborted() bool {
 	return false
 }
 
-func (m *MockHttpContext) Set(key string, value interface{}) {
+func (m *MockHttpContext) Set(key string, value any) {
 	// 简化实现
 }
 
-func (m *MockHttpContext) Get(key string) (interface{}, bool) {
+func (m *MockHttpContext) Get(key string) (any, bool) {
 	return nil, false
 }
 
-func (m *MockHttpContext) MustGet(key string) interface{} {
+func (m *MockHttpContext) MustGet(key string) any {
 	return nil
 }
 
-func (m *MockHttpContext) GetRaw() interface{} {
+func (m *MockHttpContext) GetRaw() any {
 	return m
 }
 

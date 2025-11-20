@@ -113,7 +113,7 @@ func (o *SagaOrchestrator) Execute(ctx context.Context, saga ISaga) error {
 			}
 
 			// 发布步骤失败事件
-			o.publishEvent(ctx, "SagaStepFailed", sagaID, map[string]interface{}{
+			o.publishEvent(ctx, "SagaStepFailed", sagaID, map[string]any{
 				"step":  step.Name,
 				"error": err.Error(),
 			})
@@ -127,7 +127,7 @@ func (o *SagaOrchestrator) Execute(ctx context.Context, saga ISaga) error {
 				saga.OnFailed(ctx, fmt.Errorf("step failed and compensation failed: %w", errors.Join(err, compErr)))
 
 				// 发布 Saga 失败事件
-				o.publishEvent(ctx, "SagaFailed", sagaID, map[string]interface{}{
+				o.publishEvent(ctx, "SagaFailed", sagaID, map[string]any{
 					"error":              err.Error(),
 					"compensation_error": compErr.Error(),
 				})
@@ -139,7 +139,7 @@ func (o *SagaOrchestrator) Execute(ctx context.Context, saga ISaga) error {
 			saga.OnFailed(ctx, err)
 
 			// 发布 Saga 补偿完成事件
-			o.publishEvent(ctx, "SagaCompensated", sagaID, map[string]interface{}{
+			o.publishEvent(ctx, "SagaCompensated", sagaID, map[string]any{
 				"error": err.Error(),
 			})
 
@@ -153,7 +153,7 @@ func (o *SagaOrchestrator) Execute(ctx context.Context, saga ISaga) error {
 		}
 
 		// 发布步骤完成事件
-		o.publishEvent(ctx, "SagaStepCompleted", sagaID, map[string]interface{}{
+		o.publishEvent(ctx, "SagaStepCompleted", sagaID, map[string]any{
 			"step": step.Name,
 		})
 	}
@@ -274,7 +274,7 @@ func (o *SagaOrchestrator) compensate(ctx context.Context, saga ISaga, state *Sa
 				logging.String("step", step.Name))
 
 			// 发布补偿失败事件
-			o.publishEvent(ctx, "SagaCompensationStepFailed", sagaID, map[string]interface{}{
+			o.publishEvent(ctx, "SagaCompensationStepFailed", sagaID, map[string]any{
 				"step":  step.Name,
 				"error": err.Error(),
 			})
@@ -284,7 +284,7 @@ func (o *SagaOrchestrator) compensate(ctx context.Context, saga ISaga, state *Sa
 		}
 
 		// 发布补偿步骤完成事件
-		o.publishEvent(ctx, "SagaCompensationStepCompleted", sagaID, map[string]interface{}{
+		o.publishEvent(ctx, "SagaCompensationStepCompleted", sagaID, map[string]any{
 			"step": step.Name,
 		})
 	}
@@ -302,7 +302,7 @@ func (o *SagaOrchestrator) compensate(ctx context.Context, saga ISaga, state *Sa
 }
 
 // publishEvent 发布事件
-func (o *SagaOrchestrator) publishEvent(ctx context.Context, eventType string, sagaID string, data map[string]interface{}) {
+func (o *SagaOrchestrator) publishEvent(ctx context.Context, eventType string, sagaID string, data map[string]any) {
 	if o.eventBus == nil {
 		return
 	}

@@ -34,7 +34,7 @@ func (s *SQLEventStore) GetEventStreamWithCursor(ctx context.Context, opts *esto
 
 	var builder strings.Builder
 	fmt.Fprintf(&builder, "SELECT id, type, aggregate_id, aggregate_type, version, schema_version, timestamp, payload, metadata FROM %s WHERE 1=1", s.tableName)
-	args := make([]interface{}, 0, 10)
+	args := make([]any, 0, 10)
 
 	if !opts.FromTime.IsZero() {
 		builder.WriteString(" AND timestamp >= ?")

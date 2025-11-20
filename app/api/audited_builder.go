@@ -36,7 +36,7 @@ type AuditedApiBuilder[T entity.Entity[int64]] struct {
 func NewAuditedApiBuilder[T entity.Entity[int64]](svc sservice.IAuditedService[T, int64], validator validation.IValidator) *AuditedApiBuilder[T] {
 	rc := DefaultRouteConfig()
 	if validator != nil && rc.Validator == nil {
-		rc.Validator = func(v interface{}) error { return validator.Validate(v) }
+		rc.Validator = func(v any) error { return validator.Validate(v) }
 	}
 	var sc *app.ServiceConfig
 	if c, ok := any(svc).(auditedConfigurableService); ok {

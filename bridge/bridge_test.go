@@ -16,7 +16,7 @@ func TestJSONSerializer_Command(t *testing.T) {
 	serializer := NewJSONSerializer()
 
 	// 创建命令
-	cmd := command.NewCommand("cmd-123", "CreateOrder", 456, "Order", map[string]interface{}{
+	cmd := command.NewCommand("cmd-123", "CreateOrder", 456, "Order", map[string]any{
 		"product":  "test",
 		"quantity": 10,
 	})
@@ -184,7 +184,7 @@ func TestHTTPBridge_CustomConfig(t *testing.T) {
 // BenchmarkJSONSerializer_SerializeCommand 性能测试
 func BenchmarkJSONSerializer_SerializeCommand(b *testing.B) {
 	serializer := NewJSONSerializer()
-	cmd := command.NewCommand("cmd-123", "CreateOrder", 456, "Order", map[string]interface{}{
+	cmd := command.NewCommand("cmd-123", "CreateOrder", 456, "Order", map[string]any{
 		"product": "test",
 	})
 
@@ -197,7 +197,7 @@ func BenchmarkJSONSerializer_SerializeCommand(b *testing.B) {
 // BenchmarkJSONSerializer_DeserializeCommand 性能测试
 func BenchmarkJSONSerializer_DeserializeCommand(b *testing.B) {
 	serializer := NewJSONSerializer()
-	cmd := command.NewCommand("cmd-123", "CreateOrder", 456, "Order", map[string]interface{}{
+	cmd := command.NewCommand("cmd-123", "CreateOrder", 456, "Order", map[string]any{
 		"product": "test",
 	})
 	data, _ := serializer.SerializeCommand(cmd)

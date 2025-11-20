@@ -16,7 +16,7 @@ func NewRequestContext(ctx context.Context) httpx.IRequestContext {
 	return &RequestContext{Context: ctx}
 }
 
-func NewRequestContextWithValues(ctx context.Context, values map[string]interface{}) httpx.IRequestContext {
+func NewRequestContextWithValues(ctx context.Context, values map[string]any) httpx.IRequestContext {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -61,7 +61,7 @@ func (r *RequestContext) GetCorrelationID() string {
 	return v
 }
 
-func (r *RequestContext) WithValue(key interface{}, value interface{}) httpx.IRequestContext {
+func (r *RequestContext) WithValue(key any, value any) httpx.IRequestContext {
 	return &RequestContext{Context: context.WithValue(r.Context, key, value)}
 }
 func (r *RequestContext) WithTimeout(timeout time.Duration) (httpx.IRequestContext, context.CancelFunc) {

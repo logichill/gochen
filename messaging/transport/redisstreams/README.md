@@ -366,7 +366,7 @@ func (t *Transport) streamName(messageType string) string {
 	return t.cfg.StreamPrefix + messageType
 }
 
-func encodeMessage(msg messaging.IMessage) (map[string]interface{}, error) {
+func encodeMessage(msg messaging.IMessage) (map[string]any, error) {
 	m, ok := msg.(*messaging.Message)
 	if !ok {
 		m = &messaging.Message{
@@ -381,7 +381,7 @@ func encodeMessage(msg messaging.IMessage) (map[string]interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	return map[string]interface{}{
+	return map[string]any{
 		"id":        m.ID,
 		"type":      m.Type,
 		"ts":        m.Timestamp.UnixNano(),
@@ -390,7 +390,7 @@ func encodeMessage(msg messaging.IMessage) (map[string]interface{}, error) {
 	}, nil
 }
 
-func decodeMessage(values map[string]interface{}, out *messaging.Message) error {
+func decodeMessage(values map[string]any, out *messaging.Message) error {
 	raw, ok := values["payload"]
 	if !ok {
 		return errors.New("missing payload")

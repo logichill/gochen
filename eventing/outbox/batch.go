@@ -58,7 +58,7 @@ func (b *BatchOperations) MarkAsPublishedBatch(ctx context.Context, entryIDs []i
 
 	// 构造 IN 子句的占位符与参数
 	placeholders := make([]string, len(entryIDs))
-	args := make([]interface{}, len(entryIDs))
+	args := make([]any, len(entryIDs))
 	for i, id := range entryIDs {
 		placeholders[i] = "?"
 		args[i] = id
@@ -94,13 +94,13 @@ func (b *BatchOperations) MarkAsFailedBatch(ctx context.Context, entries []Faile
 
 	// 构造 ID 列表与参数
 	ids := make([]string, len(entries))
-	idArgs := make([]interface{}, len(entries))
+	idArgs := make([]any, len(entries))
 
 	// 构造 CASE WHEN 子句
 	errorCases := make([]string, len(entries))
 	retryCases := make([]string, len(entries))
-	var errorArgs []interface{}
-	var retryArgs []interface{}
+	var errorArgs []any
+	var retryArgs []any
 
 	for i, entry := range entries {
 		ids[i] = "?"
@@ -139,7 +139,7 @@ func (b *BatchOperations) DeletePublishedBatch(ctx context.Context, entryIDs []i
 	}
 
 	placeholders := make([]string, len(entryIDs))
-	args := make([]interface{}, len(entryIDs))
+	args := make([]any, len(entryIDs))
 	for i, id := range entryIDs {
 		placeholders[i] = "?"
 		args[i] = id

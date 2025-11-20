@@ -44,11 +44,11 @@ func NewErrorResponse(code, message, details string) *ErrorPayload {
 
 // SuccessPayload 通用成功响应
 type SuccessPayload struct {
-	Data interface{} `json:"data"`
+	Data any `json:"data"`
 }
 
 // NewSuccessResponse 创建成功响应
-func NewSuccessResponse(data interface{}) *SuccessPayload {
+func NewSuccessResponse(data any) *SuccessPayload {
 	return &SuccessPayload{
 		Data: data,
 	}

@@ -106,7 +106,7 @@ func (u *HttpUtils) WriteErrorResponse(ctx httpx.IHttpContext, err error) error 
 	return nil
 }
 
-func (u *HttpUtils) WriteSuccessResponse(ctx httpx.IHttpContext, data interface{}) error {
+func (u *HttpUtils) WriteSuccessResponse(ctx httpx.IHttpContext, data any) error {
 	if jerr := ctx.JSON(http.StatusOK, httpx.NewSuccessResponse(data)); jerr != nil {
 		_ = ctx.String(http.StatusOK, "success")
 	}

@@ -53,7 +53,7 @@ func TestEventBus_PublishSubscribe(t *testing.T) {
 			ID:        "evt-1",
 			Type:      "TestEvt",
 			Timestamp: time.Now(),
-			Metadata:  make(map[string]interface{}),
+			Metadata:  make(map[string]any),
 		},
 		AggregateID:   1,
 		AggregateType: "Agg",

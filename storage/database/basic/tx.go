@@ -13,7 +13,7 @@ type Tx struct {
 	tx *sql.Tx
 }
 
-func (t *Tx) Query(ctx context.Context, query string, args ...interface{}) (core.IRows, error) {
+func (t *Tx) Query(ctx context.Context, query string, args ...any) (core.IRows, error) {
 	rows, err := t.tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -21,11 +21,11 @@ func (t *Tx) Query(ctx context.Context, query string, args ...interface{}) (core
 	return &Rows{rows: rows}, nil
 }
 
-func (t *Tx) QueryRow(ctx context.Context, query string, args ...interface{}) core.IRow {
+func (t *Tx) QueryRow(ctx context.Context, query string, args ...any) core.IRow {
 	return &Row{row: t.tx.QueryRowContext(ctx, query, args...)}
 }
 
-func (t *Tx) Exec(ctx context.Context, query string, args ...interface{}) (sql.Result, error) {
+func (t *Tx) Exec(ctx context.Context, query string, args ...any) (sql.Result, error) {
 	return t.tx.ExecContext(ctx, query, args...)
 }
 
@@ -37,7 +37,7 @@ func (t *Tx) BeginTx(ctx context.Context, opts *sql.TxOptions) (core.ITransactio
 
 func (t *Tx) Ping(ctx context.Context) error { return t.db.PingContext(ctx) }
 func (t *Tx) Close() error                   { return nil }
-func (t *Tx) Raw() interface{}               { return t.tx }
+func (t *Tx) Raw() any                       { return t.tx }
 
 func (t *Tx) Commit() error   { return t.tx.Commit() }
 func (t *Tx) Rollback() error { return t.tx.Rollback() }

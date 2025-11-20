@@ -24,21 +24,21 @@ type IMessage interface {
 	GetTimestamp() time.Time
 
 	// GetPayload 获取消息数据
-	GetPayload() interface{}
+	GetPayload() any
 
 	// GetMetadata 获取元数据
-	GetMetadata() map[string]interface{}
+	GetMetadata() map[string]any
 }
 
 // Message 消息基础实现
 type Message struct {
-	ID        string                 `json:"id"`
-	Type      string                 `json:"type"`
-	Timestamp time.Time              `json:"timestamp"`
-	Payload   interface{}            `json:"payload"`
-	Metadata  map[string]interface{} `json:"metadata,omitempty"`
-	UserID    int64                  `json:"user_id,omitempty"`
-	RequestID string                 `json:"request_id,omitempty"`
+	ID        string         `json:"id"`
+	Type      string         `json:"type"`
+	Timestamp time.Time      `json:"timestamp"`
+	Payload   any            `json:"payload"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
+	UserID    int64          `json:"user_id,omitempty"`
+	RequestID string         `json:"request_id,omitempty"`
 }
 
 // GetID 获取消息ID
@@ -57,33 +57,33 @@ func (m *Message) GetTimestamp() time.Time {
 }
 
 // GetPayload 获取消息数据
-func (m *Message) GetPayload() interface{} {
+func (m *Message) GetPayload() any {
 	return m.Payload
 }
 
 // GetMetadata 获取元数据
-func (m *Message) GetMetadata() map[string]interface{} {
+func (m *Message) GetMetadata() map[string]any {
 	if m.Metadata == nil {
-		m.Metadata = make(map[string]interface{})
+		m.Metadata = make(map[string]any)
 	}
 	return m.Metadata
 }
 
 // SetMetadata 设置元数据
-func (m *Message) SetMetadata(key string, value interface{}) {
+func (m *Message) SetMetadata(key string, value any) {
 	if m.Metadata == nil {
-		m.Metadata = make(map[string]interface{})
+		m.Metadata = make(map[string]any)
 	}
 	m.Metadata[key] = value
 }
 
 // NewMessage 创建新消息
-func NewMessage(messageID, messageType string, data interface{}) *Message {
+func NewMessage(messageID, messageType string, data any) *Message {
 	return &Message{
 		ID:        messageID,
 		Type:      messageType,
 		Timestamp: time.Now(),
 		Payload:   data,
-		Metadata:  make(map[string]interface{}),
+		Metadata:  make(map[string]any),
 	}
 }

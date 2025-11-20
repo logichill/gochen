@@ -149,7 +149,7 @@ type RouteConfig struct {
     BasePath         string                    // 基础路径
     EnableBatch      bool                      // 启用批量操作
     EnablePagination bool                      // 启用分页
-    Validator        func(interface{}) error   // 自定义验证器
+    Validator        func(any) error   // 自定义验证器
     ErrorHandler     func(error) IResponse     // 错误处理器
     MaxPageSize      int                       // 最大分页大小
     DefaultPageSize  int                       // 默认分页大小
@@ -157,7 +157,7 @@ type RouteConfig struct {
     AllowedMethods   []string                  // 允许的 HTTP 方法
     CORS             *CORSConfig               // CORS 配置
     Middlewares      []Middleware              // 中间件
-    ResponseWrapper  func(interface{}) interface{} // 响应包装器
+    ResponseWrapper  func(any) any // 响应包装器
 }
 ```
 
@@ -224,7 +224,7 @@ return errors.NewInternalError(err, "database error")
 ## 自定义验证
 
 ```go
-func customUserValidator(user interface{}) error {
+func customUserValidator(user any) error {
     if u, ok := user.(*User); ok {
         if len(u.Name) < 2 {
             return errors.NewValidationError("用户名至少需要2个字符")

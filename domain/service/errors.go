@@ -25,7 +25,7 @@ func (e *ServiceError) Unwrap() error {
 }
 
 // NewValidationError 创建验证错误
-func NewValidationError(format string, args ...interface{}) *ServiceError {
+func NewValidationError(format string, args ...any) *ServiceError {
 	return &ServiceError{
 		Code:    "VALIDATION_ERROR",
 		Message: fmt.Sprintf(format, args...),
@@ -33,7 +33,7 @@ func NewValidationError(format string, args ...interface{}) *ServiceError {
 }
 
 // NewNotFoundError 创建未找到错误
-func NewNotFoundError(format string, args ...interface{}) *ServiceError {
+func NewNotFoundError(format string, args ...any) *ServiceError {
 	return &ServiceError{
 		Code:    "NOT_FOUND",
 		Message: fmt.Sprintf(format, args...),
@@ -41,7 +41,7 @@ func NewNotFoundError(format string, args ...interface{}) *ServiceError {
 }
 
 // NewConflictError 创建冲突错误
-func NewConflictError(format string, args ...interface{}) *ServiceError {
+func NewConflictError(format string, args ...any) *ServiceError {
 	return &ServiceError{
 		Code:    "CONFLICT",
 		Message: fmt.Sprintf(format, args...),
@@ -49,7 +49,7 @@ func NewConflictError(format string, args ...interface{}) *ServiceError {
 }
 
 // NewUnauthorizedError 创建未授权错误
-func NewUnauthorizedError(format string, args ...interface{}) *ServiceError {
+func NewUnauthorizedError(format string, args ...any) *ServiceError {
 	return &ServiceError{
 		Code:    "UNAUTHORIZED",
 		Message: fmt.Sprintf(format, args...),
@@ -57,7 +57,7 @@ func NewUnauthorizedError(format string, args ...interface{}) *ServiceError {
 }
 
 // NewForbiddenError 创建禁止访问错误
-func NewForbiddenError(format string, args ...interface{}) *ServiceError {
+func NewForbiddenError(format string, args ...any) *ServiceError {
 	return &ServiceError{
 		Code:    "FORBIDDEN",
 		Message: fmt.Sprintf(format, args...),
@@ -65,7 +65,7 @@ func NewForbiddenError(format string, args ...interface{}) *ServiceError {
 }
 
 // NewTooManyRequestsError 创建请求过多错误
-func NewTooManyRequestsError(format string, args ...interface{}) *ServiceError {
+func NewTooManyRequestsError(format string, args ...any) *ServiceError {
 	return &ServiceError{
 		Code:    "TOO_MANY_REQUESTS",
 		Message: fmt.Sprintf(format, args...),
@@ -73,7 +73,7 @@ func NewTooManyRequestsError(format string, args ...interface{}) *ServiceError {
 }
 
 // NewInternalError 创建内部错误
-func NewInternalError(cause error, format string, args ...interface{}) *ServiceError {
+func NewInternalError(cause error, format string, args ...any) *ServiceError {
 	return &ServiceError{
 		Code:    "INTERNAL_ERROR",
 		Message: fmt.Sprintf(format, args...),

@@ -30,7 +30,7 @@ type IRepository[T entity.IEntity[ID], ID comparable] interface {
     List(ctx context.Context, opts *QueryOptions) ([]T, error)
     
     // Count 统计数量
-    Count(ctx context.Context, filters map[string]interface{}) (int64, error)
+    Count(ctx context.Context, filters map[string]any) (int64, error)
 }
 ```
 
@@ -107,7 +107,7 @@ type QueryOptions struct {
     Sort *SortOption
     
     // 过滤条件
-    Filters map[string]interface{}
+    Filters map[string]any
     
     // 字段选择
     Fields []string
@@ -190,7 +190,7 @@ func (r *UserRepository) Delete(ctx context.Context, id int64) error {
 
 func (r *UserRepository) List(ctx context.Context, opts *repository.QueryOptions) ([]*User, error) {
     query := "SELECT * FROM users WHERE 1=1"
-    args := []interface{}{}
+    args := []any{}
     
     // 应用过滤条件
     if opts != nil && opts.Filters != nil {
@@ -230,9 +230,9 @@ func (r *UserRepository) List(ctx context.Context, opts *repository.QueryOptions
     return users, nil
 }
 
-func (r *UserRepository) Count(ctx context.Context, filters map[string]interface{}) (int64, error) {
+func (r *UserRepository) Count(ctx context.Context, filters map[string]any) (int64, error) {
     query := "SELECT COUNT(*) FROM users WHERE 1=1"
-    args := []interface{}{}
+    args := []any{}
     
     if status, ok := filters["status"]; ok {
         query += " AND status = ?"

@@ -59,7 +59,7 @@ func NewIntegrationEvent(
 	aggregateType string,
 	eventType string,
 	version uint64,
-	data map[string]interface{},
+	data map[string]any,
 	targetContext string,
 	sourceContext string,
 	correlationID string,
@@ -81,7 +81,7 @@ func NewIntegrationEventWithoutCorrelation(
 	aggregateType string,
 	eventType string,
 	version uint64,
-	data map[string]interface{},
+	data map[string]any,
 	targetContext string,
 	sourceContext string,
 ) *IntegrationEvent {
