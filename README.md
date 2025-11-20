@@ -9,7 +9,7 @@
 
 ### 核心能力 ✅
 
-✅ **渐进式架构** - 支持 CRUD → Audited → Event Sourcing 平滑演进  
+✅ **渐进式架构** - 支持按 CRUD → Audited → Event Sourcing 的路径逐步演进（阶段间可能需要适度重构和数据迁移）  
 ✅ **完整的事件溯源** - 事件存储、快照、投影、Outbox 模式齐全  
 ✅ **SOLID 原则** - 接口隔离、依赖倒置、开闭原则严格遵循  
 ✅ **泛型支持** - 充分利用 Go 1.21+ 泛型，类型安全且灵活  
@@ -64,16 +64,17 @@ eventing/                   # 事件系统（事件模型/存储/投影/出箱�
 │   ├── snapshot/           # 快照存储与管理器
 │   └── sql/                # SQL 实现（追加/查询/游标）
 ├── outbox/                 # Outbox 模式（仓储 + 发布器）
-│   ├── repository.go               # IOutboxRepository 接口
-│   ├── publisher.go                # IOutboxPublisher 接口
+│   ├── outbox.go                   # OutboxEntry + IOutboxRepository/IOutboxPublisher 接口
+│   ├── sql_repository.go           # 基于 IDatabase/ISql 的 SQL 仓储实现
+│   ├── publisher.go                # Outbox 发布器
 │   ├── publisher_parallel.go       # 并行发布器 🎉 NEW!
 │   ├── dlq.go                      # 死信队列 🎉 NEW!
 │   ├── batch.go                    # 批量操作 🎉 NEW!
 │   ├── cleanup.go                  # 清理策略 🎉 NEW!
 │   └── metrics.go                  # 监控指标 🎉 NEW!
 ├── projection/             # CQRS 投影管理
-│   ├── projection.go       # IProjection 接口
-│   ├── manager.go          # IProjectionManager 管理器
+│   ├── projection.go       # IProjection 接口（旧版投影管理器，已不推荐）
+│   ├── manager.go          # ProjectionManager 投影管理器（支持检查点）
 │   ├── checkpoint.go               # ICheckpointStore 接口 🎉 NEW!
 │   ├── checkpoint_sql.go           # SQL 实现 🎉 NEW!
 │   ├── checkpoint_memory.go        # 内存实现 🎉 NEW!
@@ -216,7 +217,7 @@ Gochen Shared 支持三个递进的复杂度级别，允许根据业务需求灵
    - 新增能力：完整事件历史、时间旅行、事件重放
 ```
 
-**平滑迁移示例**:
+**演进示例（阶段 1→2 基本无侵入，2→3 需要有意识重构和数据迁移）**:
 
 ```go
 // 阶段 1: 从简单 CRUD 开始
@@ -225,17 +226,17 @@ type Category struct {
     Name string
 }
 
-// 阶段 2: 后续需求变化，升级到审计模式（无需重构）
+// 阶段 2: 后续需求变化，升级到审计模式（实体结构基本无需重构）
 // - EntityFields 已包含审计字段
 // - 切换到 IAuditedRepository 即可
 
-// 阶段 3: 业务关键，升级到事件溯源
+// 阶段 3: 业务关键，升级到事件溯源（需要重构聚合模型与持久化方式）
 type Category struct {
     *entity.EventSourcedAggregate[int64]
     Name string
 }
-// - 重构为事件溯源聚合
-// - 历史数据可通过迁移工具转换
+// - 重构为事件溯源聚合（命令处理/事件模型/投影均需调整）
+// - 历史数据需要通过批处理/迁移工具转换为事件流
 ```
 
 ### 可插拔技术栈
@@ -661,11 +662,11 @@ func HandleCreateOrder(ctx context.Context, cmd *command.Command) error {
 }
 
 func main() {
-    // 3. 创建消息总线
-    messageBus := messaging.NewMessageBus(transport.NewMemoryTransport())
+    // 3. 创建消息总线（同步 Transport 能提供更清晰的错误语义）
+    messageBus := messaging.NewMessageBus(sync.NewSyncTransport())
     
     // 4. 创建命令总线并添加中间件
-    commandBus := command.NewCommandBus(messageBus)
+    commandBus := command.NewCommandBus(messageBus, nil)
     commandBus.Use(middleware.ValidationMiddleware())
     commandBus.Use(middleware.IdempotencyMiddleware(cache))
     commandBus.Use(middleware.TracingMiddleware())

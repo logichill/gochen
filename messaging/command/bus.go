@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"sync"
 
+	"gochen/logging"
 	"gochen/messaging"
+	"gochen/messaging/transport/memory"
+	synctransport "gochen/messaging/transport/sync"
 )
 
 // CommandBus 命令总线
@@ -25,6 +28,14 @@ type CommandBus struct {
 	// key: commandType, value: handler
 	handlers map[string]messaging.IMessageHandler
 	mutex    sync.RWMutex
+
+	// syncTransport 标记当前 CommandBus 所在的 Transport 是否为“同步执行”语义
+	//
+	// 说明：
+	//   - 当为 true 且底层 Transport 为同步实现（如 transport/sync），Dispatch 返回值通常可以反映 handler 的执行结果；
+	//   - 当为 false（典型如 memory/redisstreams/natsjetstream 等异步 Transport），Dispatch 的 error 仅保证传输层是否成功，
+	//     handler 的业务错误不会可靠地通过返回值传播。
+	syncTransport bool
 }
 
 // commandRoutingHandler 根据命令类型进行路由的适配器
@@ -81,10 +92,37 @@ func NewCommandBus(messageBus messaging.IMessageBus, config *CommandBusConfig) *
 		config = DefaultCommandBusConfig()
 	}
 
-	return &CommandBus{
+	bus := &CommandBus{
 		messageBus: messageBus,
 		handlers:   make(map[string]messaging.IMessageHandler),
 	}
+
+	// 尝试探测底层 Transport 类型，以便给出更明确的错误语义告警
+	type transportProvider interface {
+		GetTransport() messaging.Transport
+	}
+
+	if provider, ok := messageBus.(transportProvider); ok {
+		switch provider.GetTransport().(type) {
+		case *synctransport.SyncTransport:
+			bus.syncTransport = true
+		case *memory.MemoryTransport:
+			bus.syncTransport = false
+		default:
+			// 未知类型：保守假定为异步，并给出一次性告警
+			logging.GetLogger().Warn(context.Background(),
+				"CommandBus 使用的 Transport 类型未知，Dispatch 错误语义仅保证传输层；业务错误请通过领域返回值或监控钩子处理",
+				logging.String("transport_type", fmt.Sprintf("%T", provider.GetTransport())),
+			)
+		}
+	} else {
+		// 无法探测 Transport（自定义 IMessageBus 实现），同样给出一次性告警
+		logging.GetLogger().Warn(context.Background(),
+			"CommandBus 无法探测底层 Transport 类型，Dispatch 错误语义仅保证传输层；请确认所用 IMessageBus/Transport 的同步语义",
+		)
+	}
+
+	return bus
 }
 
 // RegisterHandler 注册命令处理器

@@ -85,6 +85,9 @@ func DefaultErrorHandler(err error) core.IResponse {
 		return bhttp.SuccessResponse(nil)
 	}
 
+	// 先将领域/事件存储/命令总线等错误规范化为 AppError
+	err = errors.Normalize(err)
+
 	// 根据错误类型返回不同的响应
 	switch {
 	case errors.IsValidation(err):

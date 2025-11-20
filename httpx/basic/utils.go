@@ -60,6 +60,10 @@ func (u *HttpUtils) WriteErrorResponse(ctx httpx.IHttpContext, err error) error 
 			return nil
 		}
 	}
+
+	// 优先规范化错误，确保尽可能使用统一的 ErrorCode 体系
+	err = errors.Normalize(err)
+
 	var (
 		status    int
 		message   string
@@ -97,6 +101,8 @@ func (u *HttpUtils) WriteErrorResponse(ctx httpx.IHttpContext, err error) error 
 	if jerr := ctx.JSON(status, httpx.NewErrorResponse(errorCode, message, "")); jerr != nil {
 		_ = ctx.String(http.StatusInternalServerError, fmt.Sprintf("%s: %s", errorCode, message))
 	}
+	// 标记已写出错误响应，避免在同一请求链路中重复写入
+	ctx.Set("response_written", true)
 	return nil
 }
 
