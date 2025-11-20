@@ -157,7 +157,6 @@ func (pm *ProjectionManager) ResumeFromCheckpoint(ctx context.Context, projectio
 	checkpointStore := pm.checkpointStore
 	eventStore := pm.eventStore
 	projection, exists := pm.projections[projectionName]
-	handlerMap := pm.handlers[projectionName]
 	pm.mutex.RUnlock()
 
 	if !exists {
@@ -170,21 +169,16 @@ func (pm *ProjectionManager) ResumeFromCheckpoint(ctx context.Context, projectio
 		return pm.StartProjection(projectionName)
 	}
 
-	if eventStore == nil {
-		projectionLogger.Warn(ctx, "事件存储未配置，无法从检查点重放，直接启动",
-			logging.String("projection", projectionName))
-		return pm.StartProjection(projectionName)
-	}
-
 	// 加载检查点
 	checkpoint, err := checkpointStore.Load(ctx, projectionName)
 	if err != nil {
 		if err == ErrCheckpointNotFound {
 			projectionLogger.Info(ctx, "检查点不存在，从头开始",
 				logging.String("projection", projectionName))
-			return pm.StartProjection(projectionName)
+			checkpoint = NewCheckpoint(projectionName, 0, "", time.Time{})
+		} else {
+			return fmt.Errorf("failed to load checkpoint: %w", err)
 		}
-		return fmt.Errorf("failed to load checkpoint: %w", err)
 	}
 
 	projectionLogger.Info(ctx, "从检查点恢复投影",
@@ -198,64 +192,158 @@ func (pm *ProjectionManager) ResumeFromCheckpoint(ctx context.Context, projectio
 		status.LastEventID = checkpoint.LastEventID
 		status.LastEventTime = checkpoint.LastEventTime
 		status.ProcessedEvents = checkpoint.Position
+		status.Status = "stopped"
+		status.LastError = ""
 		status.UpdatedAt = time.Now()
 	}
 	pm.mutex.Unlock()
 
-	// 启动投影（确保状态为 running，从而允许 handler 处理事件）
-	if err := pm.StartProjection(projectionName); err != nil {
+	if eventStore == nil {
+		projectionLogger.Warn(ctx, "事件存储未配置，无法从检查点重放，直接启动",
+			logging.String("projection", projectionName))
+		return pm.StartProjection(projectionName)
+	}
+
+	replayed, err := pm.replayProjectionFromCheckpoint(ctx, projectionName, projection, checkpoint)
+	if err != nil {
 		return err
 	}
 
-	// 重放从检查点后的事件
-	var events []eventing.Event
-	if extended, ok := eventStore.(store.IEventStoreExtended); ok {
-		stream, err := extended.GetEventStreamWithCursor(ctx, &store.StreamOptions{
-			After:    checkpoint.LastEventID,
-			Types:    projection.GetSupportedEventTypes(),
-			FromTime: checkpoint.LastEventTime,
-		})
-		if err != nil {
-			return fmt.Errorf("failed to stream events with cursor: %w", err)
-		}
-		events = stream.Events
-	} else {
-		events, err = eventStore.StreamEvents(ctx, checkpoint.LastEventTime)
-		if err != nil {
-			return fmt.Errorf("failed to load events from store: %w", err)
-		}
-	}
+	projectionLogger.Info(ctx, "从检查点恢复并完成历史回放",
+		logging.String("projection", projectionName),
+		logging.Int64("replayed_events", replayed))
 
+	return pm.StartProjection(projectionName)
+}
+
+func (pm *ProjectionManager) replayProjectionFromCheckpoint(ctx context.Context, projectionName string, projection IProjection, checkpoint *Checkpoint) (int64, error) {
 	supported := make(map[string]struct{})
 	for _, t := range projection.GetSupportedEventTypes() {
 		supported[t] = struct{}{}
 	}
 
-	for i := range events {
-		evt := &events[i]
+	lastEventID := checkpoint.LastEventID
+	fromTime := checkpoint.LastEventTime
+	var replayed int64
 
-		// 跳过已处理到的检查点事件及其之前的同时间戳事件，避免重放重复
-		if evt.GetTimestamp().Before(checkpoint.LastEventTime) {
-			continue
+	for {
+		events, hasMore, err := pm.fetchEventsForReplay(ctx, lastEventID, fromTime)
+		if err != nil {
+			return replayed, fmt.Errorf("failed to load events for projection %s: %w", projectionName, err)
 		}
-		if evt.GetTimestamp().Equal(checkpoint.LastEventTime) && evt.GetID() <= checkpoint.LastEventID {
-			continue
-		}
-
-		// 过滤投影未订阅的事件类型
-		if len(supported) > 0 {
-			if _, ok := supported[evt.GetType()]; !ok {
+		if len(events) == 0 {
+			if hasMore {
 				continue
 			}
+			break
 		}
 
-		handler := handlerMap[evt.GetType()]
-		if handler == nil {
-			continue
+		for i := range events {
+			evt := &events[i]
+			if len(supported) > 0 {
+				if _, ok := supported[evt.GetType()]; !ok {
+					continue
+				}
+			}
+
+			if err := pm.applyReplayEvent(ctx, projectionName, projection, evt); err != nil {
+				pm.mutex.Lock()
+				if status, ok := pm.statuses[projectionName]; ok && status != nil {
+					status.Status = "error"
+					status.LastError = err.Error()
+					status.UpdatedAt = time.Now()
+				}
+				pm.mutex.Unlock()
+
+				return replayed, fmt.Errorf("replay projection %s failed at event %s: %w", projectionName, evt.GetID(), err)
+			}
+
+			replayed++
+			lastEventID = evt.GetID()
+			fromTime = evt.GetTimestamp()
 		}
 
-		if err := handler.HandleEvent(ctx, evt); err != nil {
-			return fmt.Errorf("replay projection %s failed at event %s: %w", projectionName, evt.GetID(), err)
+		if !hasMore {
+			break
+		}
+	}
+
+	return replayed, nil
+}
+
+func (pm *ProjectionManager) fetchEventsForReplay(ctx context.Context, after string, fromTime time.Time) ([]eventing.Event, bool, error) {
+	if extended, ok := pm.eventStore.(store.IEventStoreExtended); ok {
+		stream, err := extended.GetEventStreamWithCursor(ctx, &store.StreamOptions{
+			After:    after,
+			FromTime: fromTime,
+		})
+		if err != nil {
+			return nil, false, err
+		}
+		if stream == nil {
+			return nil, false, nil
+		}
+		return stream.Events, stream.HasMore, nil
+	}
+
+	events, err := pm.eventStore.StreamEvents(ctx, fromTime)
+	if err != nil {
+		return nil, false, err
+	}
+
+	filtered := store.FilterEventsWithOptions(events, &store.StreamOptions{
+		After:    after,
+		FromTime: fromTime,
+	})
+	if filtered == nil {
+		return nil, false, nil
+	}
+	return filtered.Events, filtered.HasMore, nil
+}
+
+func (pm *ProjectionManager) applyReplayEvent(ctx context.Context, projectionName string, projection IProjection, evt eventing.IEvent) error {
+	checkpointStore := pm.checkpointStore
+
+	err := projection.Handle(ctx, evt)
+
+	var (
+		statusCopy       *ProjectionStatus
+		processedEvents  int64
+		lastEventID      string
+		lastEventTime    time.Time
+		checkpointNeeded bool
+	)
+
+	pm.mutex.Lock()
+	if status, ok := pm.statuses[projectionName]; ok && status != nil {
+		now := time.Now()
+		if err != nil {
+			status.FailedEvents++
+			status.LastError = err.Error()
+		} else {
+			status.ProcessedEvents++
+			status.LastEventID = evt.GetID()
+			status.LastEventTime = evt.GetTimestamp()
+			status.LastError = ""
+
+			processedEvents = status.ProcessedEvents
+			lastEventID = status.LastEventID
+			lastEventTime = status.LastEventTime
+			checkpointNeeded = true
+		}
+		status.UpdatedAt = now
+		statusCopy = status
+	}
+	pm.mutex.Unlock()
+
+	if err != nil {
+		return err
+	}
+
+	if checkpointStore != nil && checkpointNeeded && statusCopy != nil {
+		if saveErr := checkpointStore.Save(ctx, NewCheckpoint(projectionName, processedEvents, lastEventID, lastEventTime)); saveErr != nil {
+			projectionLogger.Warn(ctx, "保存检查点失败", logging.Error(saveErr),
+				logging.String("projection", projectionName))
 		}
 	}
 
@@ -292,6 +380,14 @@ func (pm *ProjectionManager) ResumeAllFromCheckpoint(ctx context.Context) error 
 
 // RegisterProjection 注册投影
 func (pm *ProjectionManager) RegisterProjection(projection IProjection) error {
+	return pm.RegisterProjectionWithContext(context.Background(), projection)
+}
+
+// RegisterProjectionWithContext 注册投影（支持上下文透传）
+func (pm *ProjectionManager) RegisterProjectionWithContext(ctx context.Context, projection IProjection) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if projection == nil {
 		return fmt.Errorf("projection cannot be nil")
 	}
@@ -324,25 +420,37 @@ func (pm *ProjectionManager) RegisterProjection(projection IProjection) error {
 		handler := &projectionEventHandler{projection: projection, manager: pm}
 		pm.handlers[name][eventType] = handler
 
-		if err := pm.eventBus.SubscribeEvent(context.Background(), eventType, handler); err != nil {
+		if err := pm.eventBus.SubscribeEvent(ctx, eventType, handler); err != nil {
 			// 回滚当前投影的注册状态，避免半注册
 			delete(pm.projections, name)
 			delete(pm.statuses, name)
 			delete(pm.handlers, name)
 			for t, h := range subscribedHandlers {
-				_ = pm.eventBus.UnsubscribeEvent(context.Background(), t, h)
+				if unSubErr := pm.eventBus.UnsubscribeEvent(ctx, t, h); unSubErr != nil {
+					projectionLogger.Warn(ctx, "订阅回滚取消订阅失败", logging.Error(unSubErr),
+						logging.String("projection", name), logging.String("event_type", t))
+				}
 			}
 			return fmt.Errorf("failed to subscribe to event type %s: %w", eventType, err)
 		}
 		subscribedHandlers[eventType] = handler
 	}
 
-	projectionLogger.Info(context.Background(), "[ProjectionManager] 注册投影", logging.String("projection", name))
+	projectionLogger.Info(ctx, "[ProjectionManager] 注册投影", logging.String("projection", name))
 	return nil
 }
 
 // UnregisterProjection 取消注册投影
 func (pm *ProjectionManager) UnregisterProjection(name string) error {
+	return pm.UnregisterProjectionWithContext(context.Background(), name)
+}
+
+// UnregisterProjectionWithContext 取消注册投影（支持上下文透传）
+func (pm *ProjectionManager) UnregisterProjectionWithContext(ctx context.Context, name string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	pm.mutex.Lock()
 	defer pm.mutex.Unlock()
 
@@ -357,14 +465,14 @@ func (pm *ProjectionManager) UnregisterProjection(name string) error {
 			handler = pm.handlers[name][eventType]
 		}
 		if handler == nil {
-			projectionLogger.Warn(context.Background(), "[ProjectionManager] 找不到已注册的处理器实例，可能无法正确取消订阅",
+			projectionLogger.Warn(ctx, "[ProjectionManager] 找不到已注册的处理器实例，可能无法正确取消订阅",
 				logging.String("projection", name),
 				logging.String("event_type", eventType),
 			)
 		}
 
-		if err := pm.eventBus.UnsubscribeEvent(context.Background(), eventType, handler); err != nil {
-			projectionLogger.Warn(context.Background(), "取消订阅事件失败", logging.Error(err),
+		if err := pm.eventBus.UnsubscribeEvent(ctx, eventType, handler); err != nil {
+			projectionLogger.Warn(ctx, "取消订阅事件失败", logging.Error(err),
 				logging.String("event_type", eventType),
 				logging.String("projection", name),
 			)
@@ -379,7 +487,7 @@ func (pm *ProjectionManager) UnregisterProjection(name string) error {
 	delete(pm.statuses, name)
 	delete(pm.handlers, name)
 
-	projectionLogger.Info(context.Background(), "[ProjectionManager] 取消注册投影", logging.String("projection", name))
+	projectionLogger.Info(ctx, "[ProjectionManager] 取消注册投影", logging.String("projection", name))
 	return nil
 }
 

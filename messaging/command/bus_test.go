@@ -143,6 +143,35 @@ func TestCommandBus_Middleware(t *testing.T) {
 	assert.True(t, handlerExecuted, "handler should be executed")
 }
 
+// TestCommandBus_RegisterHandler_ReplacesExisting 确保重复注册会替换旧处理器而非重复订阅
+func TestCommandBus_RegisterHandler_ReplacesExisting(t *testing.T) {
+	transport := synctransport.NewSyncTransport()
+	require.NoError(t, transport.Start(context.Background()))
+	defer transport.Close()
+
+	messageBus := messaging.NewMessageBus(transport)
+	commandBus := NewCommandBus(messageBus, nil)
+
+	var firstCalled int32
+	require.NoError(t, commandBus.RegisterHandler("CreateUser", func(ctx context.Context, cmd *Command) error {
+		atomic.AddInt32(&firstCalled, 1)
+		return nil
+	}))
+
+	var secondCalled int32
+	require.NoError(t, commandBus.RegisterHandlerWithContext(context.Background(), "CreateUser", func(ctx context.Context, cmd *Command) error {
+		atomic.AddInt32(&secondCalled, 1)
+		return nil
+	}))
+
+	cmd := NewCommand("cmd-1", "CreateUser", 1, "User", nil)
+	require.NoError(t, commandBus.Dispatch(context.Background(), cmd))
+
+	assert.Equal(t, int32(0), atomic.LoadInt32(&firstCalled), "旧处理器不应再被调用")
+	assert.Equal(t, int32(1), atomic.LoadInt32(&secondCalled), "新处理器应被调用一次")
+	assert.Equal(t, 1, transport.Stats().HandlerCount, "重复注册后应只保留一个订阅")
+}
+
 // TestCommandBus_HasHandler 测试处理器检查
 func TestCommandBus_HasHandler(t *testing.T) {
 	transport := memory.NewMemoryTransport(10, 2)
@@ -163,24 +192,33 @@ func TestCommandBus_HasHandler(t *testing.T) {
 	assert.False(t, commandBus.HasHandler("DeleteUser"))
 }
 
-// Test command handler duplicate registration should fail
+// Test command handler duplicate registration should replace existing handler
 func TestCommandBus_RegisterHandler_Duplicate(t *testing.T) {
-	transport := memory.NewMemoryTransport(10, 2)
+	transport := synctransport.NewSyncTransport()
 	require.NoError(t, transport.Start(context.Background()))
 	defer transport.Close()
 
 	messageBus := messaging.NewMessageBus(transport)
 	commandBus := NewCommandBus(messageBus, nil)
 
+	var first int32
+	require.NoError(t, commandBus.RegisterHandler("CreateUser", func(ctx context.Context, cmd *Command) error {
+		atomic.AddInt32(&first, 1)
+		return nil
+	}))
+
+	var second int32
 	err := commandBus.RegisterHandler("CreateUser", func(ctx context.Context, cmd *Command) error {
+		atomic.AddInt32(&second, 1)
 		return nil
 	})
 	require.NoError(t, err)
 
-	err = commandBus.RegisterHandler("CreateUser", func(ctx context.Context, cmd *Command) error {
-		return nil
-	})
-	assert.Error(t, err)
+	cmd := NewCommand("cmd-duplicate", "CreateUser", 1, "User", nil)
+	require.NoError(t, commandBus.Dispatch(context.Background(), cmd))
+
+	assert.Equal(t, int32(0), atomic.LoadInt32(&first))
+	assert.Equal(t, int32(1), atomic.LoadInt32(&second))
 }
 
 // TestCommandBus_NilCommand 测试空命令
