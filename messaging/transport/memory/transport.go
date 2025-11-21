@@ -38,8 +38,8 @@ type MemoryTransport struct {
 // NewMemoryTransport 创建内存传输实例
 //
 // 参数:
-//   - queueSize: 队列大小（默认 1000）
-//   - workerCount: Worker 数量（默认 4）
+//   - queueSize: 队列大小（<=0 时使用默认 1000）
+//   - workerCount: Worker 数量（<=0 时使用默认 4）
 //
 // 返回:
 //   - *MemoryTransport: 传输实例
@@ -51,6 +51,23 @@ func NewMemoryTransport(queueSize, workerCount int) *MemoryTransport {
 		workerCount = 4
 	}
 
+	return newMemoryTransport(queueSize, workerCount)
+}
+
+// NewMemoryTransportForTest 创建仅用于测试的内存传输实例
+//
+// 特性：
+//   - 当需要验证队列 drain 等行为时，允许创建 0 worker 的 Transport；
+//   - 生产代码应始终使用 NewMemoryTransport，避免无 worker 导致消息永远不被消费。
+func NewMemoryTransportForTest(queueSize int) *MemoryTransport {
+	if queueSize <= 0 {
+		queueSize = 1000
+	}
+	return newMemoryTransport(queueSize, 0)
+}
+
+// newMemoryTransport 内部构造函数，复用初始化逻辑。
+func newMemoryTransport(queueSize, workerCount int) *MemoryTransport {
 	return &MemoryTransport{
 		handlers:    make(map[string][]messaging.IMessageHandler),
 		queue:       make(chan messaging.IMessage, queueSize),

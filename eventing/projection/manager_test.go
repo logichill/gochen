@@ -436,3 +436,114 @@ func TestProjectionManager_ResumeFromCheckpoint_ReplayFailureStops(t *testing.T)
 	assert.Equal(t, int64(1), status.ProcessedEvents) // 未推进
 	assert.Contains(t, status.LastError, "fail")
 }
+
+// Test 14: 重放阶段重试成功（首次失败，后续重试成功）
+func TestProjectionManager_ReplayRetry_Success(t *testing.T) {
+	ctx := context.Background()
+	eventStore := store.NewMemoryEventStore()
+	eventBus := &MockEventBus{}
+
+	cfg := &ProjectionConfig{
+		MaxRetries:   2,              // 允许最多重试 2 次（总尝试 <=3）
+		RetryBackoff: 0 * time.Millisecond,
+	}
+	manager := NewProjectionManagerWithConfig(eventStore, eventBus, cfg)
+
+	var attempts int
+	projection := NewMockProjection("retry-projection", []string{"TestEvent"})
+	projection.handleFunc = func(ctx context.Context, event eventing.IEvent) error {
+		attempts++
+		if attempts == 1 {
+			return fmt.Errorf("fail-once:%s", event.GetID())
+		}
+		return nil
+	}
+	require.NoError(t, manager.RegisterProjection(projection))
+	manager.checkpointStore = NewMemoryCheckpointStore()
+
+	evt := eventing.NewEvent(1, "Agg", "TestEvent", 1, nil)
+	err := manager.applyReplayEvent(ctx, "retry-projection", projection, evt)
+	require.NoError(t, err)
+
+	// 第一次失败 + 第二次成功
+	assert.Equal(t, 2, attempts)
+
+	status, sErr := manager.GetProjectionStatus("retry-projection")
+	require.NoError(t, sErr)
+	assert.Equal(t, int64(1), status.ProcessedEvents)
+	assert.Equal(t, int64(0), status.FailedEvents)
+	assert.Equal(t, evt.ID, status.LastEventID)
+}
+
+// Test 15: 重放阶段重试超过上限仍失败
+func TestProjectionManager_ReplayRetry_MaxRetriesExceeded(t *testing.T) {
+	ctx := context.Background()
+	eventStore := store.NewMemoryEventStore()
+	eventBus := &MockEventBus{}
+
+	cfg := &ProjectionConfig{
+		MaxRetries:   2,              // 最多重试 2 次（总尝试 3 次）
+		RetryBackoff: 0 * time.Millisecond,
+	}
+	manager := NewProjectionManagerWithConfig(eventStore, eventBus, cfg)
+
+	var attempts int
+	projection := NewMockProjection("retry-projection", []string{"TestEvent"})
+	projection.handleFunc = func(ctx context.Context, event eventing.IEvent) error {
+		attempts++
+		return fmt.Errorf("always-fail:%s", event.GetID())
+	}
+	require.NoError(t, manager.RegisterProjection(projection))
+
+	evt := eventing.NewEvent(1, "Agg", "TestEvent", 1, nil)
+	err := manager.applyReplayEvent(ctx, "retry-projection", projection, evt)
+	require.Error(t, err)
+
+	// 初始 + 2 次重试，共 3 次
+	assert.Equal(t, 3, attempts)
+
+	status, sErr := manager.GetProjectionStatus("retry-projection")
+	require.NoError(t, sErr)
+	// 重放失败时不会推进 ProcessedEvents，只统计 FailedEvents
+	assert.Equal(t, int64(0), status.ProcessedEvents)
+	assert.Equal(t, int64(1), status.FailedEvents)
+	assert.Contains(t, status.LastError, "always-fail")
+}
+
+// Test 16: 重放阶段在重试 backoff 中被 context 取消
+func TestProjectionManager_ReplayRetry_ContextCanceled(t *testing.T) {
+	// 使用带取消的上下文，并在调用前即取消，确保在 backoff 阶段通过 ctx.Done 中断
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	eventStore := store.NewMemoryEventStore()
+	eventBus := &MockEventBus{}
+
+	cfg := &ProjectionConfig{
+		MaxRetries:   2,
+		RetryBackoff: 10 * time.Millisecond,
+	}
+	manager := NewProjectionManagerWithConfig(eventStore, eventBus, cfg)
+
+	var attempts int
+	projection := NewMockProjection("retry-projection", []string{"TestEvent"})
+	projection.handleFunc = func(ctx context.Context, event eventing.IEvent) error {
+		attempts++
+		return fmt.Errorf("cancelled:%s", event.GetID())
+	}
+	require.NoError(t, manager.RegisterProjection(projection))
+
+	evt := eventing.NewEvent(1, "Agg", "TestEvent", 1, nil)
+	err := manager.applyReplayEvent(ctx, "retry-projection", projection, evt)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+
+	// 上下文在首次失败后即取消，不会进入下一轮重试
+	assert.Equal(t, 1, attempts)
+
+	status, sErr := manager.GetProjectionStatus("retry-projection")
+	require.NoError(t, sErr)
+	// 因为在状态更新前即返回，Processed/Failed 都不应被修改
+	assert.Equal(t, int64(0), status.ProcessedEvents)
+	assert.Equal(t, int64(0), status.FailedEvents)
+}

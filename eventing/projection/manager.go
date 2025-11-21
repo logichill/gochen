@@ -52,7 +52,12 @@ type ProjectionStatus struct {
 //
 // 用于配置投影的错误处理和重试策略。
 type ProjectionConfig struct {
-	// MaxRetries 最大重试次数（0 表示不重试）
+	// MaxRetries 表示单个事件在失败后的最大重试次数。
+	//
+	// 语义说明：
+	//   - 0 表示不重试（仅执行一次 Handle）；
+	//   - >0 表示在首次失败后最多再重试 MaxRetries 次（总尝试次数 <= 1+MaxRetries）；
+	//   - <0 视为配置错误，将按 0 处理（不重试）。
 	MaxRetries int
 
 	// RetryBackoff 重试退避时间
@@ -304,7 +309,45 @@ func (pm *ProjectionManager) fetchEventsForReplay(ctx context.Context, after str
 func (pm *ProjectionManager) applyReplayEvent(ctx context.Context, projectionName string, projection IProjection, evt eventing.IEvent) error {
 	checkpointStore := pm.checkpointStore
 
-	err := projection.Handle(ctx, evt)
+	var err error
+	// 重放阶段的重试：仅在 ResumeFromCheckpoint/replay 中生效，避免影响在线事件总线语义。
+	maxRetries := 0
+	backoff := time.Duration(0)
+	if pm.config != nil {
+		if pm.config.MaxRetries > 0 {
+			maxRetries = pm.config.MaxRetries
+		}
+		backoff = pm.config.RetryBackoff
+	}
+
+	for attempt := 0; ; attempt++ {
+		err = projection.Handle(ctx, evt)
+		if err == nil {
+			break
+		}
+
+		// 已达到最大重试次数（attempt 表示已进行的重试次数）
+		if attempt >= maxRetries {
+			break
+		}
+
+		// 记录重试日志，便于生产环境排查
+		projectionLogger.Warn(ctx, "投影重放事件重试",
+			logging.String("projection", projectionName),
+			logging.String("event_id", evt.GetID()),
+			logging.Int("attempt", attempt+1), // 第几次重试（从 1 开始）
+			logging.Error(err),
+		)
+
+		if backoff > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(backoff):
+			}
+		}
+		// 继续下一次重试
+	}
 
 	var (
 		statusCopy       *ProjectionStatus

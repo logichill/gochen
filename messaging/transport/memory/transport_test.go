@@ -108,10 +108,25 @@ func TestMemoryTransport_CloseWithContextTimeout(t *testing.T) {
 	timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
 	defer cancel()
 
-	err := tpt.CloseWithContext(timeoutCtx)
+	_, err := tpt.CloseWithContext(timeoutCtx)
 	require.Error(t, err)
 
 	// 确认 CloseWithTimeout 也能返回超时
 	err = tpt.CloseWithTimeout(10 * time.Millisecond)
 	require.Error(t, err)
+}
+
+func TestMemoryTransport_CloseWithPendingMessages(t *testing.T) {
+	// 不启动 worker，避免消费队列中的消息，只验证 CloseWithContext drain 语义
+	tpt := NewMemoryTransportForTest(4)
+	ctx := context.Background()
+	require.NoError(t, tpt.Start(ctx))
+
+	// 塞入两条消息但不提供 handler，确保它们留在队列
+	require.NoError(t, tpt.Publish(ctx, &msg.Message{ID: "m1", Type: "none"}))
+	require.NoError(t, tpt.Publish(ctx, &msg.Message{ID: "m2", Type: "none"}))
+
+	pending, err := tpt.CloseWithContext(ctx)
+	require.NoError(t, err)
+	require.Len(t, pending, 2)
 }
