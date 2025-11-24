@@ -34,18 +34,6 @@ type Logger interface {
 
 	// WithFields 添加字段，返回新的Logger
 	WithFields(fields ...Field) Logger
-
-	// 带错误的日志方法（用于兼容旧代码）
-	DebugWithError(ctx context.Context, err error, msg string, fields ...Field)
-	InfoWithError(ctx context.Context, err error, msg string, fields ...Field)
-	WarnWithError(ctx context.Context, err error, msg string, fields ...Field)
-	ErrorWithError(ctx context.Context, err error, msg string, fields ...Field)
-
-	// 格式化日志方法（用于兼容旧代码）
-	Debugf(ctx context.Context, format string, args ...any)
-	Infof(ctx context.Context, format string, args ...any)
-	Warnf(ctx context.Context, format string, args ...any)
-	Errorf(ctx context.Context, format string, args ...any)
 }
 
 // Field 日志字段
@@ -152,44 +140,6 @@ func (l *StdLogger) WithFields(fields ...Field) Logger {
 	}
 }
 
-// 带错误的日志方法实现
-func (l *StdLogger) DebugWithError(ctx context.Context, err error, msg string, fields ...Field) {
-	allFields := append(fields, Error(err))
-	l.Debug(ctx, msg, allFields...)
-}
-
-func (l *StdLogger) InfoWithError(ctx context.Context, err error, msg string, fields ...Field) {
-	allFields := append(fields, Error(err))
-	l.Info(ctx, msg, allFields...)
-}
-
-func (l *StdLogger) WarnWithError(ctx context.Context, err error, msg string, fields ...Field) {
-	allFields := append(fields, Error(err))
-	l.Warn(ctx, msg, allFields...)
-}
-
-func (l *StdLogger) ErrorWithError(ctx context.Context, err error, msg string, fields ...Field) {
-	allFields := append(fields, Error(err))
-	l.Error(ctx, msg, allFields...)
-}
-
-// 格式化日志方法实现
-func (l *StdLogger) Debugf(ctx context.Context, format string, args ...any) {
-	l.Debug(ctx, fmt.Sprintf(format, args...))
-}
-
-func (l *StdLogger) Infof(ctx context.Context, format string, args ...any) {
-	l.Info(ctx, fmt.Sprintf(format, args...))
-}
-
-func (l *StdLogger) Warnf(ctx context.Context, format string, args ...any) {
-	l.Warn(ctx, fmt.Sprintf(format, args...))
-}
-
-func (l *StdLogger) Errorf(ctx context.Context, format string, args ...any) {
-	l.Error(ctx, fmt.Sprintf(format, args...))
-}
-
 // NoopLogger 空日志实现（用于测试）
 type NoopLogger struct{}
 
@@ -202,18 +152,6 @@ func (l *NoopLogger) Info(ctx context.Context, msg string, fields ...Field)  {}
 func (l *NoopLogger) Warn(ctx context.Context, msg string, fields ...Field)  {}
 func (l *NoopLogger) Error(ctx context.Context, msg string, fields ...Field) {}
 func (l *NoopLogger) WithFields(fields ...Field) Logger                      { return l }
-
-// 带错误的日志方法（空实现）
-func (l *NoopLogger) DebugWithError(ctx context.Context, err error, msg string, fields ...Field) {}
-func (l *NoopLogger) InfoWithError(ctx context.Context, err error, msg string, fields ...Field)  {}
-func (l *NoopLogger) WarnWithError(ctx context.Context, err error, msg string, fields ...Field)  {}
-func (l *NoopLogger) ErrorWithError(ctx context.Context, err error, msg string, fields ...Field) {}
-
-// 格式化日志方法（空实现）
-func (l *NoopLogger) Debugf(ctx context.Context, format string, args ...any) {}
-func (l *NoopLogger) Infof(ctx context.Context, format string, args ...any)  {}
-func (l *NoopLogger) Warnf(ctx context.Context, format string, args ...any)  {}
-func (l *NoopLogger) Errorf(ctx context.Context, format string, args ...any) {}
 
 // 全局Logger
 var globalLogger Logger = NewStdLogger("")

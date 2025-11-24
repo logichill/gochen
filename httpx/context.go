@@ -5,8 +5,6 @@ type IResponseWriter interface {
 	// 状态和头部
 	SetStatus(code int)
 	SetHeader(key, value string)
-	Status(code int)          // 兼容性方法
-	Header(key, value string) // 兼容性方法
 
 	// 响应内容
 	JSON(code int, obj any) error

@@ -29,11 +29,11 @@ import (
 //	// 租户 B 的事件
 //	err := tenantProjector.Handle(ctx, eventB) // 跳过
 type TenantAwareProjector struct {
-	projector Projector
+	projector IProjection
 }
 
 // NewTenantAwareProjector 创建租户感知的投影
-func NewTenantAwareProjector(p Projector) Projector {
+func NewTenantAwareProjector(p IProjection) IProjection {
 	return &TenantAwareProjector{
 		projector: p,
 	}
@@ -45,7 +45,7 @@ func (p *TenantAwareProjector) GetName() string {
 }
 
 // Handle 处理事件（自动过滤租户）
-func (p *TenantAwareProjector) Handle(ctx context.Context, event eventing.Event) error {
+func (p *TenantAwareProjector) Handle(ctx context.Context, event eventing.IEvent) error {
 	// 提取当前租户 ID
 	contextTenantID := httpx.GetTenantID(ctx)
 	if contextTenantID == "" {
@@ -53,8 +53,7 @@ func (p *TenantAwareProjector) Handle(ctx context.Context, event eventing.Event)
 		return p.projector.Handle(ctx, event)
 	}
 
-	// 提取事件的租户 ID
-	eventTenantID := extractTenantIDFromEvent(&event)
+	eventTenantID := extractTenantIDFromMessage(event)
 
 	// 只处理属于当前租户的事件
 	if eventTenantID == contextTenantID {
@@ -68,6 +67,10 @@ func (p *TenantAwareProjector) Handle(ctx context.Context, event eventing.Event)
 // GetSupportedEventTypes 获取支持的事件类型
 func (p *TenantAwareProjector) GetSupportedEventTypes() []string {
 	return p.projector.GetSupportedEventTypes()
+}
+
+func (p *TenantAwareProjector) GetStatus() ProjectionStatus {
+	return p.projector.GetStatus()
 }
 
 // Rebuild 重建投影
@@ -98,6 +101,18 @@ func extractTenantIDFromEvent(event *eventing.Event) string {
 	}
 	if tenantID, ok := event.Metadata["tenant_id"].(string); ok {
 		return tenantID
+	}
+	return ""
+}
+
+func extractTenantIDFromMessage(event eventing.IEvent) string {
+	if event == nil {
+		return ""
+	}
+	if msg := event.GetMetadata(); msg != nil {
+		if tenantID, ok := msg["tenant_id"].(string); ok {
+			return tenantID
+		}
 	}
 	return ""
 }

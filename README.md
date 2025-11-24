@@ -424,8 +424,8 @@ type IProjection interface {
     Reset(ctx context.Context) error
 }
 
-// IProjectionManager 投影管理器接口
-type IProjectionManager interface {
+// ProjectionManager 投影管理器接口
+type ProjectionManager interface {
     // Register 注册投影
     Register(projection IProjection) error
     

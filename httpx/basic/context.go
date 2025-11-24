@@ -97,8 +97,6 @@ func (c *HttpContext) Data(code int, contentType string, data []byte) error {
 	}
 	return err
 }
-func (c *HttpContext) Status(code int)                      { c.SetStatus(code) }
-func (c *HttpContext) Header(key, value string)             { c.SetHeader(key, value) }
 func (c *HttpContext) GetContext() httpx.IRequestContext    { return c.reqCtx }
 func (c *HttpContext) SetContext(ctx httpx.IRequestContext) { c.reqCtx = ctx }
 func (c *HttpContext) GetQueryParams() url.Values           { return c.request.URL.Query() }

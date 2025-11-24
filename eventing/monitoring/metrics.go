@@ -111,13 +111,6 @@ func (m *Metrics) RecordCacheMiss() { atomic.AddInt64(&m.CacheMisses, 1) }
 // RecordCacheEviction 记录缓存驱逐
 func (m *Metrics) RecordCacheEviction() { atomic.AddInt64(&m.CacheEvictions, 1) }
 
-// 兼容保留：以下方法留空以避免破坏既有调用
-func (m *Metrics) RecordTaskEvaluationLatency(duration time.Duration) {}
-func (m *Metrics) RecordXPAwardLatency(duration time.Duration)        {}
-func (m *Metrics) RecordPointsAwardLatency(duration time.Duration)    {}
-func (m *Metrics) RecordAggregateRebuild(aggregateType string, eventCount int, duration time.Duration, fromSnapshot bool) {
-}
-
 // MetricsSnapshot 指标快照（用于读取）
 type MetricsSnapshot struct {
 	// 事件存储指标

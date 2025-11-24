@@ -21,11 +21,6 @@ type IHttpServer interface {
 	Start(addr string) error
 	Stop(ctx context.Context) error
 
-	RegisterRoute(method, path string, handler any)
-	RegisterGroup(prefix string) IRouteGroup
-	RegisterGlobalMiddleware(middleware any)
-	RegisterMiddleware(path string, middleware any)
-
 	HealthCheck() error
 	GetRaw() any
 }
@@ -45,8 +40,4 @@ type IRouteGroup interface {
 
 	Group(prefix string) IRouteGroup
 	Use(middleware ...Middleware) IRouteGroup
-
-	// 保留动态注册能力，兼容不同框架
-	RegisterRoute(method, path string, handler any)
-	RegisterMiddleware(middleware any)
 }

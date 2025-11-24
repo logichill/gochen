@@ -183,16 +183,5 @@ func (c *MockHttpContextWithHeaders) GetHeader(key string) string {
 	return c.headers[key]
 }
 
-func (c *MockHttpContextWithHeaders) Header(key, value string) {
-	if c.headers == nil {
-		c.headers = make(map[string]string)
-	}
-	c.headers[key] = value
-}
-
-func (c *MockHttpContextWithHeaders) Status(code int) {
-	log.Printf("Status set to: %d", code)
-}
-
 // SimpleDelegateHandler 简单委托处理器
 type SimpleDelegateHandler func(httpx.IHttpContext) error

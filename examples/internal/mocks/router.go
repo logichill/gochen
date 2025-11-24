@@ -72,14 +72,6 @@ func (r *MockRouter) Use(middlewares ...httpx.Middleware) httpx.IRouteGroup {
 	return r
 }
 
-func (r *MockRouter) RegisterRoute(method, path string, handler any) {
-	// 简化实现
-}
-
-func (r *MockRouter) RegisterMiddleware(middleware any) {
-	// 简化实现
-}
-
 // PrintRoutes 打印路由信息
 func (r *MockRouter) PrintRoutes() {
 	log.Printf("注册的路由:")
@@ -186,12 +178,6 @@ func (r *MockAdvancedRouter) Use(middlewares ...httpx.Middleware) httpx.IRouteGr
 	return r
 }
 
-func (r *MockAdvancedRouter) RegisterRoute(method, path string, handler any) {
-}
-
-func (r *MockAdvancedRouter) RegisterMiddleware(middleware any) {
-}
-
 // PrintRoutes 打印路由信息
 func (r *MockAdvancedRouter) PrintRoutes() {
 	log.Printf("注册的高级路由:")
@@ -296,12 +282,6 @@ func (r *MockRouterWithMiddleware) Group(prefix string) httpx.IRouteGroup {
 
 func (r *MockRouterWithMiddleware) Use(middlewares ...httpx.Middleware) httpx.IRouteGroup {
 	return r
-}
-
-func (r *MockRouterWithMiddleware) RegisterRoute(method, path string, handler any) {
-}
-
-func (r *MockRouterWithMiddleware) RegisterMiddleware(middleware any) {
 }
 
 // PrintRoutes 打印路由信息

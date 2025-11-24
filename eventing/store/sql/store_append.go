@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"gochen/eventing"
+	"gochen/eventing/monitoring"
 	log "gochen/logging"
 	"gochen/storage/database"
 )
@@ -98,7 +99,7 @@ func (s *SQLEventStore) AppendEventsWithDB(ctx context.Context, db database.IDat
 		}
 	}
 	duration := time.Since(start)
-	eventing.GlobalMetrics().RecordEventSaved(len(events), duration)
+	monitoring.GlobalMetrics().RecordEventSaved(len(events), duration)
 	log.GetLogger().Debug(ctx, "append batch done", log.Int64("aggregate_id", aggregateID), log.Int("written", len(events)), log.Int64("ms", duration.Milliseconds()))
 	return nil
 }
