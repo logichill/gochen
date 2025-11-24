@@ -83,11 +83,6 @@ func DefaultProjectionConfig() *ProjectionConfig {
 	}
 }
 
-// ProjectionManager 投影管理器
-//
-// 注意：历史上该类型曾命名为 IProjectionManager（违反接口命名约定），
-// 为保持向后兼容，仍保留 IProjectionManager 作为别名类型，但推荐新代码
-// 直接使用 ProjectionManager。
 type ProjectionManager struct {
 	projections     map[string]IProjection
 	eventStore      store.IEventStore
@@ -98,9 +93,6 @@ type ProjectionManager struct {
 	checkpointStore ICheckpointStore // 检查点存储（可选）
 	mutex           sync.RWMutex
 }
-
-// Deprecated: IProjectionManager 仅为向后兼容而保留，请使用 ProjectionManager。
-type IProjectionManager = ProjectionManager
 
 // NewProjectionManager 创建投影管理器
 func NewProjectionManager(eventStore store.IEventStore, eventBus bus.IEventBus) *ProjectionManager {

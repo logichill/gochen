@@ -11,11 +11,11 @@ import (
 // EventSourcedAutoRegistrar 简化事件处理器与投影注册
 type EventSourcedAutoRegistrar struct {
 	eventBus          bus.IEventBus
-	projectionManager *projection.IProjectionManager
+	projectionManager *projection.ProjectionManager
 }
 
 // NewEventSourcedAutoRegistrar 创建注册器
-func NewEventSourcedAutoRegistrar(eventBus bus.IEventBus, manager *projection.IProjectionManager) *EventSourcedAutoRegistrar {
+func NewEventSourcedAutoRegistrar(eventBus bus.IEventBus, manager *projection.ProjectionManager) *EventSourcedAutoRegistrar {
 	return &EventSourcedAutoRegistrar{
 		eventBus:          eventBus,
 		projectionManager: manager,

@@ -130,21 +130,6 @@ func (s *HttpServer) Stop(ctx context.Context) error {
 	return s.server.Shutdown(ctx)
 }
 
-// 动态注册（兼容不同框架）
-func (s *HttpServer) RegisterRoute(method, path string, handler any) {
-	if h, ok := handler.(httpx.HttpHandler); ok {
-		_ = s.addRoute(method, path, h)
-	}
-}
-func (s *HttpServer) RegisterGroup(prefix string) httpx.IRouteGroup { return s.Group(prefix) }
-func (s *HttpServer) RegisterGlobalMiddleware(middleware any) {
-	if mw, ok := middleware.(httpx.Middleware); ok {
-		s.Use(mw)
-	}
-}
-func (s *HttpServer) RegisterMiddleware(path string, middleware any) { /* 标准库不支持路径级中间件，忽略 */
-}
-
 func (s *HttpServer) HealthCheck() error { return nil }
 func (s *HttpServer) GetRaw() any        { return s.mux }
 
@@ -248,16 +233,6 @@ func (g *RouteGroup) Group(prefix string) httpx.IRouteGroup { return g.server.Gr
 func (g *RouteGroup) Use(mw ...httpx.Middleware) httpx.IRouteGroup {
 	g.middlewares = append(g.middlewares, mw...)
 	return g
-}
-func (g *RouteGroup) RegisterRoute(method, path string, handler any) {
-	if h, ok := handler.(httpx.HttpHandler); ok {
-		_ = g.add(method, path, h)
-	}
-}
-func (g *RouteGroup) RegisterMiddleware(middleware any) {
-	if mw, ok := middleware.(httpx.Middleware); ok {
-		g.Use(mw)
-	}
 }
 
 func (g *RouteGroup) add(method, path string, h httpx.HttpHandler) httpx.IRouteGroup {

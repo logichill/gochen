@@ -66,26 +66,6 @@ func (pm *ProjectionManager) StartProjection(name string) error
 func (pm *ProjectionManager) StopProjection(name string) error
 ```
 
-### 兼容的旧 Manager（已废弃）
-
-`projection.Manager` 是较早期基于本地事件发布的简化实现，仅支持基本注册/启动/重建能力：
-
-```go
-// Manager 投影管理器（Deprecated）
-//
-// Deprecated: 请使用功能更完整、支持检查点和事件总线集成的 ProjectionManager。
-type Manager struct {
-    // ...
-}
-
-// NewManager 创建投影管理器
-//
-// Deprecated: 请改用 NewProjectionManager 或 NewProjectionManagerWithConfig。
-func NewManager(eventStore store.IEventStore, config any) *Manager
-```
-
-新代码应优先使用 `ProjectionManager`，旧 `Manager` 仅为向后兼容保留。
-
 ## 使用示例
 
 ### 1. 定义投影

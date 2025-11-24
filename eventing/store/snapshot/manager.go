@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"gochen/eventing"
+	"gochen/eventing/monitoring"
 	"gochen/eventing/store"
 	"gochen/logging"
 )
@@ -109,7 +110,7 @@ func (sm *Manager) CreateSnapshot(ctx context.Context, aggregateID int64, aggreg
 	if err := sm.snapshotStore.SaveSnapshot(ctx, snap); err != nil {
 		return fmt.Errorf("failed to save snapshot: %w", err)
 	}
-	eventing.GlobalMetrics().RecordSnapshotCreated(time.Since(start))
+	monitoring.GlobalMetrics().RecordSnapshotCreated(time.Since(start))
 	snapshotLogger.Info(ctx, "[SnapshotManager] 创建快照成功", logging.Int64("aggregate_id", aggregateID), logging.Any("version", version), logging.Int("data_size", len(serializedData)))
 	return nil
 }
@@ -123,27 +124,27 @@ func (sm *Manager) LoadSnapshot(ctx context.Context, aggregateID int64, target a
 	}
 	snapshot, err := sm.snapshotStore.GetSnapshot(ctx, aggregateType, aggregateID)
 	if err != nil {
-		eventing.GlobalMetrics().RecordSnapshotLoaded(time.Since(start), false)
+		monitoring.GlobalMetrics().RecordSnapshotLoaded(time.Since(start), false)
 		return nil, err
 	}
 	if restorer, ok := target.(interface{ RestoreFromSnapshotData(data any) error }); ok {
 		var snapshotData any
 		if err := json.Unmarshal(snapshot.Data, &snapshotData); err != nil {
-			eventing.GlobalMetrics().RecordSnapshotLoaded(time.Since(start), false)
+			monitoring.GlobalMetrics().RecordSnapshotLoaded(time.Since(start), false)
 			return nil, fmt.Errorf("failed to deserialize lightweight snapshot data: %w", err)
 		}
 		if err := restorer.RestoreFromSnapshotData(snapshotData); err != nil {
-			eventing.GlobalMetrics().RecordSnapshotLoaded(time.Since(start), false)
+			monitoring.GlobalMetrics().RecordSnapshotLoaded(time.Since(start), false)
 			return nil, fmt.Errorf("failed to restore from lightweight snapshot: %w", err)
 		}
 		snapshotLogger.Debug(ctx, "[SnapshotManager] 使用轻量快照恢复", logging.Int64("aggregate_id", aggregateID))
 	} else {
 		if err := json.Unmarshal(snapshot.Data, target); err != nil {
-			eventing.GlobalMetrics().RecordSnapshotLoaded(time.Since(start), false)
+			monitoring.GlobalMetrics().RecordSnapshotLoaded(time.Since(start), false)
 			return nil, fmt.Errorf("failed to deserialize snapshot data: %w", err)
 		}
 	}
-	eventing.GlobalMetrics().RecordSnapshotLoaded(time.Since(start), true)
+	monitoring.GlobalMetrics().RecordSnapshotLoaded(time.Since(start), true)
 	snapshotLogger.Debug(ctx, "[SnapshotManager] 加载快照成功", logging.Int64("aggregate_id", aggregateID), logging.Any("version", snapshot.Version))
 	return snapshot, nil
 }

@@ -237,10 +237,6 @@ func (m *mockRouteGroup) Use(...httpx.Middleware) httpx.IRouteGroup {
 	return m
 }
 
-func (m *mockRouteGroup) RegisterRoute(string, string, any) {}
-
-func (m *mockRouteGroup) RegisterMiddleware(any) {}
-
 func TestServiceConfigOverride(t *testing.T) {
 	var order []string
 	svc := newStubAppService(&order)

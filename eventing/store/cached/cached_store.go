@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"gochen/eventing"
+	"gochen/eventing/monitoring"
 	"gochen/eventing/store"
 )
 
@@ -358,7 +359,7 @@ func (s *CachedEventStore) recordHit() {
 	s.stats.mutex.Lock()
 	defer s.stats.mutex.Unlock()
 	s.stats.Hits++
-	eventing.GlobalMetrics().RecordCacheHit()
+	monitoring.GlobalMetrics().RecordCacheHit()
 }
 
 // recordMiss 记录缓存未命中
@@ -366,7 +367,7 @@ func (s *CachedEventStore) recordMiss() {
 	s.stats.mutex.Lock()
 	defer s.stats.mutex.Unlock()
 	s.stats.Misses++
-	eventing.GlobalMetrics().RecordCacheMiss()
+	monitoring.GlobalMetrics().RecordCacheMiss()
 }
 
 // recordEviction 记录缓存驱逐
@@ -374,7 +375,7 @@ func (s *CachedEventStore) recordEviction() {
 	s.stats.mutex.Lock()
 	defer s.stats.mutex.Unlock()
 	s.stats.Evictions++
-	eventing.GlobalMetrics().RecordCacheEviction()
+	monitoring.GlobalMetrics().RecordCacheEviction()
 }
 
 // recordInvalidation 记录缓存失效
