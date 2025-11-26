@@ -1,0 +1,203 @@
+# golangci-lint 配置文件
+# 文档: https://golangci-lint.run/usage/configuration/
+
+run:
+  timeout: 5m
+  tests: true
+  skip-dirs:
+    - vendor
+    - examples
+    - scripts
+  skip-files:
+    - ".*\\.pb\\.go$"
+    - ".*_mock\\.go$"
+
+linters:
+  enable:
+    # 默认启用的 linters
+    - errcheck       # 检查未处理的错误
+    - gosimple       # 简化代码建议
+    - govet          # Go 官方检查工具
+    - ineffassign    # 检查无效赋值
+    - staticcheck    # 静态分析
+    - unused         # 检查未使用的代码
+    
+    # 额外启用的 linters
+    - gocyclo        # 圈复杂度检查
+    - gofmt          # 代码格式化检查
+    - goimports      # import 排序检查
+    - misspell       # 拼写检查
+    - revive         # 代码风格检查（golint 的替代品）
+    - bodyclose      # HTTP response body 关闭检查
+    - gosec          # 安全检查
+    - gocritic       # 代码批评（高级检查）
+    - unconvert      # 不必要的类型转换
+    - goprintffuncname # Printf 函数命名检查
+    - noctx          # 检查是否传递了 context
+    - prealloc       # 预分配切片检查
+    - exportloopref  # 循环变量引用问题
+    
+  disable:
+    - typecheck      # 由 go build 处理
+    - structcheck    # 已废弃
+    - varcheck       # 已废弃
+    - deadcode       # 已废弃
+    - ifshort        # 已废弃
+    - golint         # 已废弃，使用 revive 代替
+    - maligned       # 已废弃
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+    exclude-functions:
+      - (*github.com/spf13/cobra.Command).MarkFlagRequired
+    
+  govet:
+    check-shadowing: true
+    enable-all: true
+    disable:
+      - fieldalignment  # 字段对齐检查（可能过于严格）
+  
+  gocyclo:
+    min-complexity: 15  # 圈复杂度阈值
+  
+  gofmt:
+    simplify: true
+  
+  goimports:
+    local-prefixes: gochen  # 本地包前缀
+  
+  misspell:
+    locale: US
+  
+  revive:
+    confidence: 0.8
+    rules:
+      # 启用的规则
+      - name: blank-imports
+      - name: context-as-argument
+      - name: context-keys-type
+      - name: dot-imports
+      - name: error-return
+      - name: error-strings
+      - name: error-naming
+      - name: exported
+        arguments:
+          - "checkPrivateReceivers"
+          - "disableStutteringCheck"
+      - name: if-return
+      - name: increment-decrement
+      - name: var-naming
+      - name: var-declaration
+      - name: package-comments
+      - name: range
+      - name: receiver-naming
+      - name: time-naming
+      - name: unexported-return
+      - name: indent-error-flow
+      - name: errorf
+      - name: empty-block
+      - name: superfluous-else
+      - name: unused-parameter
+      - name: unreachable-code
+      - name: redefines-builtin-id
+      
+      # 禁用的规则
+      # - name: line-length-limit
+      #   arguments: [120]
+  
+  gosec:
+    severity: medium
+    confidence: medium
+    excludes:
+      - G104  # 审计未检查的错误（由 errcheck 处理）
+      - G204  # 子进程启动检查（可能过于严格）
+  
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - style
+      - performance
+      - experimental
+      - opinionated
+    disabled-checks:
+      - whyNoLint         # 要求所有 nolint 都有注释
+      - unnamedResult     # 未命名返回值
+      - hugeParam         # 大参数检查（泛型可能触发）
+      
+  noctx:
+    require-specific-functions:
+      - (*gorm.io/gorm.DB).WithContext
+      - (*database/sql.DB).QueryContext
+      - (*database/sql.DB).ExecContext
+  
+  prealloc:
+    simple: true
+    range-loops: true
+    for-loops: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  
+  exclude-rules:
+    # 排除测试文件中的某些检查
+    - path: _test\.go
+      linters:
+        - gocyclo         # 测试函数可能比较复杂
+        - errcheck        # 测试中可以忽略某些错误
+        - gosec           # 测试中的安全检查可以放松
+        - funlen          # 测试函数可以比较长
+        - goconst         # 测试中的常量可以重复
+        - gocritic        # 测试中的批评可以放松
+    
+    # 排除示例代码
+    - path: examples/
+      linters:
+        - errcheck
+        - gosec
+        - gocritic
+    
+    # 排除特定错误消息
+    - text: "weak cryptographic primitive"
+      linters:
+        - gosec
+    
+    # 排除 init 函数的某些检查
+    - source: "^func init\\(\\)"
+      linters:
+        - gochecknoinits
+    
+    # 排除生成的代码
+    - path: ".*\\.pb\\.go$"
+      linters:
+        - all
+    
+    # 排除 mock 代码
+    - path: ".*_mock\\.go$"
+      linters:
+        - all
+  
+  # 不排除默认的排除规则
+  exclude-use-default: false
+  
+  # 需要修复的问题
+  new: false
+  
+  # 修复某些问题
+  fix: false
+
+severity:
+  default-severity: warning
+  case-sensitive: false
+  rules:
+    - linters:
+        - errcheck
+        - govet
+        - staticcheck
+      severity: error
+    
+    - linters:
+        - gosec
+      severity: warning
