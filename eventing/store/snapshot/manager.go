@@ -99,7 +99,7 @@ func (sm *Manager) CreateSnapshot(ctx context.Context, aggregateID int64, aggreg
 	var snapshotData any = data
 	if lightweight, ok := data.(interface{ GetSnapshotData() any }); ok {
 		snapshotData = lightweight.GetSnapshotData()
-		snapshotLogger.Debug(ctx, "[SnapshotManager] 使用轻量快照",
+		snapshotLogger().Debug(ctx, "[SnapshotManager] 使用轻量快照",
 			logging.Int64("aggregate_id", aggregateID), logging.String("aggregate_type", aggregateType))
 	}
 	serializedData, err := json.Marshal(snapshotData)
@@ -111,7 +111,7 @@ func (sm *Manager) CreateSnapshot(ctx context.Context, aggregateID int64, aggreg
 		return fmt.Errorf("failed to save snapshot: %w", err)
 	}
 	monitoring.GlobalMetrics().RecordSnapshotCreated(time.Since(start))
-	snapshotLogger.Info(ctx, "[SnapshotManager] 创建快照成功", logging.Int64("aggregate_id", aggregateID), logging.Any("version", version), logging.Int("data_size", len(serializedData)))
+	snapshotLogger().Info(ctx, "[SnapshotManager] 创建快照成功", logging.Int64("aggregate_id", aggregateID), logging.Any("version", version), logging.Int("data_size", len(serializedData)))
 	return nil
 }
 
@@ -137,7 +137,7 @@ func (sm *Manager) LoadSnapshot(ctx context.Context, aggregateID int64, target a
 			monitoring.GlobalMetrics().RecordSnapshotLoaded(time.Since(start), false)
 			return nil, fmt.Errorf("failed to restore from lightweight snapshot: %w", err)
 		}
-		snapshotLogger.Debug(ctx, "[SnapshotManager] 使用轻量快照恢复", logging.Int64("aggregate_id", aggregateID))
+		snapshotLogger().Debug(ctx, "[SnapshotManager] 使用轻量快照恢复", logging.Int64("aggregate_id", aggregateID))
 	} else {
 		if err := json.Unmarshal(snapshot.Data, target); err != nil {
 			monitoring.GlobalMetrics().RecordSnapshotLoaded(time.Since(start), false)
@@ -145,7 +145,7 @@ func (sm *Manager) LoadSnapshot(ctx context.Context, aggregateID int64, target a
 		}
 	}
 	monitoring.GlobalMetrics().RecordSnapshotLoaded(time.Since(start), true)
-	snapshotLogger.Debug(ctx, "[SnapshotManager] 加载快照成功", logging.Int64("aggregate_id", aggregateID), logging.Any("version", snapshot.Version))
+	snapshotLogger().Debug(ctx, "[SnapshotManager] 加载快照成功", logging.Int64("aggregate_id", aggregateID), logging.Any("version", snapshot.Version))
 	return snapshot, nil
 }
 
@@ -160,9 +160,9 @@ func (sm *Manager) RestoreAggregate(ctx context.Context, aggregateID int64, targ
 			restorer.RestoreSnapshotMeta(aggregateID, snapshot.AggregateType, snapshot.Version)
 		}
 		fromVersion = snapshot.Version
-		snapshotLogger.Info(ctx, "[SnapshotManager] 从快照恢复聚合", logging.Int64("aggregate_id", aggregateID), logging.Any("snapshot_version", fromVersion))
+		snapshotLogger().Info(ctx, "[SnapshotManager] 从快照恢复聚合", logging.Int64("aggregate_id", aggregateID), logging.Any("snapshot_version", fromVersion))
 	} else {
-		snapshotLogger.Info(ctx, "[SnapshotManager] 未找到快照，从头开始恢复", logging.Int64("aggregate_id", aggregateID))
+		snapshotLogger().Info(ctx, "[SnapshotManager] 未找到快照，从头开始恢复", logging.Int64("aggregate_id", aggregateID))
 	}
 	aggregateType := ""
 	if typed, ok := target.(interface{ GetAggregateType() string }); ok {
@@ -177,7 +177,7 @@ func (sm *Manager) RestoreAggregate(ctx context.Context, aggregateID int64, targ
 	if err != nil {
 		return fromVersion, fmt.Errorf("failed to get events: %w", err)
 	}
-	snapshotLogger.Debug(ctx, "[SnapshotManager] 应用事件", logging.Int64("aggregate_id", aggregateID), logging.Int("event_count", len(events)))
+	snapshotLogger().Debug(ctx, "[SnapshotManager] 应用事件", logging.Int64("aggregate_id", aggregateID), logging.Int("event_count", len(events)))
 	if len(events) > 0 {
 		type eventApplier interface {
 			MarkEventsAsCommitted()
