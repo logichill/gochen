@@ -9,9 +9,11 @@ import (
 	"gochen/logging"
 )
 
-var snapshotLogger = logging.GetLogger().WithFields(
-	logging.String("component", "eventstore.snapshot"),
-)
+func snapshotLogger() logging.Logger {
+	return logging.GetLogger().WithFields(
+		logging.String("component", "eventstore.snapshot"),
+	)
+}
 
 // Snapshot 定义聚合快照
 type Snapshot struct {
@@ -51,7 +53,7 @@ func (s *MemoryStore) SaveSnapshot(ctx context.Context, snapshot Snapshot) error
 	defer s.mutex.Unlock()
 	key := snapshotKey(snapshot.AggregateType, snapshot.AggregateID)
 	s.snapshots[key] = snapshot
-	snapshotLogger.Debug(ctx, "[ISnapshotStore] 保存快照", logging.Int64("aggregate_id", snapshot.AggregateID), logging.Any("version", snapshot.Version))
+	snapshotLogger().Debug(ctx, "[ISnapshotStore] 保存快照", logging.Int64("aggregate_id", snapshot.AggregateID), logging.Any("version", snapshot.Version))
 	return nil
 }
 
@@ -72,7 +74,7 @@ func (s *MemoryStore) DeleteSnapshot(ctx context.Context, aggregateType string, 
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	delete(s.snapshots, snapshotKey(aggregateType, aggregateID))
-	snapshotLogger.Debug(ctx, "[ISnapshotStore] 删除快照", logging.Int64("aggregate_id", aggregateID))
+	snapshotLogger().Debug(ctx, "[ISnapshotStore] 删除快照", logging.Int64("aggregate_id", aggregateID))
 	return nil
 }
 
@@ -106,6 +108,6 @@ func (s *MemoryStore) CleanupSnapshots(ctx context.Context, retentionPeriod time
 			deleted++
 		}
 	}
-	snapshotLogger.Info(ctx, "[ISnapshotStore] 清理过期快照", logging.Int("deleted_count", deleted))
+	snapshotLogger().Info(ctx, "[ISnapshotStore] 清理过期快照", logging.Int("deleted_count", deleted))
 	return nil
 }

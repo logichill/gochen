@@ -71,7 +71,7 @@ func (s *SQLStore) SaveSnapshot(ctx context.Context, snapshot Snapshot) error {
 		return fmt.Errorf("update snapshot failed: %w", err)
 	}
 	if rows, errRA := res.RowsAffected(); errRA == nil && rows > 0 {
-		snapshotLogger.Debug(ctx, "[SQLSnapshotStore] 更新快照",
+		snapshotLogger().Debug(ctx, "[SQLSnapshotStore] 更新快照",
 			logging.Int64("aggregate_id", snapshot.AggregateID),
 			logging.String("aggregate_type", snapshot.AggregateType),
 			logging.Any("version", snapshot.Version),
@@ -94,7 +94,7 @@ func (s *SQLStore) SaveSnapshot(ctx context.Context, snapshot Snapshot) error {
 		return fmt.Errorf("insert snapshot failed: %w", err)
 	}
 
-	snapshotLogger.Debug(ctx, "[SQLSnapshotStore] 创建快照",
+	snapshotLogger().Debug(ctx, "[SQLSnapshotStore] 创建快照",
 		logging.Int64("aggregate_id", snapshot.AggregateID),
 		logging.String("aggregate_type", snapshot.AggregateType),
 		logging.Any("version", snapshot.Version),
@@ -156,7 +156,7 @@ func (s *SQLStore) DeleteSnapshot(ctx context.Context, aggregateType string, agg
 		return fmt.Errorf("delete snapshot failed: %w", err)
 	}
 
-	snapshotLogger.Debug(ctx, "[SQLSnapshotStore] 删除快照",
+	snapshotLogger().Debug(ctx, "[SQLSnapshotStore] 删除快照",
 		logging.Int64("aggregate_id", aggregateID),
 		logging.String("aggregate_type", aggregateType),
 	)
@@ -242,7 +242,7 @@ func (s *SQLStore) CleanupSnapshots(ctx context.Context, retentionPeriod time.Du
 		return fmt.Errorf("cleanup snapshots failed: %w", err)
 	}
 	if deleted, errRA := res.RowsAffected(); errRA == nil {
-		snapshotLogger.Info(ctx, "[SQLSnapshotStore] 清理过期快照",
+		snapshotLogger().Info(ctx, "[SQLSnapshotStore] 清理过期快照",
 			logging.Int64("deleted_count", deleted),
 		)
 	}
