@@ -89,7 +89,8 @@ func (e *Engine) log(msg string, args ...interface{}) {
 // Start 执行标准的启动模板流程
 // Flow: LoadConfig -> Setup -> StartBackground -> Run -> Wait Signal -> Shutdown
 func (e *Engine) Start() error {
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	e.log("Starting application version %s...", e.options.Version)
 
@@ -175,12 +176,15 @@ func (e *Engine) Start() error {
 	case err := <-errChan:
 		if err == nil {
 			e.log("Server stopped gracefully. Shutting down...")
+			cancel()
 			break
 		}
 		e.log("Server stopped with error: %v. Shutting down...", err)
+		cancel()
 		runErr = err
 	case sig := <-quit:
 		e.log("Received signal: %v. Shutting down...", sig)
+		cancel()
 	}
 
 	// ---------------------------------------------------------
