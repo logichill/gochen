@@ -95,11 +95,58 @@ func NewStdLogger(prefix string) *StdLogger {
 }
 
 func (l *StdLogger) format(msg string, fields ...Field) string {
-	result := l.prefix + " " + msg
-	allFields := append(l.fields, fields...)
+	// 统一布局（类 log4j）：
+	// <prefix/service> component=... event=... msg... key=value...
+	allFields := append(append([]Field{}, l.fields...), fields...)
+
+	var component, event string
+	otherFields := make([]Field, 0, len(allFields))
+
 	for _, f := range allFields {
+		switch f.Key {
+		case "component":
+			component = formatValue(f.Value)
+		case "event":
+			event = formatValue(f.Value)
+		default:
+			otherFields = append(otherFields, f)
+		}
+	}
+
+	result := ""
+
+	// 将 prefix 视为“服务名”或 logger 名
+	if l.prefix != "" {
+		result += l.prefix
+	}
+
+	// 核心维度字段优先输出，便于扫描和过滤
+	if component != "" {
+		if result != "" {
+			result += " "
+		}
+		result += "[" + component + "]"
+	}
+	if event != "" {
+		if result != "" {
+			result += " "
+		}
+		result += "event=" + event
+	}
+
+	// 主消息放在核心字段之后
+	if msg != "" {
+		if result != "" {
+			result += " "
+		}
+		result += msg
+	}
+
+	// 其余字段按 key=value 追加
+	for _, f := range otherFields {
 		result += " " + f.Key + "=" + formatValue(f.Value)
 	}
+
 	return result
 }
 
