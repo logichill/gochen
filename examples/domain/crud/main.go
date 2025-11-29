@@ -5,7 +5,7 @@ import (
 	"log"
 	"time"
 
-	"gochen/app"
+	application "gochen/domain/application"
 	"gochen/app/api"
 	"gochen/examples/internal/mocks"
 	httpx "gochen/http"
@@ -57,11 +57,11 @@ func (r *ExtUserRepo) Activate(ctx context.Context, id int64) error {
 
 // 扩展服务：封装业务方法
 type UserServiceExt struct {
-	app.IApplication[*User]
+	application.IApplication[*User]
 	repo *ExtUserRepo
 }
 
-func NewUserServiceExt(repo *ExtUserRepo, base app.IApplication[*User]) *UserServiceExt {
+func NewUserServiceExt(repo *ExtUserRepo, base application.IApplication[*User]) *UserServiceExt {
 	return &UserServiceExt{IApplication: base, repo: repo}
 }
 
@@ -79,7 +79,7 @@ func main() {
 	router := mocks.NewMockRouter()
 
 	// 2) 服务
-	baseSvc := app.NewApplication(userRepo, validator, nil)
+	baseSvc := application.NewApplication(userRepo, validator, nil)
 	svc := NewUserServiceExt(userRepo, baseSvc)
 
 	// 3) 注册 RESTful API
@@ -96,6 +96,6 @@ func main() {
 	_ = svc.Create(context.Background(), &User{Name: "张三", Email: "zhangsan@example.com"})
 	got, _ := svc.GetByID(context.Background(), 1)
 	log.Printf("查询用户: %+v", got)
-	page, _ := svc.ListPage(context.Background(), &app.PaginationOptions{Page: 1, Size: 10})
+	page, _ := svc.ListPage(context.Background(), &application.PaginationOptions{Page: 1, Size: 10})
 	log.Printf("分页: total=%d, items=%d", page.Total, len(page.Data))
 }

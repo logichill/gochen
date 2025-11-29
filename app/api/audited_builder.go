@@ -3,7 +3,7 @@ package api
 import (
 	"fmt"
 
-	"gochen/app"
+	application "gochen/domain/application"
 	"gochen/domain/entity"
 	"gochen/domain/service"
 	httpx "gochen/http"
@@ -13,21 +13,21 @@ import (
 // IAuditedApiBuilder 面向审计型业务的构建器接口
 type IAuditedApiBuilder[T entity.Entity[int64]] interface {
 	Route(config func(*RouteConfig)) IAuditedApiBuilder[T]
-	Service(config func(*app.ServiceConfig)) IAuditedApiBuilder[T]
+	Service(config func(*application.ServiceConfig)) IAuditedApiBuilder[T]
 	Middleware(middlewares ...httpx.Middleware) IAuditedApiBuilder[T]
 	Build(group httpx.IRouteGroup) error
 }
 
 type auditedConfigurableService interface {
-	UpdateConfig(*app.ServiceConfig)
-	GetConfig() *app.ServiceConfig
+	UpdateConfig(*application.ServiceConfig)
+	GetConfig() *application.ServiceConfig
 }
 type auditedValidatorAware interface{ SetValidator(validation.IValidator) }
 
 // AuditedApiBuilder 构建器实现
 type AuditedApiBuilder[T entity.Entity[int64]] struct {
 	routeConfig   *RouteConfig
-	serviceConfig *app.ServiceConfig
+	serviceConfig *application.ServiceConfig
 	middlewares   []httpx.Middleware
 	service       service.IAuditedService[T, int64]
 	validator     validation.IValidator
@@ -38,11 +38,11 @@ func NewAuditedApiBuilder[T entity.Entity[int64]](svc service.IAuditedService[T,
 	if validator != nil && rc.Validator == nil {
 		rc.Validator = func(v any) error { return validator.Validate(v) }
 	}
-	var sc *app.ServiceConfig
+	var sc *application.ServiceConfig
 	if c, ok := any(svc).(auditedConfigurableService); ok {
 		sc = cloneServiceConfig(c.GetConfig())
 	} else {
-		sc = cloneServiceConfig(app.DefaultServiceConfig())
+		sc = cloneServiceConfig(application.DefaultServiceConfig())
 	}
 	return &AuditedApiBuilder[T]{routeConfig: rc, serviceConfig: sc, service: svc, validator: validator}
 }
@@ -51,10 +51,10 @@ func (b *AuditedApiBuilder[T]) Route(config func(*RouteConfig)) IAuditedApiBuild
 	config(b.routeConfig)
 	return b
 }
-func (b *AuditedApiBuilder[T]) Service(config func(*app.ServiceConfig)) IAuditedApiBuilder[T] {
+func (b *AuditedApiBuilder[T]) Service(config func(*application.ServiceConfig)) IAuditedApiBuilder[T] {
 	if config != nil {
 		if b.serviceConfig == nil {
-			b.serviceConfig = cloneServiceConfig(app.DefaultServiceConfig())
+			b.serviceConfig = cloneServiceConfig(application.DefaultServiceConfig())
 		}
 		config(b.serviceConfig)
 	}

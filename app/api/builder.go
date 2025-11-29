@@ -4,24 +4,24 @@ package api
 import (
 	"fmt"
 
-	app "gochen/app"
+	application "gochen/domain/application"
 	"gochen/domain/entity"
 	httpx "gochen/http"
 	validation "gochen/validation"
 )
 
 type configurableService interface {
-	UpdateConfig(*app.ServiceConfig)
-	GetConfig() *app.ServiceConfig
+	UpdateConfig(*application.ServiceConfig)
+	GetConfig() *application.ServiceConfig
 }
 
 type validatorAware interface {
 	SetValidator(validation.IValidator)
 }
 
-func cloneServiceConfig(cfg *app.ServiceConfig) *app.ServiceConfig {
+func cloneServiceConfig(cfg *application.ServiceConfig) *application.ServiceConfig {
 	if cfg == nil {
-		def := app.DefaultServiceConfig()
+		def := application.DefaultServiceConfig()
 		copyCfg := *def
 		return &copyCfg
 	}
@@ -35,7 +35,7 @@ type IApiBuilder[T entity.IEntity[int64]] interface {
 	Route(config func(*RouteConfig)) IApiBuilder[T]
 
 	// 配置服务
-	Service(config func(*app.ServiceConfig)) IApiBuilder[T]
+	Service(config func(*application.ServiceConfig)) IApiBuilder[T]
 
 	// 添加中间件
 	Middleware(middlewares ...httpx.Middleware) IApiBuilder[T]
@@ -47,15 +47,15 @@ type IApiBuilder[T entity.IEntity[int64]] interface {
 // ApiBuilder RESTful API 构建器实现
 type ApiBuilder[T entity.IEntity[int64]] struct {
 	routeConfig   *RouteConfig
-	serviceConfig *app.ServiceConfig
+	serviceConfig *application.ServiceConfig
 	middlewares   []httpx.Middleware
-	service       app.IApplication[T]
+	service       application.IApplication[T]
 	validator     validation.IValidator
 }
 
 // NewApiBuilder 创建 RESTful 构建器
 func NewApiBuilder[T entity.IEntity[int64]](
-	svc app.IApplication[T],
+	svc application.IApplication[T],
 	validator validation.IValidator,
 ) *ApiBuilder[T] {
 	routeCfg := DefaultRouteConfig()
@@ -65,11 +65,11 @@ func NewApiBuilder[T entity.IEntity[int64]](
 		}
 	}
 
-	var svcConfig *app.ServiceConfig
+	var svcConfig *application.ServiceConfig
 	if configurable, ok := any(svc).(configurableService); ok {
 		svcConfig = cloneServiceConfig(configurable.GetConfig())
 	} else {
-		svcConfig = cloneServiceConfig(app.DefaultServiceConfig())
+		svcConfig = cloneServiceConfig(application.DefaultServiceConfig())
 	}
 
 	return &ApiBuilder[T]{
@@ -87,12 +87,12 @@ func (rb *ApiBuilder[T]) Route(config func(*RouteConfig)) IApiBuilder[T] {
 }
 
 // Service 配置服务
-func (rb *ApiBuilder[T]) Service(config func(*app.ServiceConfig)) IApiBuilder[T] {
+func (rb *ApiBuilder[T]) Service(config func(*application.ServiceConfig)) IApiBuilder[T] {
 	if config == nil {
 		return rb
 	}
 	if rb.serviceConfig == nil {
-		rb.serviceConfig = cloneServiceConfig(app.DefaultServiceConfig())
+		rb.serviceConfig = cloneServiceConfig(application.DefaultServiceConfig())
 	}
 	config(rb.serviceConfig)
 	return rb
@@ -139,7 +139,7 @@ func (rb *ApiBuilder[T]) Build(group httpx.IRouteGroup) error {
 // 便捷函数
 func RegisterRESTfulAPI[T entity.IEntity[int64]](
 	group httpx.IRouteGroup,
-	svc app.IApplication[T],
+	svc application.IApplication[T],
 	validator validation.IValidator,
 	options ...func(*ApiBuilder[T]),
 ) error {

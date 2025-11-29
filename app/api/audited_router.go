@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strconv"
 
-	app "gochen/app"
+	application "gochen/domain/application"
 	"gochen/domain/entity"
 	sservice "gochen/domain/service"
 	"gochen/errors"
@@ -17,14 +17,14 @@ type AuditedRouteBuilder[T entity.Entity[int64]] struct {
 	config      *RouteConfig
 	middlewares []core.Middleware
 	service     sservice.IAuditedService[T, int64]
-	app         app.IApplication[T] // 可选，用于高级查询/分页/批量
+	app         application.IApplication[T] // 可选，用于高级查询/分页/批量
 }
 
 // NewAuditedRouteBuilder 创建审计型路由构建器
 func NewAuditedRouteBuilder[T entity.Entity[int64]](svc sservice.IAuditedService[T, int64]) *AuditedRouteBuilder[T] {
 	b := &AuditedRouteBuilder[T]{config: DefaultRouteConfig(), service: svc}
 	// 若服务同时实现了 IAppService，则可启用高级查询/分页/批量
-	if a, ok := any(svc).(app.IApplication[T]); ok {
+	if a, ok := any(svc).(application.IApplication[T]); ok {
 		b.app = a
 	}
 	return b
@@ -160,7 +160,7 @@ func (rb *AuditedRouteBuilder[T]) handlePagedList(c core.IHttpContext) error {
 	if err != nil {
 		return err
 	}
-	pr := &app.PagedResult[T]{Data: data, Total: total, Page: opts.Page, Size: opts.Size}
+	pr := &application.PagedResult[T]{Data: data, Total: total, Page: opts.Page, Size: opts.Size}
 	if opts.Size > 0 {
 		pr.TotalPages = int((total + int64(opts.Size) - 1) / int64(opts.Size))
 	}
@@ -334,10 +334,10 @@ func (rb *AuditedRouteBuilder[T]) handleRestore(c core.IHttpContext) error {
 }
 
 // 共用解析辅助
-func (rb *AuditedRouteBuilder[T]) parseQueryParams(c core.IHttpContext) *app.QueryParams {
+func (rb *AuditedRouteBuilder[T]) parseQueryParams(c core.IHttpContext) *application.QueryParams {
 	return (&RouteBuilder[T]{}).parseQueryParams(c)
 }
-func (rb *AuditedRouteBuilder[T]) parsePaginationOptions(c core.IHttpContext) *app.PaginationOptions {
+func (rb *AuditedRouteBuilder[T]) parsePaginationOptions(c core.IHttpContext) *application.PaginationOptions {
 	// 使用普通 RouteBuilder 的实现以保持一致
 	return (&RouteBuilder[T]{config: rb.config}).parsePaginationOptions(c)
 }

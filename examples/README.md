@@ -197,7 +197,7 @@ var _ entity.IEntity[int64] = (*User)(nil)
 package main
 
 import (
-    "gochen/app"
+    application "gochen/domain/application"
     "gochen/domain/repository"
     "gochen/validation"
 )
@@ -211,10 +211,10 @@ func main() {
     validator := validation.NewValidator()
 
     // 3. 创建应用服务
-    userService := app.NewApplication[*User, int64](
+    userService := application.NewApplication[*User, int64](
         userRepo,
         validator,
-        &app.ServiceConfig{
+        &application.ServiceConfig{
             AutoValidate:   true,  // 自动验证实体
             AutoTimestamp:  true,  // 自动设置时间戳
             EnableAudit:    true,  // 启用审计日志
@@ -247,6 +247,7 @@ func main() {
 package main
 
 import (
+    application "gochen/domain/application"
     "gochen/app/api"
     "gochen/http"
     "github.com/gin-gonic/gin"
@@ -272,7 +273,7 @@ func main() {
             config.MaxPageSize = 500       // 最大分页大小
             config.DefaultPageSize = 20    // 默认分页大小
         }).
-        Service(func(config *app.ServiceConfig) {
+        Service(func(config *application.ServiceConfig) {
             config.AutoValidate = true  // 自动验证
             config.SoftDelete = true    // 软删除
             config.EnableCache = true   // 启用缓存

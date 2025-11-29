@@ -8,7 +8,7 @@ import (
 	"reflect"
 	"testing"
 
-	app "gochen/app"
+	application "gochen/domain/application"
 	"gochen/domain/entity"
 	"gochen/domain/repository"
 	httpx "gochen/http"
@@ -48,10 +48,10 @@ func TestRestfulBuilderAppliesServiceConfig(t *testing.T) {
 	repo := &noopRepository{}
 	validator := &trackingValidator{err: errors.New("validator hit")}
 
-	svc := app.NewApplication[*fakeEntity](repo, nil, nil)
+	svc := application.NewApplication[*fakeEntity](repo, nil, nil)
 	builder := NewApiBuilder(svc, validator)
 
-	builder.Service(func(cfg *app.ServiceConfig) {
+	builder.Service(func(cfg *application.ServiceConfig) {
 		cfg.MaxBatchSize = 77
 	})
 
@@ -74,14 +74,14 @@ func TestRestfulBuilderAppliesServiceConfig(t *testing.T) {
 }
 
 type stubAppService struct {
-	cfg       *app.ServiceConfig
+	cfg       *application.ServiceConfig
 	validator validation.IValidator
 	order     *[]string
 }
 
 func newStubAppService(order *[]string) *stubAppService {
 	return &stubAppService{
-		cfg:   cloneServiceConfig(app.DefaultServiceConfig()),
+		cfg:   cloneServiceConfig(application.DefaultServiceConfig()),
 		order: order,
 	}
 }
@@ -95,29 +95,29 @@ func (s *stubAppService) List(context.Context, int, int) ([]*fakeEntity, error) 
 }
 func (s *stubAppService) Count(context.Context) (int64, error)                   { return 0, nil }
 func (s *stubAppService) Repository() repository.IRepository[*fakeEntity, int64] { return nil }
-func (s *stubAppService) ListByQuery(context.Context, *app.QueryParams) ([]*fakeEntity, error) {
+func (s *stubAppService) ListByQuery(context.Context, *application.QueryParams) ([]*fakeEntity, error) {
 	if s.order != nil {
 		*s.order = append(*s.order, "handler-list")
 	}
 	return []*fakeEntity{}, nil
 }
-func (s *stubAppService) ListPage(context.Context, *app.PaginationOptions) (*app.PagedResult[*fakeEntity], error) {
+func (s *stubAppService) ListPage(context.Context, *application.PaginationOptions) (*application.PagedResult[*fakeEntity], error) {
 	if s.order != nil {
 		*s.order = append(*s.order, "handler")
 	}
-	return &app.PagedResult[*fakeEntity]{Data: []*fakeEntity{}, Total: 0, Page: 1, Size: 10}, nil
+		return &application.PagedResult[*fakeEntity]{Data: []*fakeEntity{}, Total: 0, Page: 1, Size: 10}, nil
 }
-func (s *stubAppService) CountByQuery(context.Context, *app.QueryParams) (int64, error) {
+func (s *stubAppService) CountByQuery(context.Context, *application.QueryParams) (int64, error) {
 	return 0, nil
 }
-func (s *stubAppService) CreateBatch(context.Context, []*fakeEntity) (*app.BatchOperationResult, error) {
-	return &app.BatchOperationResult{}, nil
+func (s *stubAppService) CreateBatch(context.Context, []*fakeEntity) (*application.BatchOperationResult, error) {
+	return &application.BatchOperationResult{}, nil
 }
-func (s *stubAppService) UpdateBatch(context.Context, []*fakeEntity) (*app.BatchOperationResult, error) {
-	return &app.BatchOperationResult{}, nil
+func (s *stubAppService) UpdateBatch(context.Context, []*fakeEntity) (*application.BatchOperationResult, error) {
+	return &application.BatchOperationResult{}, nil
 }
-func (s *stubAppService) DeleteBatch(context.Context, []int64) (*app.BatchOperationResult, error) {
-	return &app.BatchOperationResult{}, nil
+func (s *stubAppService) DeleteBatch(context.Context, []int64) (*application.BatchOperationResult, error) {
+	return &application.BatchOperationResult{}, nil
 }
 func (s *stubAppService) Validate(entity *fakeEntity) error {
 	if s.cfg != nil && s.cfg.AutoValidate && s.validator != nil {
@@ -131,8 +131,8 @@ func (s *stubAppService) BeforeUpdate(context.Context, *fakeEntity) error { retu
 func (s *stubAppService) AfterUpdate(context.Context, *fakeEntity) error  { return nil }
 func (s *stubAppService) BeforeDelete(context.Context, int64) error       { return nil }
 func (s *stubAppService) AfterDelete(context.Context, int64) error        { return nil }
-func (s *stubAppService) GetConfig() *app.ServiceConfig                   { return s.cfg }
-func (s *stubAppService) UpdateConfig(cfg *app.ServiceConfig)             { s.cfg = cloneServiceConfig(cfg) }
+func (s *stubAppService) GetConfig() *application.ServiceConfig           { return s.cfg }
+func (s *stubAppService) UpdateConfig(cfg *application.ServiceConfig)     { s.cfg = cloneServiceConfig(cfg) }
 func (s *stubAppService) SetValidator(v validation.IValidator)            { s.validator = v }
 
 func TestRouteBuilderMiddlewareChain(t *testing.T) {
@@ -252,7 +252,7 @@ func TestServiceConfigOverride(t *testing.T) {
 
 	builder := NewApiBuilder[*fakeEntity](svc, nil)
 	// 通过 Service() 覆盖配置
-	builder.Service(func(cfg *app.ServiceConfig) {
+		builder.Service(func(cfg *application.ServiceConfig) {
 		cfg.AutoValidate = true
 		cfg.MaxBatchSize = 99
 	})

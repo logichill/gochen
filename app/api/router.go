@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	app "gochen/app"
+	application "gochen/domain/application"
 	"gochen/domain/entity"
 	"gochen/errors"
 	core "gochen/http"
@@ -28,11 +28,11 @@ type IRouteBuilder[T entity.IEntity[int64]] interface {
 type RouteBuilder[T entity.IEntity[int64]] struct {
 	config      *RouteConfig
 	middlewares []core.Middleware
-	service     app.IApplication[T]
+	service     application.IApplication[T]
 }
 
 // NewRouteBuilder 创建路由构建器
-func NewRouteBuilder[T entity.IEntity[int64]](svc app.IApplication[T]) IRouteBuilder[T] {
+func NewRouteBuilder[T entity.IEntity[int64]](svc application.IApplication[T]) IRouteBuilder[T] {
 	return &RouteBuilder[T]{
 		config:  DefaultRouteConfig(),
 		service: svc,
@@ -319,8 +319,8 @@ func (rb *RouteBuilder[T]) handleDeleteBatch(c core.IHttpContext) error {
 }
 
 // 辅助方法
-func (rb *RouteBuilder[T]) parseQueryParams(c core.IHttpContext) *app.QueryParams {
-	query := &app.QueryParams{
+func (rb *RouteBuilder[T]) parseQueryParams(c core.IHttpContext) *application.QueryParams {
+	query := &application.QueryParams{
 		Filters: make(map[string]string),
 		Sorts:   make(map[string]string),
 	}
@@ -349,8 +349,8 @@ func (rb *RouteBuilder[T]) parseQueryParams(c core.IHttpContext) *app.QueryParam
 	return query
 }
 
-func (rb *RouteBuilder[T]) parsePaginationOptions(c core.IHttpContext) *app.PaginationOptions {
-	options := &app.PaginationOptions{
+func (rb *RouteBuilder[T]) parsePaginationOptions(c core.IHttpContext) *application.PaginationOptions {
+	options := &application.PaginationOptions{
 		Page:    1,
 		Size:    rb.config.DefaultPageSize,
 		Sorts:   make(map[string]string),
