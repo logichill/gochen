@@ -9,7 +9,7 @@ import (
 	sentity "gochen/domain/entity"
 	sservice "gochen/domain/service"
 	"gochen/examples/internal/mocks"
-	httpx "gochen/httpx"
+	httpx "gochen/http"
 )
 
 // Article 带审计与软删除的实体

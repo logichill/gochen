@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	httpx "gochen/httpx"
+	httpx "gochen/http"
 )
 
 type RequestContext struct{ context.Context }

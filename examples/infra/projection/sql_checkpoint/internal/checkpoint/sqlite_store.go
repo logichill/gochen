@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	dbcore "gochen/data/db"
 	"gochen/eventing/projection"
-	dbcore "gochen/storage/database"
 )
 
 // SQLiteCheckpointStore 示例级 SQLite 检查点存储（演示用）

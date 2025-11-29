@@ -11,8 +11,8 @@ import (
 	app "gochen/app"
 	"gochen/domain/entity"
 	"gochen/domain/repository"
-	httpx "gochen/httpx"
-	hbasic "gochen/httpx/basic"
+	httpx "gochen/http"
+	hbasic "gochen/http/basic"
 	validation "gochen/validation"
 )
 

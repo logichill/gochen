@@ -4,8 +4,8 @@ import (
 	"context"
 	"database/sql"
 
-	core "gochen/storage/database"
-	"gochen/storage/database/dialect"
+	core "gochen/data/db"
+	"gochen/data/db/dialect"
 )
 
 // ISql 提供统一的 SQL 构建与执行接口。

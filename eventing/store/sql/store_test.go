@@ -10,10 +10,10 @@ import (
 	"github.com/stretchr/testify/require"
 	_ "modernc.org/sqlite"
 
+	"gochen/data/db"
+	basicdb "gochen/data/db/basic"
 	"gochen/eventing"
 	estore "gochen/eventing/store"
-	"gochen/storage/database"
-	basicdb "gochen/storage/database/basic"
 )
 
 // 测试辅助：创建内存数据库并初始化表

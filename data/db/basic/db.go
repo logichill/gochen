@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	core "gochen/storage/database"
-	"gochen/storage/database/dialect"
+	core "gochen/data/db"
+	"gochen/data/db/dialect"
 )
 
 // DB 基于 database/sql 的最小实现，满足 core.IDatabase 抽象

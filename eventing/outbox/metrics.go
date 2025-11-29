@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"gochen/storage/database"
+	"gochen/data/db"
 )
 
 // OutboxMetrics Outbox 监控指标

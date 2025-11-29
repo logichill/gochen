@@ -302,7 +302,7 @@ Outbox 模式用于在同一事务内写入领域事件和“待发布消息”�
 
 - `OutboxEntry`：Outbox 表行结构；
 - `IOutboxRepository`：定义存取接口；
-- `sql_repository.go`：基于 `storage/database/sql.ISql` 的 SQL 实现；
+- `sql_repository.go`：基于 `data/db/sql.ISql` 的 SQL 实现；
 - `publisher.go` / `publisher_parallel.go`：串行/并行发布器实现；
 - `dlq.go`：死信队列支持。
 

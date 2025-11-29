@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"gochen/httpx"
+	httpx "gochen/http"
 )
 
 // TenantAwareEventStore 租户感知的事件存储装饰器

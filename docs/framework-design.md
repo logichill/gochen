@@ -24,7 +24,7 @@ gochen 采用 **DDD + Event Sourcing + CQRS + 消息驱动** 的组合模式，�
 - **模块明确**：`domain` 专注领域模型，`eventing` 专注事件与溯源，`messaging` 专注消息管道；
 - **事件为一等公民**：所有状态变化可以通过事件流重建或审计；
 - **读写分离**：写端优先事件溯源，读端通过投影/视图优化；
-- **框架无侵入**：不绑定具体 Web 框架或 ORM，HTTP/数据库通过 `httpx` 和 `storage/database` 抽象；
+- **框架无侵入**：不绑定具体 Web 框架或 ORM，HTTP/数据库通过 `http` 和 `data/db` 抽象；
 - **并发安全**：关键组件（消息总线、事件存储、投影管理器等）在设计上显式考虑并发。
 
 ### 1.2 目录结构概览
@@ -56,7 +56,7 @@ messaging/                   # 消息总线与传输层
 saga/                        # Saga 编排
   orchestrator.go            # SagaOrchestrator（发布 Saga 生命周期事件，见 docs/eventing-saga-events.md）
 
-storage/database/            # 数据库抽象
+data/db/            # 数据库抽象
   basic/                     # 最小 DB 接口实现
   dialect/                   # 方言抽象（DELETE LIMIT 等兼容）
   sql/                       # ISql Builder（Select/Insert/Update/Delete/Upsert）
@@ -65,7 +65,7 @@ app/                         # 应用服务层
   application.go             # Application 泛型服务 + 查询/分页
   api/                       # HTTP API 构建器（路由器、错误处理等）
 
-httpx/                       # HTTP 抽象
+http/                       # HTTP 抽象
 di/                          # 依赖注入接口（IContainer + BasicContainer）
 logging/                     # 日志接口与基础实现
 saga/                        # Saga 编排
@@ -217,7 +217,7 @@ type IEventStore interface {
 - `IEventStoreExtended`：基于游标的事件流分页；
 - `IAggregateEventStore`：按聚合顺序流式读取。
 
-SQL 实现基于 `storage/database` 与 `storage/database/sql.ISql`，位于 `eventing/store/sql`（此处仅说明抽象层，具体 schema 见迁移指南）。
+SQL 实现基于 `data/db` 与 `data/db/sql.ISql`，位于 `eventing/store/sql`（此处仅说明抽象层，具体 schema 见迁移指南）。
 
 ### 3.3 投影管理（`eventing/projection`）
 
@@ -238,7 +238,7 @@ SQL 实现基于 `storage/database` 与 `storage/database/sql.ISql`，位于 `ev
 
 ### 3.4 Outbox 与监控
 
-- Outbox 位于 `eventing/outbox`，基于 `storage/database/sql` 实现 SQL 仓储（`sql_repository.go`），提供入库、查询待发布事件、标记已发布/死信等能力；
+- Outbox 位于 `eventing/outbox`，基于 `data/db/sql` 实现 SQL 仓储（`sql_repository.go`），提供入库、查询待发布事件、标记已发布/死信等能力；
 - 监控辅助位于 `eventing/monitoring.go` 与 `eventing/monitoring/` 子目录，用于统计 EventStore/Outbox 等指标。
 
 ---
@@ -307,26 +307,26 @@ type IMessageHandler interface {
 
 注意：当仓储不支持 `IQueryableRepository` 时，带过滤/排序的 query/page 操作会返回 `ErrQueryableRepositoryRequired`，不会再静默忽略条件。
 
-### 5.2 HTTP 抽象与 API 构建（`httpx` + `app/api`）
+### 5.2 HTTP 抽象与 API 构建（`http` + `app/api`）
 
-- `httpx` 提供基础 HTTP 抽象（上下文、请求、响应），以及追踪/租户中间件；
+- `http` 提供基础 HTTP 抽象（上下文、请求、响应），以及追踪/租户中间件；
 - `app/api` 提供简化的 RESTful 构建器，将 `Application` 或领域服务暴露为 HTTP API，并与 `errors.Normalize` 协作统一错误返回。
 
 ---
 
 ## 6. 数据库抽象与 SQL Builder
 
-### 6.1 基础 DB 抽象（`storage/database/basic`）
+### 6.1 基础 DB 抽象（`data/db/basic`）
 
 定义统一的 `IDatabase` 接口，并提供最简实现，屏蔽具体驱动差异。
 
-### 6.2 SQL Builder（`storage/database/sql`）
+### 6.2 SQL Builder（`data/db/sql`）
 
 模块化的 SQL 构建层：
 
 - `ISql` 接口支持 Select/Insert/Update/Delete/Upsert；
 - 每类语句拆分到独立文件（`select.go`、`insert.go` 等）；
-- 结合 `storage/database/dialect.Dialect` 处理不同数据库（MySQL/SQLite/Postgres）的方言差异（DELETE LIMIT、Upsert 语法等）。
+- 结合 `data/db/dialect.Dialect` 处理不同数据库（MySQL/SQLite/Postgres）的方言差异（DELETE LIMIT、Upsert 语法等）。
 
 事件存储、Outbox、投影检查点等 SQL 实现都优先基于这一层构建。
 

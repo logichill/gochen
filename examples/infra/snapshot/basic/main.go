@@ -8,13 +8,13 @@ import (
 
 	_ "modernc.org/sqlite"
 
+	dbcore "gochen/data/db"
+	basicdb "gochen/data/db/basic"
 	sentity "gochen/domain/entity"
 	"gochen/domain/eventsourced"
 	"gochen/eventing"
 	estore "gochen/eventing/store"
 	ssnap "gochen/eventing/store/snapshot"
-	dbcore "gochen/storage/database"
-	basicdb "gochen/storage/database/basic"
 )
 
 // Counter 事件载荷

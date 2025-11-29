@@ -8,6 +8,8 @@ import (
 
 	_ "modernc.org/sqlite"
 
+	dbcore "gochen/data/db"
+	basicdb "gochen/data/db/basic"
 	"gochen/eventing"
 	ebus "gochen/eventing/bus"
 	"gochen/eventing/projection"
@@ -15,8 +17,6 @@ import (
 	"gochen/examples/infra/projection/sql_checkpoint/internal/proj"
 	"gochen/messaging"
 	mtransport "gochen/messaging/transport/memory"
-	dbcore "gochen/storage/database"
-	basicdb "gochen/storage/database/basic"
 )
 
 func main() {

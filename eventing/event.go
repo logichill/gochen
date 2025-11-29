@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"time"
 
-	"gochen/idgen/snowflake"
+	"gochen/codegen/snowflake"
 	"gochen/messaging"
 )
 

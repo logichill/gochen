@@ -444,7 +444,7 @@ func TestProjectionManager_ReplayRetry_Success(t *testing.T) {
 	eventBus := &MockEventBus{}
 
 	cfg := &ProjectionConfig{
-		MaxRetries:   2,              // 允许最多重试 2 次（总尝试 <=3）
+		MaxRetries:   2, // 允许最多重试 2 次（总尝试 <=3）
 		RetryBackoff: 0 * time.Millisecond,
 	}
 	manager := NewProjectionManagerWithConfig(eventStore, eventBus, cfg)
@@ -482,7 +482,7 @@ func TestProjectionManager_ReplayRetry_MaxRetriesExceeded(t *testing.T) {
 	eventBus := &MockEventBus{}
 
 	cfg := &ProjectionConfig{
-		MaxRetries:   2,              // 最多重试 2 次（总尝试 3 次）
+		MaxRetries:   2, // 最多重试 2 次（总尝试 3 次）
 		RetryBackoff: 0 * time.Millisecond,
 	}
 	manager := NewProjectionManagerWithConfig(eventStore, eventBus, cfg)

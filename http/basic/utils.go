@@ -6,7 +6,7 @@ import (
 	"strconv"
 
 	"gochen/errors"
-	httpx "gochen/httpx"
+	httpx "gochen/http"
 )
 
 type HttpUtils struct{}

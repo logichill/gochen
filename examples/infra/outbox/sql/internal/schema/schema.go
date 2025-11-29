@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	dbcore "gochen/storage/database"
+	dbcore "gochen/data/db"
 )
 
 // EnsureEventAndOutboxTables 创建演示所需的表（SQLite 兼容 DDL）

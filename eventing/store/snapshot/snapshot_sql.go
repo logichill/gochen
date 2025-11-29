@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
+	"gochen/data/db"
 	"gochen/logging"
-	"gochen/storage/database"
 )
 
 // SQLStore 基于通用 database.IDatabase 的快照存储实现

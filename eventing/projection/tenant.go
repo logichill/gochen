@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"gochen/eventing"
-	"gochen/httpx"
+	httpx "gochen/http"
 )
 
 // TenantAwareProjector 租户感知的投影装饰器

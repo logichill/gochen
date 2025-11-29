@@ -112,7 +112,7 @@ app/                        # 应用层
     ├── router.go           # IRouter 路由接口
     └── config.go           # 路由和服务配置
 
-httpx/                      # HTTP 抽象层
+http/                       # HTTP 抽象层
 ├── context.go              # IHttpContext 接口
 ├── request.go              # IHttpRequest 接口
 ├── response.go             # IHttpResponse 接口
@@ -124,21 +124,21 @@ httpx/                      # HTTP 抽象层
     ├── request.go          # 基础 HTTP 请求
     └── response.go         # 基础 HTTP 响应
 
-storage/                    # 存储抽象
-├── database/               # 数据库接口与实现
+data/                       # 数据与存储抽象
+├── db/                     # 数据库接口与实现（原 storage/database）
 │   ├── basic/              # 基础 DB 实现（IDatabase）
 │   ├── dialect/            # 数据库方言（DeleteLimit/Upsert 等）
 │   └── sql/                # SQL Builder + ISql 抽象
-└── file/                   # 文件存储
+├── file/                   # 文件存储
+└── orm/                    # ORM 兼容抽象（接口与元信息）
 
 cache/                      # 缓存系统
+codegen/                    # 编码/ID 生成（原 idgen）
 errors/                     # 错误处理
 logging/                    # 日志系统
 validation/                 # 验证工具
 di/                         # 依赖注入
-idgen/                      # ID 生成器
 saga/                       # Saga 模式 🎉 NEW!
-bridge/                     # 远程桥接 🎉 NEW!
 patterns/                   # 设计模式工具
 workflow/                   # 工作流/流程管理
 examples/                   # 示例代码
@@ -781,7 +781,7 @@ package main
 
 import (
     "context"
-    "gochen/httpx"
+    "gochen/http"
     "gochen/eventing"
     "gochen/eventing/projection"
 )
@@ -792,22 +792,22 @@ func main() {
     
     mux.HandleFunc("/api/orders", func(w http.ResponseWriter, r *http.Request) {
         // 提取租户 ID（从 Header: X-Tenant-ID）
-        tenantID := httpx.ExtractTenantIDFromRequest(r)
-        ctx := httpx.WithTenantID(r.Context(), tenantID)
+        tenantID := http.ExtractTenantIDFromRequest(r)
+        ctx := http.WithTenantID(r.Context(), tenantID)
         
         // 处理请求...
         handleCreateOrder(ctx, w, r)
     })
     
     // 使用中间件自动处理
-    http.ListenAndServe(":8080", httpx.TenantMiddleware(mux))
+    http.ListenAndServe(":8080", http.TenantMiddleware(mux))
     
     // 2. 事件存储 - 自动隔离
     baseStore := store.NewSQLEventStore(db)
     tenantStore := eventing.NewTenantAwareEventStore(baseStore)
     
     // 保存事件时自动注入租户 ID
-    ctx := httpx.WithTenantID(ctx, "tenant-A")
+    ctx := http.WithTenantID(ctx, "tenant-A")
     err := tenantStore.AppendEvents(ctx, aggregateID, events, 0)
     // 事件自动包含 metadata["tenant_id"] = "tenant-A"
     
@@ -831,7 +831,7 @@ package main
 
 import (
     "context"
-    "gochen/httpx"
+    "gochen/http"
     "gochen/eventing"
 )
 
@@ -841,9 +841,9 @@ func main() {
     
     mux.HandleFunc("/api/orders", func(w http.ResponseWriter, r *http.Request) {
         // 自动提取或生成 correlation_id
-        correlationID := httpx.GetOrGenerateCorrelationID(r)
-        ctx := httpx.WithCorrelationID(r.Context(), correlationID)
-        ctx = httpx.WithCausationID(ctx, r.Header.Get("X-Request-ID"))
+        correlationID := http.GetOrGenerateCorrelationID(r)
+        ctx := http.WithCorrelationID(r.Context(), correlationID)
+        ctx = http.WithCausationID(ctx, r.Header.Get("X-Request-ID"))
         
         // 处理请求...
         handleCreateOrder(ctx, w, r)
@@ -851,7 +851,7 @@ func main() {
     
     // 2. 命令层 - 自动注入追踪 ID
     cmd := command.NewCommand("cmd-123", "create-order", 100, "Order", payload)
-    httpx.InjectTraceContext(ctx, cmd.Metadata)
+    http.InjectTraceContext(ctx, cmd.Metadata)
     // cmd.Metadata["correlation_id"] = "cor-xxx"
     // cmd.Metadata["causation_id"] = "req-xxx"
     
@@ -919,7 +919,7 @@ func ToJson(v any) ([]byte, error)
 
 ### API 文档
 - [RESTful API 构建器](./app/api/README.md) - API 配置说明
-- [HTTP 抽象层](./httpx/README.md) - HTTP 上下文和路由
+- [HTTP 抽象层](./http/README.md) - HTTP 上下文和路由
 - [应用服务层](./app/README.md) - 应用服务接口
 
 ### 领域层文档

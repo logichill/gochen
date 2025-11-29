@@ -8,7 +8,7 @@ import (
 	"gochen/domain/entity"
 	sservice "gochen/domain/service"
 	"gochen/errors"
-	core "gochen/httpx"
+	core "gochen/http"
 )
 
 // AuditedRouteBuilder 面向审计型实体的 REST 路由构建器
