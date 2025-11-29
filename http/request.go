@@ -1,5 +1,5 @@
-// Package httpx 提供简化的 HTTP 接口，遵循接口隔离原则
-package httpx
+// package http 提供简化的 HTTP 接口，遵循接口隔离原则
+package http
 
 import (
 	"context"

@@ -1,4 +1,4 @@
-package httpx
+package http
 
 // IResponseWriter 响应写入接口 - 只负责写入响应
 type IResponseWriter interface {
