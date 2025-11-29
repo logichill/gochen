@@ -8,7 +8,7 @@ import (
 	"gochen/app"
 	"gochen/app/api"
 	"gochen/examples/internal/mocks"
-	httpx "gochen/httpx"
+	httpx "gochen/http"
 )
 
 // User 简单实体（普通 CRUD）

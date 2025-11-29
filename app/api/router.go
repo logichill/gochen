@@ -9,7 +9,7 @@ import (
 	app "gochen/app"
 	"gochen/domain/entity"
 	"gochen/errors"
-	core "gochen/httpx"
+	core "gochen/http"
 )
 
 // IRouteBuilder 路由构建器接口

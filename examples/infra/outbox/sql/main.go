@@ -7,6 +7,8 @@ import (
 
 	_ "modernc.org/sqlite"
 
+	dbcore "gochen/data/db"
+	basicdb "gochen/data/db/basic"
 	sentity "gochen/domain/entity"
 	"gochen/domain/eventsourced"
 	"gochen/eventing"
@@ -16,8 +18,6 @@ import (
 	"gochen/examples/infra/outbox/sql/internal/schema"
 	"gochen/messaging"
 	mtransport "gochen/messaging/transport/memory"
-	dbcore "gochen/storage/database"
-	basicdb "gochen/storage/database/basic"
 )
 
 // 领域事件

@@ -9,10 +9,10 @@ import (
 	"github.com/stretchr/testify/require"
 	_ "modernc.org/sqlite"
 
+	"gochen/data/db"
+	basicdb "gochen/data/db/basic"
 	"gochen/eventing"
 	"gochen/logging"
-	"gochen/storage/database"
-	basicdb "gochen/storage/database/basic"
 )
 
 // MockEventStoreWithDB 模拟支持数据库接口的事件存储

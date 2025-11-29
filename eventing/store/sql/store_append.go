@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
+	"gochen/data/db"
 	"gochen/eventing"
 	"gochen/eventing/monitoring"
 	log "gochen/logging"
-	"gochen/storage/database"
 )
 
 func (s *SQLEventStore) AppendEvents(ctx context.Context, aggregateID int64, events []eventing.IStorableEvent, expectedVersion uint64) error {

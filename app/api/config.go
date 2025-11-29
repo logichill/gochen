@@ -5,8 +5,8 @@ import (
 	"net/http"
 
 	"gochen/errors"
-	core "gochen/httpx"
-	bhttp "gochen/httpx/basic"
+	core "gochen/http"
+	bhttp "gochen/http/basic"
 )
 
 // RouteConfig 路由配置

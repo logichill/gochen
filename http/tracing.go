@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"gochen/idgen/snowflake"
+	"gochen/codegen/snowflake"
 )
 
 // Context keys for tracing

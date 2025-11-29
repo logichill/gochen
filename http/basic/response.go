@@ -1,7 +1,7 @@
 package basic
 
 import (
-	httpx "gochen/httpx"
+	httpx "gochen/http"
 	"net/http"
 )
 

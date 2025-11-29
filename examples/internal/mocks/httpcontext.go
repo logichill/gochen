@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"net/url"
 
-	httpx "gochen/httpx"
-	hbasic "gochen/httpx/basic"
+	httpx "gochen/http"
+	hbasic "gochen/http/basic"
 )
 
 // MockHttpContext 模拟 HTTP 上下文

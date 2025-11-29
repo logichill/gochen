@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	httpx "gochen/httpx"
+	httpx "gochen/http"
 )
 
 // HttpServer 基于标准库 net/http 的 IHttpServer 实现

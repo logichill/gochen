@@ -152,37 +152,42 @@ type IHttpServer interface {
 package main
 
 import (
-    "gochen/httpx"
-    "gochen/httpx/basic"
+    httpx "gochen/http"
+    basic "gochen/http/basic"
 )
 
 func main() {
     // 创建 HTTP 服务器
-    server := basic.NewHttpServer()
-    
+    server := basic.NewHTTPServer(&httpx.WebConfig{
+        Host: "0.0.0.0",
+        Port: 8080,
+    })
+
     // 注册路由
     server.GET("/hello", func(ctx httpx.IHttpContext) error {
         return ctx.JSON(200, map[string]string{
             "message": "Hello, World!",
         })
     })
-    
+
     server.POST("/users", func(ctx httpx.IHttpContext) error {
         var user User
-        if err := ctx.Bind(&user); err != nil {
+        if err := ctx.BindJSON(&user); err != nil {
             return ctx.JSON(400, map[string]string{
                 "error": "invalid request",
             })
         }
-        
+
         // 处理业务逻辑
         // ...
-        
+
         return ctx.JSON(201, user)
     })
-    
+
     // 启动服务器
-    server.Start(":8080")
+    if err := server.Start(":8080"); err != nil {
+        panic(err)
+    }
 }
 ```
 
@@ -351,7 +356,7 @@ func listUsers(ctx httpx.IHttpContext) error {
 package adapter
 
 import (
-    "gochen/httpx"
+    "gochen/http"
     "github.com/gin-gonic/gin"
 )
 

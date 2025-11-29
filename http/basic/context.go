@@ -6,7 +6,7 @@ import (
 	"net/url"
 
 	"gochen/errors"
-	httpx "gochen/httpx"
+	httpx "gochen/http"
 )
 
 type HttpContext struct {

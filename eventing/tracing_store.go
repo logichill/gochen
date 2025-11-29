@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"gochen/httpx"
+	httpx "gochen/http"
 )
 
 // TracingEventStore 带追踪的事件存储装饰器

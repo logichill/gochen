@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 
-	core "gochen/storage/database"
+	core "gochen/data/db"
 )
 
 // Tx 事务实现，委托给 *sql.Tx，同时实现 core.IDatabase 以便透传给需要 DB 的接口

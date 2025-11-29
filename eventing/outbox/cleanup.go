@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
+	"gochen/data/db"
+	"gochen/data/db/dialect"
 	"gochen/logging"
-	"gochen/storage/database"
-	"gochen/storage/database/dialect"
 )
 
 // CleanupPolicy 清理策略配置

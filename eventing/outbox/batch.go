@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	sqlbuilder "gochen/storage/database/sql"
+	sqlbuilder "gochen/data/db/sql"
 
-	"gochen/storage/database"
+	"gochen/data/db"
 )
 
 // IBatchRepository 批量操作接口

@@ -8,9 +8,9 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	coredb "gochen/storage/database"
-	basicdb "gochen/storage/database/basic"
-	sqlbuilder "gochen/storage/database/sql"
+	coredb "gochen/data/db"
+	basicdb "gochen/data/db/basic"
+	sqlbuilder "gochen/data/db/sql"
 )
 
 // demoUser 用于演示 SQL Builder 的简单实体

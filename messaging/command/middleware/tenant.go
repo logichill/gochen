@@ -3,7 +3,7 @@ package middleware
 import (
 	"context"
 
-	"gochen/httpx"
+	httpx "gochen/http"
 	"gochen/messaging"
 	"gochen/messaging/command"
 )

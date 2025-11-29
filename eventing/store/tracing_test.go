@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"gochen/eventing"
-	"gochen/httpx"
+	httpx "gochen/http"
 	"gochen/messaging/command"
 )
 

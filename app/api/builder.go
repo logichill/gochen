@@ -6,7 +6,7 @@ import (
 
 	app "gochen/app"
 	"gochen/domain/entity"
-	"gochen/httpx"
+	httpx "gochen/http"
 	validation "gochen/validation"
 )
 

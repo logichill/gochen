@@ -248,7 +248,7 @@ package main
 
 import (
     "gochen/app/api"
-    "gochen/httpx"
+    "gochen/http"
     "github.com/gin-gonic/gin"
 )
 
@@ -607,7 +607,7 @@ type IEventSourcedRepository[T IEventSourcedAggregate[ID], ID comparable] interf
 
 ### API 文档
 - [RESTful API 构建器](../app/api/README.md) - 详细 API 配置说明
-- [HTTP 抽象层](../httpx/README.md) - HTTP 上下文和路由
+- [HTTP 抽象层](../http/README.md) - HTTP 上下文和路由
 - [应用服务层](../app/README.md) - 应用服务接口
 
 ### 领域层文档

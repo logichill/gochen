@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	core "gochen/storage/database"
-	"gochen/storage/database/dialect"
+	core "gochen/data/db"
+	"gochen/data/db/dialect"
 )
 
 type upsertBuilder struct {

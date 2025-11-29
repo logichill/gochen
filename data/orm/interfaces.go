@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 
-	"gochen/storage/database"
+	"gochen/data/db"
 )
 
 // IOrm 表示 ORM 适配器入口。

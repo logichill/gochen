@@ -3,7 +3,7 @@ package sql
 import (
 	"context"
 
-	"gochen/storage/database"
+	"gochen/data/db"
 )
 
 // SQLEventStore 基于通用 SQL 接口的事件存储
