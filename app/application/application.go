@@ -196,4 +196,3 @@ func (s *Application[T]) BeforeUpdate(ctx context.Context, entity T) error { ret
 func (s *Application[T]) AfterUpdate(ctx context.Context, entity T) error  { return nil }
 func (s *Application[T]) BeforeDelete(ctx context.Context, id int64) error { return nil }
 func (s *Application[T]) AfterDelete(ctx context.Context, id int64) error  { return nil }
-

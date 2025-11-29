@@ -3,7 +3,7 @@ package api
 import (
 	"fmt"
 
-	application "gochen/domain/application"
+	application "gochen/app/application"
 	"gochen/domain/entity"
 	"gochen/domain/service"
 	httpx "gochen/http"
@@ -11,7 +11,7 @@ import (
 )
 
 // IAuditedApiBuilder 面向审计型业务的构建器接口
-type IAuditedApiBuilder[T entity.Entity[int64]] interface {
+type IAuditedApiBuilder[T entity.IAuditedEntity[int64]] interface {
 	Route(config func(*RouteConfig)) IAuditedApiBuilder[T]
 	Service(config func(*application.ServiceConfig)) IAuditedApiBuilder[T]
 	Middleware(middlewares ...httpx.Middleware) IAuditedApiBuilder[T]
@@ -25,7 +25,7 @@ type auditedConfigurableService interface {
 type auditedValidatorAware interface{ SetValidator(validation.IValidator) }
 
 // AuditedApiBuilder 构建器实现
-type AuditedApiBuilder[T entity.Entity[int64]] struct {
+type AuditedApiBuilder[T entity.IAuditedEntity[int64]] struct {
 	routeConfig   *RouteConfig
 	serviceConfig *application.ServiceConfig
 	middlewares   []httpx.Middleware
@@ -33,7 +33,7 @@ type AuditedApiBuilder[T entity.Entity[int64]] struct {
 	validator     validation.IValidator
 }
 
-func NewAuditedApiBuilder[T entity.Entity[int64]](svc service.IAuditedService[T, int64], validator validation.IValidator) *AuditedApiBuilder[T] {
+func NewAuditedApiBuilder[T entity.IAuditedEntity[int64]](svc service.IAuditedService[T, int64], validator validation.IValidator) *AuditedApiBuilder[T] {
 	rc := DefaultRouteConfig()
 	if validator != nil && rc.Validator == nil {
 		rc.Validator = func(v any) error { return validator.Validate(v) }

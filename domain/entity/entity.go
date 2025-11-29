@@ -68,27 +68,28 @@ type IValidatable interface {
 	Validate() error
 }
 
-// Entity 基础实体接口，组合常用功能
-// 适用于传统 CRUD 场景
-type Entity[T comparable] interface {
+// IAuditedEntity 带审计与软删除能力的实体接口
+// 适用于需要审计追踪、软删/恢复与状态校验的场景
+type IAuditedEntity[T comparable] interface {
 	IEntity[T]
 	IAuditable
 	ISoftDeletable
 	IValidatable
 }
 
-// String 字符串 ID 类型的实体
+// StringEntity 字符串 ID 类型的审计实体
 type StringEntity interface {
-	Entity[string]
+	IAuditedEntity[string]
 }
 
-// Int64 整数 ID 类型的实体
+// Int64Entity 整数 ID 类型的审计实体
 type Int64Entity interface {
-	Entity[int64]
+	IAuditedEntity[int64]
 }
 
-// EntityFields 通用实体字段（用于嵌入）
-type EntityFields struct {
+// Entity 通用审计实体字段（用于嵌入）
+// 默认使用 int64 作为主键类型
+type Entity struct {
 	ID        int64      `json:"id" gorm:"primaryKey"`
 	Version   int64      `json:"version" gorm:"default:1"`
 	CreatedAt time.Time  `json:"created_at" gorm:"autoCreateTime"`
@@ -100,65 +101,65 @@ type EntityFields struct {
 }
 
 // GetID 实现 IObject 接口
-func (e *EntityFields) GetID() int64 {
+func (e *Entity) GetID() int64 {
 	return e.ID
 }
 
 // GetVersion 实现 IEntity 接口
-func (e *EntityFields) GetVersion() int64 {
+func (e *Entity) GetVersion() int64 {
 	return e.Version
 }
 
 // GetCreatedAt 实现 IAuditable 接口
-func (e *EntityFields) GetCreatedAt() time.Time {
+func (e *Entity) GetCreatedAt() time.Time {
 	return e.CreatedAt
 }
 
 // GetCreatedBy 实现 IAuditable 接口
-func (e *EntityFields) GetCreatedBy() string {
+func (e *Entity) GetCreatedBy() string {
 	return e.CreatedBy
 }
 
 // GetUpdatedAt 实现 IAuditable 接口
-func (e *EntityFields) GetUpdatedAt() time.Time {
+func (e *Entity) GetUpdatedAt() time.Time {
 	return e.UpdatedAt
 }
 
 // GetUpdatedBy 实现 IAuditable 接口
-func (e *EntityFields) GetUpdatedBy() string {
+func (e *Entity) GetUpdatedBy() string {
 	return e.UpdatedBy
 }
 
 // SetCreatedInfo 实现 IAuditable 接口
-func (e *EntityFields) SetCreatedInfo(by string, at time.Time) {
+func (e *Entity) SetCreatedInfo(by string, at time.Time) {
 	e.CreatedBy = by
 	e.CreatedAt = at
 }
 
 // SetUpdatedInfo 实现 IAuditable 接口
-func (e *EntityFields) SetUpdatedInfo(by string, at time.Time) {
+func (e *Entity) SetUpdatedInfo(by string, at time.Time) {
 	e.UpdatedBy = by
 	e.UpdatedAt = at
 	e.Version++
 }
 
 // GetDeletedAt 实现 ISoftDeletable 接口
-func (e *EntityFields) GetDeletedAt() *time.Time {
+func (e *Entity) GetDeletedAt() *time.Time {
 	return e.DeletedAt
 }
 
 // GetDeletedBy 实现 ISoftDeletable 接口
-func (e *EntityFields) GetDeletedBy() *string {
+func (e *Entity) GetDeletedBy() *string {
 	return e.DeletedBy
 }
 
 // IsDeleted 实现 ISoftDeletable 接口
-func (e *EntityFields) IsDeleted() bool {
+func (e *Entity) IsDeleted() bool {
 	return e.DeletedAt != nil
 }
 
 // SoftDelete 实现 ISoftDeletable 接口
-func (e *EntityFields) SoftDelete(by string, at time.Time) error {
+func (e *Entity) SoftDelete(by string, at time.Time) error {
 	if e.IsDeleted() {
 		return ErrAlreadyDeleted
 	}
@@ -169,7 +170,7 @@ func (e *EntityFields) SoftDelete(by string, at time.Time) error {
 }
 
 // Restore 实现 ISoftDeletable 接口
-func (e *EntityFields) Restore() error {
+func (e *Entity) Restore() error {
 	if !e.IsDeleted() {
 		return ErrNotDeleted
 	}

@@ -40,12 +40,12 @@ func (s *CRUDService[T, ID]) Exists(ctx context.Context, id ID) (bool, error) {
 func (s *CRUDService[T, ID]) Repository() repo.IRepository[T, ID] { return s.repository }
 
 // AuditedService 基于 IAuditedRepository 的默认实现
-type AuditedService[T entity.Entity[ID], ID comparable] struct {
+type AuditedService[T entity.IAuditedEntity[ID], ID comparable] struct {
 	CRUDService[T, ID]
 	audited repo.IAuditedRepository[T, ID]
 }
 
-func NewAuditedService[T entity.Entity[ID], ID comparable](r repo.IAuditedRepository[T, ID]) *AuditedService[T, ID] {
+func NewAuditedService[T entity.IAuditedEntity[ID], ID comparable](r repo.IAuditedRepository[T, ID]) *AuditedService[T, ID] {
 	return &AuditedService[T, ID]{CRUDService: CRUDService[T, ID]{repository: r}, audited: r}
 }
 

@@ -14,7 +14,7 @@ import (
 
 // Article 带审计与软删除的实体
 type Article struct {
-	sentity.EntityFields
+	sentity.Entity
 	Title       string     `json:"title"`
 	Content     string     `json:"content"`
 	Status      string     `json:"status"`

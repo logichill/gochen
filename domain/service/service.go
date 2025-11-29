@@ -24,7 +24,7 @@ type IService[T entity.IEntity[ID], ID comparable] interface {
 
 // IAuditedService 面向带审计/软删除的服务接口
 // 在 CRUD 基础上引入审计追踪、软删/恢复等能力
-type IAuditedService[T entity.Entity[ID], ID comparable] interface {
+type IAuditedService[T entity.IAuditedEntity[ID], ID comparable] interface {
 	IService[T, ID]
 
 	GetAuditTrail(ctx context.Context, id ID) ([]repo.AuditRecord, error)

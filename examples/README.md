@@ -197,7 +197,7 @@ var _ entity.IEntity[int64] = (*User)(nil)
 package main
 
 import (
-    application "gochen/domain/application"
+    application "gochen/app/application"
     "gochen/domain/repository"
     "gochen/validation"
 )
@@ -247,7 +247,7 @@ func main() {
 package main
 
 import (
-    application "gochen/domain/application"
+    application "gochen/app/application"
     "gochen/app/api"
     "gochen/http"
     "github.com/gin-gonic/gin"

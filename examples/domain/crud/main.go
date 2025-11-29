@@ -5,8 +5,8 @@ import (
 	"log"
 	"time"
 
-	application "gochen/domain/application"
 	"gochen/app/api"
+	application "gochen/app/application"
 	"gochen/examples/internal/mocks"
 	httpx "gochen/http"
 )

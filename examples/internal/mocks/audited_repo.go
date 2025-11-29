@@ -13,13 +13,13 @@ import (
 // MockAuditedRepository 基于内存的审计型仓储实现
 // - 复用 GenericMockRepository 提供的基础 CRUD 行为
 // - 实现审计相关方法（审计轨迹、软删/恢复/物理删）
-type MockAuditedRepository[T entity.Entity[int64]] struct {
+type MockAuditedRepository[T entity.IAuditedEntity[int64]] struct {
 	*GenericMockRepository[T]
 	audits map[int64][]srepo.AuditRecord
 }
 
 // NewMockAuditedRepository 创建审计型内存仓储
-func NewMockAuditedRepository[T entity.Entity[int64]]() *MockAuditedRepository[T] {
+func NewMockAuditedRepository[T entity.IAuditedEntity[int64]]() *MockAuditedRepository[T] {
 	return &MockAuditedRepository[T]{
 		GenericMockRepository: NewGenericMockRepository[T](),
 		audits:                map[int64][]srepo.AuditRecord{},

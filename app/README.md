@@ -112,7 +112,7 @@ package main
 
 import (
     "context"
-    application "gochen/domain/application"
+    application "gochen/app/application"
     "gochen/domain/entity"
     "gochen/validation"
 )

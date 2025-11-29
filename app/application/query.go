@@ -206,4 +206,3 @@ func (s *Application[T]) CountByQuery(ctx context.Context, query *QueryParams) (
 	// 避免将 Count(ctx) 误当作带查询条件的统计结果。
 	return 0, ErrQueryableRepositoryRequired
 }
-

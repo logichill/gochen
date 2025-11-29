@@ -106,7 +106,7 @@ messaging/                  # 消息系统
     └── sync/               # 同步传输（同步执行）
 
 app/                        # 应用层
-├── application.go          # Application 应用服务
+├── application/            # Application 应用服务（通用应用服务层）
 └── api/                    # RESTful API 构建器
     ├── builder.go          # RestfulBuilder
     ├── router.go           # IRouter 路由接口
@@ -224,12 +224,12 @@ Gochen Shared 支持三个递进的复杂度级别，允许根据业务需求灵
 ```go
 // 阶段 1: 从简单 CRUD 开始
 type Category struct {
-    entity.EntityFields
+    entity.Entity
     Name string
 }
 
 // 阶段 2: 后续需求变化，升级到审计模式（实体结构基本无需重构）
-// - EntityFields 已包含审计字段
+// - Entity 已包含审计字段
 // - 切换到 IAuditedRepository 即可
 
 // 阶段 3: 业务关键，升级到事件溯源（需要重构聚合模型与持久化方式）
@@ -512,7 +512,7 @@ package main
 
 import (
     "context"
-    application "gochen/domain/application"
+    application "gochen/app/application"
     "gochen/app/api"
     "gochen/domain/entity"
     "gochen/validation"

@@ -8,7 +8,7 @@ import (
 	"reflect"
 	"testing"
 
-	application "gochen/domain/application"
+	application "gochen/app/application"
 	"gochen/domain/entity"
 	"gochen/domain/repository"
 	httpx "gochen/http"
@@ -17,7 +17,7 @@ import (
 )
 
 type fakeEntity struct {
-	entity.EntityFields
+	entity.Entity
 }
 
 func (f *fakeEntity) Validate() error { return nil }
@@ -105,7 +105,7 @@ func (s *stubAppService) ListPage(context.Context, *application.PaginationOption
 	if s.order != nil {
 		*s.order = append(*s.order, "handler")
 	}
-		return &application.PagedResult[*fakeEntity]{Data: []*fakeEntity{}, Total: 0, Page: 1, Size: 10}, nil
+	return &application.PagedResult[*fakeEntity]{Data: []*fakeEntity{}, Total: 0, Page: 1, Size: 10}, nil
 }
 func (s *stubAppService) CountByQuery(context.Context, *application.QueryParams) (int64, error) {
 	return 0, nil
@@ -132,8 +132,10 @@ func (s *stubAppService) AfterUpdate(context.Context, *fakeEntity) error  { retu
 func (s *stubAppService) BeforeDelete(context.Context, int64) error       { return nil }
 func (s *stubAppService) AfterDelete(context.Context, int64) error        { return nil }
 func (s *stubAppService) GetConfig() *application.ServiceConfig           { return s.cfg }
-func (s *stubAppService) UpdateConfig(cfg *application.ServiceConfig)     { s.cfg = cloneServiceConfig(cfg) }
-func (s *stubAppService) SetValidator(v validation.IValidator)            { s.validator = v }
+func (s *stubAppService) UpdateConfig(cfg *application.ServiceConfig) {
+	s.cfg = cloneServiceConfig(cfg)
+}
+func (s *stubAppService) SetValidator(v validation.IValidator) { s.validator = v }
 
 func TestRouteBuilderMiddlewareChain(t *testing.T) {
 	var order []string
@@ -252,7 +254,7 @@ func TestServiceConfigOverride(t *testing.T) {
 
 	builder := NewApiBuilder[*fakeEntity](svc, nil)
 	// 通过 Service() 覆盖配置
-		builder.Service(func(cfg *application.ServiceConfig) {
+	builder.Service(func(cfg *application.ServiceConfig) {
 		cfg.AutoValidate = true
 		cfg.MaxBatchSize = 99
 	})

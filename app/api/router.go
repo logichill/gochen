@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	application "gochen/domain/application"
+	application "gochen/app/application"
 	"gochen/domain/entity"
 	"gochen/errors"
 	core "gochen/http"

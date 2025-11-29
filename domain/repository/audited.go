@@ -20,7 +20,7 @@ type AuditRecord struct {
 
 // IAuditedRepository 带审计的仓储接口
 // 适用于操作记录型数据（订单、用户等）
-type IAuditedRepository[T entity.Entity[ID], ID comparable] interface {
+type IAuditedRepository[T entity.IAuditedEntity[ID], ID comparable] interface {
 	IRepository[T, ID]
 
 	// GetAuditTrail 获取实体的审计追踪

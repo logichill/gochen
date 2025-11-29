@@ -157,8 +157,8 @@ import (
 )
 
 func main() {
-    // 创建 HTTP 服务器
-    server := basic.NewHTTPServer(&httpx.WebConfig{
+// 创建 HTTP 服务器
+server := basic.NewHTTPServer(&httpx.WebConfig{
         Host: "0.0.0.0",
         Port: 8080,
     })

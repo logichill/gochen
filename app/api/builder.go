@@ -4,7 +4,7 @@ package api
 import (
 	"fmt"
 
-	application "gochen/domain/application"
+	application "gochen/app/application"
 	"gochen/domain/entity"
 	httpx "gochen/http"
 	validation "gochen/validation"

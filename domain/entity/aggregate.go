@@ -40,7 +40,7 @@ type IAggregate[T comparable] interface {
 //	    Email string
 //	}
 type Aggregate[T comparable] struct {
-	EntityFields
+	Entity
 	domainEvents []eventing.IEvent
 }
 

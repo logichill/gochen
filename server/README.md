@@ -280,3 +280,60 @@ func (s *MyServer) Run(ctx context.Context) error {
 - `Shutdown`：按"外到内"或"内到外"顺序关闭后台组件（计划任务、Outbox、消息传输层、数据库连接、HTTP 服务器等）。
 
 通过保持 Engine 抽象不变，仅在文档中约定这些最佳实践，可以在不增加复杂度的前提下覆盖从简单服务到复杂业务系统的大部分启动场景。
+
+## 模块级 Server：承载一组领域模块
+
+对于像 `gochen-iam`、`gochen-llm` 这样的“领域模块仓库”，经常只需要一个最小的运行环境：
+
+- 一个 DI 容器，用于注册仓储与服务；
+- 一个事件总线（可以是内存实现）；
+- 一个 HTTP Server，将模块自身暴露的路由挂到 `/api/v1/...`。
+
+为此，`gochen/server` 提供了一个轻量的 `Server` 实现（注意：这里的 `Server` 是 IServer 的一个实现，而不是 Engine）：
+
+```go
+import (
+    "gochen/domain"
+    "gochen/server"
+    iam "gochen-iam" // 示例：独立 IAM 模块
+)
+
+func main() {
+    // 1. 组合领域模块（实现了 domain.IModule）
+    modules := []domain.IModule{
+        iam.NewModule(),
+        // 还可以加入其他模块，例如 LLM 模块
+    }
+
+    // 2. 创建模块级 Server（默认监听 0.0.0.0:8080，BasePath=/api/v1）
+    srv := server.NewServer(
+        modules,
+        server.WithServerName("iam-service"),
+        server.WithServerHost("0.0.0.0"),
+        server.WithServerPort(8080),
+        // 如需提前在 DI 容器中注册 DB/ORM 等基础设施，可传入自定义 Container：
+        // server.WithServerContainer(container),
+    )
+
+    // 3. 交给 Engine 统一管理生命周期和信号
+    engine := server.NewEngine(srv,
+        server.WithVersion("1.0.0"),
+    )
+
+    if err := engine.Start(); err != nil {
+        panic(err)
+    }
+}
+```
+
+该 `Server` 会在 `SetupDependencies` 中完成：
+
+- 为每个 `domain.IModule` 调用 `RegisterProviders`，注册仓储/服务/路由构造器；
+- 创建或复用一个 `eventing/bus.IEventBus`（默认使用 `messaging/transport/memory` 内存实现）；
+- 从 DI 容器中自动发现所有实现了 `RouteRegistrar` 接口的路由构造器，并将其挂载到 `BasePath`（默认 `/api/v1`）；
+- 在 `StartBackgroundTasks` 中启动内存消息传输层；
+- 在 `Run` 中启动基于 `http/basic.HttpServer` 的 HTTP 服务，并在 `/api/v1/health` 暴露健康检查。
+
+> 提示：
+> - 领域模块内部只需要实现 `domain.IModule` 接口，不需要直接依赖 `server.Engine`。
+> - 对于需要数据库 / ORM 的模块（如 gochen-iam），请在调用 `NewServer` 之前在 `di.IContainer` 中注册好 `database.IDatabase` 与 `orm.IOrm` 等基础设施。

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strconv"
 
-	application "gochen/domain/application"
+	application "gochen/app/application"
 	"gochen/domain/entity"
 	sservice "gochen/domain/service"
 	"gochen/errors"
@@ -12,8 +12,8 @@ import (
 )
 
 // AuditedRouteBuilder 面向审计型实体的 REST 路由构建器
-// 约定：T 必须实现 entity.Entity[int64]（含审计/软删能力），服务实现 IAuditedService。
-type AuditedRouteBuilder[T entity.Entity[int64]] struct {
+// 约定：T 必须实现 entity.IAuditedEntity[int64]（含审计/软删能力），服务实现 IAuditedService。
+type AuditedRouteBuilder[T entity.IAuditedEntity[int64]] struct {
 	config      *RouteConfig
 	middlewares []core.Middleware
 	service     sservice.IAuditedService[T, int64]
@@ -21,7 +21,7 @@ type AuditedRouteBuilder[T entity.Entity[int64]] struct {
 }
 
 // NewAuditedRouteBuilder 创建审计型路由构建器
-func NewAuditedRouteBuilder[T entity.Entity[int64]](svc sservice.IAuditedService[T, int64]) *AuditedRouteBuilder[T] {
+func NewAuditedRouteBuilder[T entity.IAuditedEntity[int64]](svc sservice.IAuditedService[T, int64]) *AuditedRouteBuilder[T] {
 	b := &AuditedRouteBuilder[T]{config: DefaultRouteConfig(), service: svc}
 	// 若服务同时实现了 IAppService，则可启用高级查询/分页/批量
 	if a, ok := any(svc).(application.IApplication[T]); ok {
