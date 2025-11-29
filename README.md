@@ -138,9 +138,10 @@ errors/                     # 错误处理
 logging/                    # 日志系统
 validation/                 # 验证工具
 di/                         # 依赖注入
-saga/                       # Saga 模式 🎉 NEW!
-patterns/                   # 设计模式工具
-workflow/                   # 工作流/流程管理
+patterns/                   # 设计模式与流程编排
+├── retry/                  # 重试模式
+├── saga/                   # Saga 模式 🎉 NEW!
+└── workflow/               # 工作流/流程管理
 examples/                   # 示例代码
 ```
 
@@ -711,7 +712,7 @@ package main
 
 import (
     "context"
-    "gochen/saga"
+    "gochen/patterns/saga"
     "gochen/messaging/command"
 )
 
