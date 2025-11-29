@@ -3,19 +3,19 @@ package api
 import (
 	"fmt"
 
-	app "gochen/app"
+	"gochen/app"
 	"gochen/domain/entity"
-	sservice "gochen/domain/service"
-	core "gochen/httpx"
-	validation "gochen/validation"
+	"gochen/domain/service"
+	"gochen/httpx"
+	"gochen/validation"
 )
 
 // IAuditedApiBuilder 面向审计型业务的构建器接口
 type IAuditedApiBuilder[T entity.Entity[int64]] interface {
 	Route(config func(*RouteConfig)) IAuditedApiBuilder[T]
 	Service(config func(*app.ServiceConfig)) IAuditedApiBuilder[T]
-	Middleware(middlewares ...core.Middleware) IAuditedApiBuilder[T]
-	Build(group core.IRouteGroup) error
+	Middleware(middlewares ...httpx.Middleware) IAuditedApiBuilder[T]
+	Build(group httpx.IRouteGroup) error
 }
 
 type auditedConfigurableService interface {
@@ -28,12 +28,12 @@ type auditedValidatorAware interface{ SetValidator(validation.IValidator) }
 type AuditedApiBuilder[T entity.Entity[int64]] struct {
 	routeConfig   *RouteConfig
 	serviceConfig *app.ServiceConfig
-	middlewares   []core.Middleware
-	service       sservice.IAuditedService[T, int64]
+	middlewares   []httpx.Middleware
+	service       service.IAuditedService[T, int64]
 	validator     validation.IValidator
 }
 
-func NewAuditedApiBuilder[T entity.Entity[int64]](svc sservice.IAuditedService[T, int64], validator validation.IValidator) *AuditedApiBuilder[T] {
+func NewAuditedApiBuilder[T entity.Entity[int64]](svc service.IAuditedService[T, int64], validator validation.IValidator) *AuditedApiBuilder[T] {
 	rc := DefaultRouteConfig()
 	if validator != nil && rc.Validator == nil {
 		rc.Validator = func(v any) error { return validator.Validate(v) }
@@ -60,12 +60,12 @@ func (b *AuditedApiBuilder[T]) Service(config func(*app.ServiceConfig)) IAudited
 	}
 	return b
 }
-func (b *AuditedApiBuilder[T]) Middleware(m ...core.Middleware) IAuditedApiBuilder[T] {
+func (b *AuditedApiBuilder[T]) Middleware(m ...httpx.Middleware) IAuditedApiBuilder[T] {
 	b.middlewares = append(b.middlewares, m...)
 	return b
 }
 
-func (b *AuditedApiBuilder[T]) Build(group core.IRouteGroup) error {
+func (b *AuditedApiBuilder[T]) Build(group httpx.IRouteGroup) error {
 	if b.service == nil {
 		return fmt.Errorf("service cannot be nil")
 	}

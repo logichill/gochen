@@ -367,9 +367,9 @@ type IEventStore interface {
     LoadEvents(ctx context.Context, aggregateID int64, 
                afterVersion uint64) ([]IEvent, error)
     
-    // StreamEvents 流式读取事件
-    StreamEvents(ctx context.Context, 
-                 opts *StreamOptions) (<-chan IEvent, error)
+    // StreamEvents 拉取指定时间之后的事件列表（按时间升序）
+    // 如需基于游标/类型过滤/limit 的流式消费，请优先实现 IEventStoreExtended.GetEventStreamWithCursor。
+    StreamEvents(ctx context.Context, fromTime time.Time) ([]eventing.Event, error)
 }
 
 // IAggregateInspector 聚合检查器接口
