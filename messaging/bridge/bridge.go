@@ -10,8 +10,7 @@ package bridge
 import (
 	"context"
 
-	"gochen/eventing"
-	"gochen/eventing/bus"
+	"gochen/messaging"
 	"gochen/messaging/command"
 )
 
@@ -45,19 +44,19 @@ type IRemoteBridge interface {
 	//   err := bridge.SendCommand(ctx, "http://order-service:8080", cmd)
 	SendCommand(ctx context.Context, serviceURL string, cmd *command.Command) error
 
-	// SendEvent 发送事件到远程服务
+	// SendEvent 发送事件消息到远程服务（基于 messaging 抽象）
 	//
 	// 参数：
 	//   - ctx: 上下文
 	//   - serviceURL: 远程服务地址
-	//   - event: 事件实例
+	//   - event: 事件消息（应满足 MessageTypeEvent 语义）
 	//
 	// 返回：
 	//   - error: 发送失败错误
 	//
 	// 示例：
-	//   err := bridge.SendEvent(ctx, "http://notification-service:8080", event)
-	SendEvent(ctx context.Context, serviceURL string, event eventing.IEvent) error
+	//   err := bridge.SendEvent(ctx, "http://notification-service:8080", msg)
+	SendEvent(ctx context.Context, serviceURL string, event messaging.IMessage) error
 
 	// RegisterCommandHandler 注册命令处理器（服务端）
 	//
@@ -72,7 +71,7 @@ type IRemoteBridge interface {
 	//   bridge.RegisterCommandHandler("CreateOrder", myHandler)
 	RegisterCommandHandler(commandType string, handler func(ctx context.Context, cmd *command.Command) error) error
 
-	// RegisterEventHandler 注册事件处理器（服务端）
+	// RegisterEventHandler 注册事件处理器（服务端，基于 messaging 抽象）
 	//
 	// 参数：
 	//   - eventType: 事件类型
@@ -83,7 +82,7 @@ type IRemoteBridge interface {
 	//
 	// 示例：
 	//   bridge.RegisterEventHandler("OrderCreated", myEventHandler)
-	RegisterEventHandler(eventType string, handler bus.IEventHandler) error
+	RegisterEventHandler(eventType string, handler messaging.IMessageHandler) error
 
 	// Start 启动服务端（监听）
 	//

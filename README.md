@@ -87,6 +87,7 @@ messaging/                  # 消息系统
 ├── handler.go              # IMessageHandler 处理器接口
 ├── bus.go                  # IMessageBus 消息总线实现
 ├── transport.go            # ITransport 传输层接口
+├── bridge/                 # 远程桥接（基于 HTTP 的命令/事件转发）
 ├── command/                # 命令总线 🎉 NEW!
 │   ├── command.go                 # Command 实现（嵌入 Message）
 │   ├── handler.go                 # CommandHandler 适配器

@@ -4,9 +4,20 @@ import (
 	"encoding/json"
 	"errors"
 
-	"gochen/eventing"
+	"gochen/messaging"
 	"gochen/messaging/command"
 )
+
+// messageWithRaw 封装消息体并保留反序列化的原始字段，便于上层做二次映射（如还原 eventing.Event 的聚合字段）。
+type messageWithRaw struct {
+	messaging.Message
+	raw map[string]any `json:"-"`
+}
+
+// RawData 返回原始字段映射
+func (m *messageWithRaw) RawData() map[string]any {
+	return m.raw
+}
 
 // ISerializer 序列化器接口
 //
@@ -23,11 +34,11 @@ type ISerializer interface {
 	// DeserializeCommand 反序列化命令
 	DeserializeCommand(data []byte) (*command.Command, error)
 
-	// SerializeEvent 序列化事件
-	SerializeEvent(event eventing.IEvent) ([]byte, error)
+	// SerializeEvent 序列化事件消息（基于 messaging 抽象）
+	SerializeEvent(event messaging.IMessage) ([]byte, error)
 
-	// DeserializeEvent 反序列化事件
-	DeserializeEvent(data []byte) (eventing.IEvent, error)
+	// DeserializeEvent 反序列化事件消息
+	DeserializeEvent(data []byte) (messaging.IMessage, error)
 }
 
 // JSONSerializer JSON 序列化器
@@ -69,50 +80,56 @@ func (s *JSONSerializer) DeserializeCommand(data []byte) (*command.Command, erro
 }
 
 // SerializeEvent 序列化事件
-func (s *JSONSerializer) SerializeEvent(event eventing.IEvent) ([]byte, error) {
+func (s *JSONSerializer) SerializeEvent(event messaging.IMessage) ([]byte, error) {
 	if event == nil {
 		return nil, ErrInvalidMessage
 	}
 
-	// 如果是 *eventing.Event 类型，直接序列化
-	if e, ok := event.(*eventing.Event); ok {
-		data, err := json.Marshal(e)
+	// 尝试直接序列化，如果失败再回退到基础字段抽取
+	data, err := json.Marshal(event)
+	if err != nil {
+		// 回退：抽取基础字段，避免非导出字段导致序列化失败
+		simplified := map[string]any{
+			"id":        event.GetID(),
+			"type":      event.GetType(),
+			"timestamp": event.GetTimestamp(),
+			"metadata":  event.GetMetadata(),
+			"payload":   event.GetPayload(),
+		}
+
+		data, err = json.Marshal(simplified)
 		if err != nil {
 			return nil, errors.Join(ErrSerializationFailed, err)
 		}
-		return data, nil
-	}
-
-	// 否则，创建简化的事件结构
-	simplified := map[string]any{
-		"id":             event.GetID(),
-		"type":           event.GetType(),
-		"aggregate_id":   event.GetAggregateID(),
-		"aggregate_type": event.GetAggregateType(),
-		"timestamp":      event.GetTimestamp(),
-		"metadata":       event.GetMetadata(),
-	}
-
-	data, err := json.Marshal(simplified)
-	if err != nil {
-		return nil, errors.Join(ErrSerializationFailed, err)
 	}
 
 	return data, nil
 }
 
 // DeserializeEvent 反序列化事件
-func (s *JSONSerializer) DeserializeEvent(data []byte) (eventing.IEvent, error) {
+func (s *JSONSerializer) DeserializeEvent(data []byte) (messaging.IMessage, error) {
 	if len(data) == 0 {
 		return nil, ErrInvalidMessage
 	}
 
-	var event eventing.Event
+	raw := make(map[string]any)
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, errors.Join(ErrDeserializationFailed, err)
+	}
+
+	var event messaging.Message
 	if err := json.Unmarshal(data, &event); err != nil {
 		return nil, errors.Join(ErrDeserializationFailed, err)
 	}
 
-	return &event, nil
+	if event.Metadata == nil {
+		event.Metadata = make(map[string]any)
+	}
+
+	return &messageWithRaw{
+		Message: event,
+		raw:     raw,
+	}, nil
 }
 
 // Ensure JSONSerializer implements ISerializer
