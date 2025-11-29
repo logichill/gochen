@@ -112,7 +112,7 @@ package main
 
 import (
     "context"
-    "gochen/app"
+    application "gochen/domain/application"
     "gochen/domain/entity"
     "gochen/validation"
 )
@@ -133,12 +133,12 @@ func main() {
     
     // 创建仓储
     productRepo := NewProductRepository()
-    
+
     // 创建应用服务
-    productService := app.NewApplication[*Product, int64](
+    productService := application.NewApplication[*Product, int64](
         productRepo,
         validation.NewValidator(),
-        &app.ServiceConfig{
+        &application.ServiceConfig{
             AutoValidate: true,
             EnableCache:  true,
             CacheTTL:     300,
@@ -228,7 +228,7 @@ func (s *ProductService) Create(ctx context.Context, product *Product) error {
 ### 场景 1: 高性能读取服务
 
 ```go
-config := &app.ServiceConfig{
+config := &application.ServiceConfig{
     EnableCache:    true,
     CacheTTL:       600,      // 10分钟缓存
     SoftDelete:     false,    // 不需要软删除
@@ -240,7 +240,7 @@ config := &app.ServiceConfig{
 ### 场景 2: 金融交易服务
 
 ```go
-config := &app.ServiceConfig{
+config := &application.ServiceConfig{
     AutoValidate:    true,
     StrictValidate:  true,     // 严格验证
     EnableAudit:     true,     // 必须审计
@@ -254,7 +254,7 @@ config := &app.ServiceConfig{
 ### 场景 3: 内容管理系统
 
 ```go
-config := &app.ServiceConfig{
+config := &application.ServiceConfig{
     AutoValidate:    true,
     AutoTimestamp:   true,
     SoftDelete:      true,     // 支持内容恢复

@@ -512,7 +512,7 @@ package main
 
 import (
     "context"
-    "gochen/app"
+    application "gochen/domain/application"
     "gochen/app/api"
     "gochen/domain/entity"
     "gochen/validation"
@@ -535,10 +535,10 @@ func main() {
     productRepo := NewProductRepository()
     
     // 3. 创建应用服务
-    productService := app.NewApplication[*Product, int64](
+    productService := application.NewApplication[*Product, int64](
         productRepo,
         validation.NewValidator(),
-        &app.ServiceConfig{
+        &application.ServiceConfig{
             AutoValidate: true,
             EnableCache:  true,
         },
