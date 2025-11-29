@@ -10,9 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"gochen/eventing"
-	"gochen/eventing/bus"
 	"gochen/logging"
+	"gochen/messaging"
 	"gochen/messaging/command"
 )
 
@@ -76,7 +75,7 @@ type HTTPBridge struct {
 	commandMutex    sync.RWMutex
 
 	// 事件处理器
-	eventHandlers map[string]bus.IEventHandler
+	eventHandlers map[string]messaging.IMessageHandler
 	eventMutex    sync.RWMutex
 
 	running bool
@@ -102,7 +101,7 @@ func NewHTTPBridge(config *HTTPBridgeConfig) *HTTPBridge {
 		serializer:      NewJSONSerializer(),
 		mux:             mux,
 		commandHandlers: make(map[string]func(ctx context.Context, cmd *command.Command) error),
-		eventHandlers:   make(map[string]bus.IEventHandler),
+		eventHandlers:   make(map[string]messaging.IMessageHandler),
 		client: &http.Client{
 			Timeout: config.ClientTimeout,
 		},
@@ -168,7 +167,7 @@ func (b *HTTPBridge) SendCommand(ctx context.Context, serviceURL string, cmd *co
 }
 
 // SendEvent 发送事件到远程服务
-func (b *HTTPBridge) SendEvent(ctx context.Context, serviceURL string, event eventing.IEvent) error {
+func (b *HTTPBridge) SendEvent(ctx context.Context, serviceURL string, event messaging.IMessage) error {
 	if event == nil {
 		return ErrInvalidMessage
 	}
@@ -228,7 +227,7 @@ func (b *HTTPBridge) RegisterCommandHandler(commandType string, handler func(ctx
 }
 
 // RegisterEventHandler 注册事件处理器
-func (b *HTTPBridge) RegisterEventHandler(eventType string, handler bus.IEventHandler) error {
+func (b *HTTPBridge) RegisterEventHandler(eventType string, handler messaging.IMessageHandler) error {
 	if handler == nil {
 		return ErrInvalidMessage
 	}
@@ -332,7 +331,7 @@ func (b *HTTPBridge) handleEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 执行处理器
-	if err := handler.HandleEvent(r.Context(), event); err != nil {
+	if err := handler.Handle(r.Context(), event); err != nil {
 		bridgeLogger().Error(r.Context(), "事件处理失败", logging.Error(err),
 			logging.String("event_type", eventType))
 		http.Error(w, fmt.Sprintf("Event handler failed: %v", err), http.StatusInternalServerError)

@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"gochen/messaging"
 	"gochen/messaging/command"
 )
 
@@ -31,6 +32,24 @@ func TestJSONSerializer_Command(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, cmd.GetID(), cmd2.GetID())
 	assert.Equal(t, cmd.AggregateID, cmd2.AggregateID)
+}
+
+// TestJSONSerializer_Event 测试事件消息序列化
+func TestJSONSerializer_Event(t *testing.T) {
+	serializer := NewJSONSerializer()
+
+	msg := messaging.NewMessage("evt-1", "OrderCreated", map[string]any{
+		"id": "order-1",
+	})
+
+	data, err := serializer.SerializeEvent(msg)
+	require.NoError(t, err)
+	assert.NotEmpty(t, data)
+
+	msg2, err := serializer.DeserializeEvent(data)
+	require.NoError(t, err)
+	assert.Equal(t, msg.GetID(), msg2.GetID())
+	assert.Equal(t, msg.GetType(), msg2.GetType())
 }
 
 // TestJSONSerializer_InvalidCommand 测试无效命令
@@ -85,6 +104,17 @@ func TestHTTPBridge_RegisterCommandHandler(t *testing.T) {
 	assert.Contains(t, bridge.commandHandlers, "CreateOrder")
 }
 
+// TestHTTPBridge_RegisterEventHandler 测试注册事件处理器
+func TestHTTPBridge_RegisterEventHandler(t *testing.T) {
+	bridge := NewHTTPBridge(nil)
+
+	handler := &mockMessageHandler{}
+
+	err := bridge.RegisterEventHandler("OrderCreated", handler)
+	require.NoError(t, err)
+	assert.Contains(t, bridge.eventHandlers, "OrderCreated")
+}
+
 // TestHTTPBridge_RegisterNilHandler 测试注册 nil 处理器
 func TestHTTPBridge_RegisterNilHandler(t *testing.T) {
 	bridge := NewHTTPBridge(nil)
@@ -92,6 +122,11 @@ func TestHTTPBridge_RegisterNilHandler(t *testing.T) {
 	err := bridge.RegisterCommandHandler("CreateOrder", nil)
 	assert.Equal(t, ErrInvalidMessage, err)
 }
+
+type mockMessageHandler struct{}
+
+func (m *mockMessageHandler) Handle(ctx context.Context, msg messaging.IMessage) error { return nil }
+func (m *mockMessageHandler) Type() string                                             { return "mock" }
 
 // TestHTTPBridge_StartStop 测试启动和停止
 func TestHTTPBridge_StartStop(t *testing.T) {
