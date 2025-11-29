@@ -96,6 +96,8 @@ type ProjectionManager struct {
 	mutex           sync.RWMutex
 }
 
+const replayBatchLimit = 1000 // 单次回放批量上限，避免一次性加载过多事件
+
 // NewProjectionManager 创建投影管理器
 func NewProjectionManager(eventStore store.IEventStore, eventBus bus.IEventBus) *ProjectionManager {
 	return NewProjectionManagerWithConfig(eventStore, eventBus, nil)
@@ -217,7 +219,8 @@ func (pm *ProjectionManager) ResumeFromCheckpoint(ctx context.Context, projectio
 
 func (pm *ProjectionManager) replayProjectionFromCheckpoint(ctx context.Context, projectionName string, projection IProjection, checkpoint *Checkpoint) (int64, error) {
 	supported := make(map[string]struct{})
-	for _, t := range projection.GetSupportedEventTypes() {
+	supportedTypes := projection.GetSupportedEventTypes()
+	for _, t := range supportedTypes {
 		supported[t] = struct{}{}
 	}
 
@@ -226,7 +229,7 @@ func (pm *ProjectionManager) replayProjectionFromCheckpoint(ctx context.Context,
 	var replayed int64
 
 	for {
-		events, hasMore, err := pm.fetchEventsForReplay(ctx, lastEventID, fromTime)
+		events, hasMore, err := pm.fetchEventsForReplay(ctx, lastEventID, fromTime, supportedTypes)
 		if err != nil {
 			return replayed, fmt.Errorf("failed to load events for projection %s: %w", projectionName, err)
 		}
@@ -270,11 +273,13 @@ func (pm *ProjectionManager) replayProjectionFromCheckpoint(ctx context.Context,
 	return replayed, nil
 }
 
-func (pm *ProjectionManager) fetchEventsForReplay(ctx context.Context, after string, fromTime time.Time) ([]eventing.Event, bool, error) {
+func (pm *ProjectionManager) fetchEventsForReplay(ctx context.Context, after string, fromTime time.Time, supportedTypes []string) ([]eventing.Event, bool, error) {
 	if extended, ok := pm.eventStore.(store.IEventStoreExtended); ok {
 		stream, err := extended.GetEventStreamWithCursor(ctx, &store.StreamOptions{
 			After:    after,
 			FromTime: fromTime,
+			Types:    supportedTypes,
+			Limit:    replayBatchLimit,
 		})
 		if err != nil {
 			return nil, false, err
@@ -293,6 +298,8 @@ func (pm *ProjectionManager) fetchEventsForReplay(ctx context.Context, after str
 	filtered := store.FilterEventsWithOptions(events, &store.StreamOptions{
 		After:    after,
 		FromTime: fromTime,
+		Types:    supportedTypes,
+		Limit:    replayBatchLimit,
 	})
 	if filtered == nil {
 		return nil, false, nil

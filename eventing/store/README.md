@@ -44,17 +44,12 @@ type IEventStore interface {
     LoadEvents(ctx context.Context, aggregateID int64, 
                afterVersion uint64) ([]IEvent, error)
     
-    // StreamEvents 流式读取事件
+    // StreamEvents 拉取指定时间后的事件列表（按时间升序）
     //
-    // 参数：
-    //   - ctx: 上下文
-    //   - opts: 流选项（时间范围、类型过滤等）
-    //
-    // 返回：
-    //   - <-chan IEvent: 事件通道
-    //   - error: 错误
-    StreamEvents(ctx context.Context, 
-                 opts *StreamOptions) (<-chan IEvent, error)
+    // 说明：
+    //   - 为兼顾向后兼容，基础接口仅提供时间窗口拉取；
+    //   - 需要分页/类型过滤/游标时，推荐实现并使用 IEventStoreExtended.GetEventStreamWithCursor。
+    StreamEvents(ctx context.Context, fromTime time.Time) ([]eventing.Event, error)
 }
 ```
 
@@ -162,25 +157,35 @@ if err != nil {
 }
 ```
 
-### 4. 流式读取事件
+### 4. 增量读取事件
 
 ```go
-// 创建流选项
-opts := &store.StreamOptions{
-    FromTime: time.Now().Add(-24 * time.Hour), // 最近24小时
-    Types:    []string{"UserCreated", "UserUpdated"}, // 只读取特定类型
+// 推荐：若实现了 IEventStoreExtended，使用游标 + limit 方式读取
+if extended, ok := eventStore.(store.IEventStoreExtended); ok {
+    stream, err := extended.GetEventStreamWithCursor(ctx, &store.StreamOptions{
+        FromTime: time.Now().Add(-24 * time.Hour),              // 最近24小时
+        Types:    []string{"UserCreated", "UserUpdated"},       // 可选类型过滤
+        Limit:    500,                                          // 单批限制，避免一次性取太多
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+    for _, event := range stream.Events {
+        log.Printf("Event: %s at %s", event.GetType(), event.GetTimestamp())
+    }
 }
 
-// 流式读取
-eventChan, err := eventStore.StreamEvents(ctx, opts)
+// 回退：仅有基础 IEventStore 时，先取时间窗口，再用 FilterEventsWithOptions 过滤
+events, err := eventStore.StreamEvents(ctx, time.Now().Add(-24*time.Hour))
 if err != nil {
     log.Fatal(err)
 }
-
-// 处理事件
-for event := range eventChan {
+filtered := store.FilterEventsWithOptions(events, &store.StreamOptions{
+    Types: []string{"UserCreated", "UserUpdated"},
+    Limit: 500,
+})
+for _, event := range filtered.Events {
     log.Printf("Event: %s at %s", event.GetType(), event.GetTimestamp())
-    // 处理事件...
 }
 ```
 
