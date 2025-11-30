@@ -17,11 +17,15 @@ type IObject[T comparable] interface {
 
 // IEntity 实体接口，在 IObject 基础上增加版本控制
 // 版本号用于乐观锁，防止并发冲突
+//
+// 注意：此 Version 与 eventing.Event.Version 语义不同：
+//   - Entity.Version: 乐观锁版本号，用于检测并发修改冲突
+//   - Event.Version: 事件在聚合事件流中的序号，用于事件排序和重放
 type IEntity[T comparable] interface {
 	IObject[T]
 
-	// GetVersion 返回实体的版本号
-	// 每次修改都应该递增版本号
+	// GetVersion 返回实体的乐观锁版本号
+	// 每次修改都应该递增版本号，用于并发冲突检测
 	GetVersion() int64
 }
 

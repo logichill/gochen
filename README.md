@@ -908,7 +908,7 @@ func ParseUrl(rawUrl string) (*URL, error)
 func ToJson(v any) ([]byte, error)
 ```
 
-> 📖 详细规范请查看 [命名规范文档](./NAMINGmd)
+> 📖 详细规范请查看 [命名规范文档](./NAMING.md)
 
 ---
 

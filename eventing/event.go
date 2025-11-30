@@ -11,12 +11,18 @@ import (
 
 // IEvent 基础事件接口（用于事件传输/路由）
 // 包含事件分发的最小必要信息
+//
+// 注意：Event.Version 与 Entity.Version 语义不同：
+//   - Event.Version: 事件在聚合事件流中的序号（uint64），用于事件排序、重放和乐观并发控制
+//   - Entity.Version: 实体的乐观锁版本号（int64），用于检测 CRUD 操作的并发修改冲突
 type IEvent interface {
 	messaging.IMessage
 
 	// 聚合信息（用于路由和关联）
 	GetAggregateID() int64
 	GetAggregateType() string
+	// GetVersion 返回事件在聚合事件流中的序号
+	// 从 1 开始递增，用于保证事件顺序和实现乐观并发控制
 	GetVersion() uint64
 }
 
@@ -58,22 +64,22 @@ func (e *Event) SetAggregateType(t string) { e.AggregateType = t }
 
 func (e *Event) Validate() error {
 	if e.GetID() == "" {
-		return fmt.Errorf("事件ID不能为空")
+		return fmt.Errorf("event ID cannot be empty")
 	}
 	if e.AggregateID <= 0 {
-		return fmt.Errorf("聚合ID必须大于0")
+		return fmt.Errorf("aggregate ID must be greater than 0")
 	}
 	if e.AggregateType == "" {
-		return fmt.Errorf("聚合类型不能为空")
+		return fmt.Errorf("aggregate type cannot be empty")
 	}
 	if e.GetType() == "" {
-		return fmt.Errorf("事件类型不能为空")
+		return fmt.Errorf("event type cannot be empty")
 	}
 	if e.Version <= 0 {
-		return fmt.Errorf("事件版本必须大于0")
+		return fmt.Errorf("event version must be greater than 0")
 	}
 	if e.SchemaVersion <= 0 {
-		return fmt.Errorf("事件模式版本必须大于0")
+		return fmt.Errorf("schema version must be greater than 0")
 	}
 	return nil
 }

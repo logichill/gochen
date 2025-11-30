@@ -223,7 +223,7 @@ func (s *Server) SetupDependencies(ctx context.Context) error {
 
 	// 1) 事件总线（优先使用外部注入/容器中的实现，其次回退到内存实现）
 	if err := s.ensureEventBus(); err != nil {
-		return fmt.Errorf("初始化事件总线失败: %w", err)
+		return fmt.Errorf("failed to initialize event bus: %w", err)
 	}
 
 	// 2) 注册领域模块提供者
@@ -232,7 +232,7 @@ func (s *Server) SetupDependencies(ctx context.Context) error {
 			continue
 		}
 		if err := m.RegisterProviders(s.container); err != nil {
-			return fmt.Errorf("注册领域模块 %s 失败: %w", m.Name(), err)
+			return fmt.Errorf("failed to register domain module %s: %w", m.Name(), err)
 		}
 	}
 
@@ -243,13 +243,13 @@ func (s *Server) SetupDependencies(ctx context.Context) error {
 		}
 		if s.eventBus != nil {
 			if err := m.RegisterEventHandlers(ctx, s.eventBus, s.container); err != nil {
-				return fmt.Errorf("注册领域模块 %s 事件处理器失败: %w", m.Name(), err)
+				return fmt.Errorf("failed to register event handlers for module %s: %w", m.Name(), err)
 			}
 		}
 
 		manager, names, err := m.RegisterProjections(s.container)
 		if err != nil {
-			return fmt.Errorf("注册领域模块 %s 投影失败: %w", m.Name(), err)
+			return fmt.Errorf("failed to register projections for module %s: %w", m.Name(), err)
 		}
 		if manager != nil && s.projectionManager == nil {
 			s.projectionManager = manager
@@ -274,7 +274,7 @@ func (s *Server) SetupDependencies(ctx context.Context) error {
 func (s *Server) StartBackgroundTasks(ctx context.Context) error {
 	if s.transport != nil {
 		if err := s.transport.Start(ctx); err != nil {
-			return fmt.Errorf("启动消息传输层失败: %w", err)
+			return fmt.Errorf("failed to start message transport: %w", err)
 		}
 	}
 	// 当前轻量方案不主动启动投影/定时任务，留给上层按需集成。
@@ -284,7 +284,7 @@ func (s *Server) StartBackgroundTasks(ctx context.Context) error {
 // Run 实现 IServer.Run：启动 HTTP 服务并阻塞等待退出。
 func (s *Server) Run(ctx context.Context) error {
 	if s.httpServer == nil {
-		return fmt.Errorf("HTTP 服务器未初始化")
+		return fmt.Errorf("HTTP server not initialized")
 	}
 
 	// 使用 WebConfig 中的 Host/Port，Run 阶段不再拼接地址
@@ -304,13 +304,13 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 	if s.httpServer != nil {
 		if err := s.httpServer.Stop(ctx); err != nil && firstErr == nil {
-			firstErr = fmt.Errorf("关闭 HTTP 服务器失败: %w", err)
+			firstErr = fmt.Errorf("failed to stop HTTP server: %w", err)
 		}
 	}
 
 	if s.transport != nil {
 		if err := s.transport.Close(); err != nil && firstErr == nil {
-			firstErr = fmt.Errorf("关闭消息传输层失败: %w", err)
+			firstErr = fmt.Errorf("failed to close message transport: %w", err)
 		}
 	}
 

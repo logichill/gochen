@@ -92,30 +92,43 @@ func (bus *MessageBus) getHandlerErrorHook() HandlerErrorHook {
 
 // Subscribe 订阅消息处理器
 func (bus *MessageBus) Subscribe(ctx context.Context, messageType string, handler IMessageHandler) error {
-	bus.mutex.Lock()
-	key := bus.handlerKey(messageType, handler)
-	wrapped, exists := bus.wrappedHandlers[key]
-	if !exists {
-		wrapped = &handlerWithErrorHook{
-			inner: handler,
-			bus:   bus,
-		}
-		bus.wrappedHandlers[key] = wrapped
-	}
-	bus.mutex.Unlock()
-
+	// 缩小锁范围：仅在访问 wrappedHandlers 时持锁，避免 transport.Subscribe 阻塞其他操作
+	wrapped := bus.getOrCreateWrappedHandler(messageType, handler)
 	return bus.transport.Subscribe(messageType, wrapped)
+}
+
+// getOrCreateWrappedHandler 获取或创建包装后的 handler（并发安全）
+func (bus *MessageBus) getOrCreateWrappedHandler(messageType string, handler IMessageHandler) IMessageHandler {
+	key := bus.handlerKey(messageType, handler)
+
+	bus.mutex.RLock()
+	wrapped, exists := bus.wrappedHandlers[key]
+	bus.mutex.RUnlock()
+
+	if exists {
+		return wrapped
+	}
+
+	bus.mutex.Lock()
+	defer bus.mutex.Unlock()
+
+	// 双重检查，避免重复创建
+	if wrapped, exists = bus.wrappedHandlers[key]; exists {
+		return wrapped
+	}
+
+	wrapped = &handlerWithErrorHook{
+		inner: handler,
+		bus:   bus,
+	}
+	bus.wrappedHandlers[key] = wrapped
+	return wrapped
 }
 
 // Unsubscribe 取消订阅消息处理器
 func (bus *MessageBus) Unsubscribe(ctx context.Context, messageType string, handler IMessageHandler) error {
-	bus.mutex.Lock()
-	key := bus.handlerKey(messageType, handler)
-	wrapped, exists := bus.wrappedHandlers[key]
-	if exists {
-		delete(bus.wrappedHandlers, key)
-	}
-	bus.mutex.Unlock()
+	// 缩小锁范围：仅在访问 wrappedHandlers 时持锁，避免 transport.Unsubscribe 阻塞其他操作
+	wrapped, exists := bus.removeWrappedHandler(messageType, handler)
 
 	if exists {
 		return bus.transport.Unsubscribe(messageType, wrapped)
@@ -123,6 +136,20 @@ func (bus *MessageBus) Unsubscribe(ctx context.Context, messageType string, hand
 
 	// 如果找不到包装器，回退到原始 handler（兼容直接订阅 Transport 场景）
 	return bus.transport.Unsubscribe(messageType, handler)
+}
+
+// removeWrappedHandler 移除并返回包装后的 handler（并发安全）
+func (bus *MessageBus) removeWrappedHandler(messageType string, handler IMessageHandler) (IMessageHandler, bool) {
+	key := bus.handlerKey(messageType, handler)
+
+	bus.mutex.Lock()
+	defer bus.mutex.Unlock()
+
+	wrapped, exists := bus.wrappedHandlers[key]
+	if exists {
+		delete(bus.wrappedHandlers, key)
+	}
+	return wrapped, exists
 }
 
 // handlerKey 构造用于 wrappedHandlers 映射的 key

@@ -45,7 +45,7 @@ func (m *MemoryEventStore) AppendEvents(ctx context.Context, aggregateID int64, 
 		}
 		expectedEventVersion := expectedVersion + uint64(i) + 1
 		if e.GetVersion() != expectedEventVersion {
-			return fmt.Errorf("事件版本不连续: 期望 %d, 实际 %d", expectedEventVersion, e.GetVersion())
+			return fmt.Errorf("event version not sequential: expected %d, got %d", expectedEventVersion, e.GetVersion())
 		}
 	}
 	if m.events[key] == nil {
@@ -53,8 +53,11 @@ func (m *MemoryEventStore) AppendEvents(ctx context.Context, aggregateID int64, 
 	}
 	// basic validation and append in order
 	for _, e := range events {
-		// 类型断言：从 IStorableEvent 到 Event
-		event := e.(*eventing.Event)
+		// 安全类型转换：从 IStorableEvent 到 Event
+		event, ok := e.(*eventing.Event)
+		if !ok {
+			return fmt.Errorf("unsupported event type: %T, expected *eventing.Event", e)
+		}
 		m.events[key] = append(m.events[key], *event)
 	}
 	return nil
