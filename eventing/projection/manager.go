@@ -76,7 +76,7 @@ func DefaultProjectionConfig() *ProjectionConfig {
 		MaxRetries:   3,
 		RetryBackoff: 1 * time.Second,
 		DeadLetterFunc: func(err error, event eventing.Event, projection string) {
-			projectionLogger().Error(context.Background(), "事件处理失败（已达最大重试次数）", logging.Error(err),
+			projectionLogger().Error(context.Background(), "event processing failed after max retries", logging.Error(err),
 				logging.String("projection", projection),
 				logging.String("event_id", event.ID),
 				logging.String("event_type", event.Type),
@@ -165,7 +165,7 @@ func (pm *ProjectionManager) ResumeFromCheckpoint(ctx context.Context, projectio
 	}
 
 	if checkpointStore == nil {
-		projectionLogger().Warn(ctx, "检查点存储未配置，跳过恢复",
+		projectionLogger().Warn(ctx, "checkpoint store not configured, skipping recovery",
 			logging.String("projection", projectionName))
 		return pm.StartProjection(projectionName)
 	}
@@ -174,7 +174,7 @@ func (pm *ProjectionManager) ResumeFromCheckpoint(ctx context.Context, projectio
 	checkpoint, err := checkpointStore.Load(ctx, projectionName)
 	if err != nil {
 		if err == ErrCheckpointNotFound {
-			projectionLogger().Info(ctx, "检查点不存在，从头开始",
+			projectionLogger().Info(ctx, "checkpoint not found, starting from beginning",
 				logging.String("projection", projectionName))
 			checkpoint = NewCheckpoint(projectionName, 0, "", time.Time{})
 		} else {
@@ -182,7 +182,7 @@ func (pm *ProjectionManager) ResumeFromCheckpoint(ctx context.Context, projectio
 		}
 	}
 
-	projectionLogger().Info(ctx, "从检查点恢复投影",
+	projectionLogger().Info(ctx, "resuming projection from checkpoint",
 		logging.String("projection", projectionName),
 		logging.Int64("position", checkpoint.Position),
 		logging.String("last_event_id", checkpoint.LastEventID))
@@ -200,7 +200,7 @@ func (pm *ProjectionManager) ResumeFromCheckpoint(ctx context.Context, projectio
 	pm.mutex.Unlock()
 
 	if eventStore == nil {
-		projectionLogger().Warn(ctx, "事件存储未配置，无法从检查点重放，直接启动",
+		projectionLogger().Warn(ctx, "event store not configured, cannot replay from checkpoint, starting directly",
 			logging.String("projection", projectionName))
 		return pm.StartProjection(projectionName)
 	}
@@ -210,7 +210,7 @@ func (pm *ProjectionManager) ResumeFromCheckpoint(ctx context.Context, projectio
 		return err
 	}
 
-	projectionLogger().Info(ctx, "从检查点恢复并完成历史回放",
+	projectionLogger().Info(ctx, "resumed from checkpoint and completed history replay",
 		logging.String("projection", projectionName),
 		logging.Int64("replayed_events", replayed))
 
@@ -333,10 +333,10 @@ func (pm *ProjectionManager) applyReplayEvent(ctx context.Context, projectionNam
 		}
 
 		// 记录重试日志，便于生产环境排查
-		projectionLogger().Warn(ctx, "投影重放事件重试",
+		projectionLogger().Warn(ctx, "projection replay event retry",
 			logging.String("projection", projectionName),
 			logging.String("event_id", evt.GetID()),
-			logging.Int("attempt", attempt+1), // 第几次重试（从 1 开始）
+			logging.Int("attempt", attempt+1), // retry attempt number (starting from 1)
 			logging.Error(err),
 		)
 
@@ -386,7 +386,7 @@ func (pm *ProjectionManager) applyReplayEvent(ctx context.Context, projectionNam
 
 	if checkpointStore != nil && checkpointNeeded && statusCopy != nil {
 		if saveErr := checkpointStore.Save(ctx, NewCheckpoint(projectionName, processedEvents, lastEventID, lastEventTime)); saveErr != nil {
-			projectionLogger().Warn(ctx, "保存检查点失败", logging.Error(saveErr),
+			projectionLogger().Warn(ctx, "failed to save checkpoint", logging.Error(saveErr),
 				logging.String("projection", projectionName))
 		}
 	}
@@ -413,9 +413,9 @@ func (pm *ProjectionManager) ResumeAllFromCheckpoint(ctx context.Context) error 
 
 	for _, name := range names {
 		if err := pm.ResumeFromCheckpoint(ctx, name); err != nil {
-			projectionLogger().Error(ctx, "恢复投影失败", logging.Error(err),
+			projectionLogger().Error(ctx, "failed to resume projection", logging.Error(err),
 				logging.String("projection", name))
-			// 继续恢复其他投影
+			// continue resuming other projections
 		}
 	}
 
@@ -465,13 +465,13 @@ func (pm *ProjectionManager) RegisterProjectionWithContext(ctx context.Context, 
 		pm.handlers[name][eventType] = handler
 
 		if err := pm.eventBus.SubscribeEvent(ctx, eventType, handler); err != nil {
-			// 回滚当前投影的注册状态，避免半注册
+			// rollback registration state to avoid partial registration
 			delete(pm.projections, name)
 			delete(pm.statuses, name)
 			delete(pm.handlers, name)
 			for t, h := range subscribedHandlers {
 				if unSubErr := pm.eventBus.UnsubscribeEvent(ctx, t, h); unSubErr != nil {
-					projectionLogger().Warn(ctx, "订阅回滚取消订阅失败", logging.Error(unSubErr),
+					projectionLogger().Warn(ctx, "failed to unsubscribe during rollback", logging.Error(unSubErr),
 						logging.String("projection", name), logging.String("event_type", t))
 				}
 			}
@@ -480,7 +480,7 @@ func (pm *ProjectionManager) RegisterProjectionWithContext(ctx context.Context, 
 		subscribedHandlers[eventType] = handler
 	}
 
-	projectionLogger().Info(ctx, "[ProjectionManager] 注册投影", logging.String("projection", name))
+	projectionLogger().Info(ctx, "projection registered", logging.String("projection", name))
 	return nil
 }
 
@@ -509,14 +509,14 @@ func (pm *ProjectionManager) UnregisterProjectionWithContext(ctx context.Context
 			handler = pm.handlers[name][eventType]
 		}
 		if handler == nil {
-			projectionLogger().Warn(ctx, "[ProjectionManager] 找不到已注册的处理器实例，可能无法正确取消订阅",
+			projectionLogger().Warn(ctx, "registered handler instance not found, unsubscribe may fail",
 				logging.String("projection", name),
 				logging.String("event_type", eventType),
 			)
 		}
 
 		if err := pm.eventBus.UnsubscribeEvent(ctx, eventType, handler); err != nil {
-			projectionLogger().Warn(ctx, "取消订阅事件失败", logging.Error(err),
+			projectionLogger().Warn(ctx, "failed to unsubscribe from event", logging.Error(err),
 				logging.String("event_type", eventType),
 				logging.String("projection", name),
 			)
@@ -531,7 +531,7 @@ func (pm *ProjectionManager) UnregisterProjectionWithContext(ctx context.Context
 	delete(pm.statuses, name)
 	delete(pm.handlers, name)
 
-	projectionLogger().Info(ctx, "[ProjectionManager] 取消注册投影", logging.String("projection", name))
+	projectionLogger().Info(ctx, "projection unregistered", logging.String("projection", name))
 	return nil
 }
 
@@ -552,7 +552,7 @@ func (pm *ProjectionManager) StartProjection(name string) error {
 	status.Status = "running"
 	status.UpdatedAt = time.Now()
 
-	projectionLogger().Info(context.Background(), "[ProjectionManager] 启动投影", logging.String("projection", name))
+	projectionLogger().Info(context.Background(), "projection started", logging.String("projection", name))
 	return nil
 }
 
@@ -573,7 +573,7 @@ func (pm *ProjectionManager) StopProjection(name string) error {
 	status.Status = "stopped"
 	status.UpdatedAt = time.Now()
 
-	projectionLogger().Info(context.Background(), "[ProjectionManager] 停止投影", logging.String("projection", name))
+	projectionLogger().Info(context.Background(), "projection stopped", logging.String("projection", name))
 	return nil
 }
 
@@ -618,16 +618,16 @@ func (pm *ProjectionManager) RebuildProjection(ctx context.Context, name string,
 		return fmt.Errorf("projection %s not found", name)
 	}
 
-	projectionLogger().Info(ctx, "开始重建投影",
+	projectionLogger().Info(ctx, "starting projection rebuild",
 		logging.String("projection", name),
 		logging.Int("events", len(events)))
 
 	// 清空检查点（如果已配置）
 	if checkpointStore != nil {
 		if err := checkpointStore.Delete(ctx, name); err != nil {
-			projectionLogger().Warn(ctx, "删除检查点失败", logging.Error(err),
+			projectionLogger().Warn(ctx, "failed to delete checkpoint", logging.Error(err),
 				logging.String("projection", name))
-			// 继续重建
+			// continue rebuilding
 		}
 	}
 
@@ -662,12 +662,12 @@ func (pm *ProjectionManager) RebuildProjection(ctx context.Context, name string,
 		)
 
 		if err := checkpointStore.Save(ctx, checkpoint); err != nil {
-			projectionLogger().Warn(ctx, "保存检查点失败", logging.Error(err),
+			projectionLogger().Warn(ctx, "failed to save checkpoint", logging.Error(err),
 				logging.String("projection", name))
 		}
 	}
 
-	projectionLogger().Info(ctx, "重建投影完成",
+	projectionLogger().Info(ctx, "projection rebuild completed",
 		logging.String("projection", name),
 		logging.Int("events", len(events)))
 	return nil
@@ -739,7 +739,7 @@ func (h *projectionEventHandler) HandleEvent(ctx context.Context, event eventing
 		}
 
 		// 使用快照后的计数值进行日志记录，避免在无锁状态下访问共享状态
-		projectionLogger().Error(ctx, "投影处理事件失败", logging.Error(err),
+		projectionLogger().Error(ctx, "projection failed to handle event", logging.Error(err),
 			logging.String("projection", name),
 			logging.String("event_type", event.GetType()),
 			logging.Int64("processed_events", processedEvents),
@@ -751,13 +751,13 @@ func (h *projectionEventHandler) HandleEvent(ctx context.Context, event eventing
 	// 自动保存检查点（如果已配置）
 	if checkpoint != nil && checkpointStore != nil {
 		if err := checkpointStore.Save(ctx, checkpoint); err != nil {
-			projectionLogger().Warn(ctx, "保存检查点失败", logging.Error(err),
+			projectionLogger().Warn(ctx, "failed to save checkpoint", logging.Error(err),
 				logging.String("projection", name))
-			// 不中断事件处理
+			// don't interrupt event processing
 		}
 	}
 
-	projectionLogger().Debug(ctx, "投影处理事件成功",
+	projectionLogger().Debug(ctx, "projection handled event successfully",
 		logging.String("event_type", event.GetType()),
 		logging.String("projection", name),
 	)
