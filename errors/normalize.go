@@ -4,9 +4,9 @@ import (
 	stdErrors "errors"
 
 	"gochen/domain/entity"
-	repository "gochen/domain/repository"
+	"gochen/domain/repository"
 	"gochen/eventing"
-	cmd "gochen/messaging/command"
+	"gochen/messaging/command"
 )
 
 // Normalize 将领域层/基础设施层的错误规范化为 AppError。
@@ -31,32 +31,32 @@ func Normalize(err error) error {
 
 	// 事件存储相关错误
 	if stdErrors.Is(err, eventing.ErrAggregateNotFound) {
-		return WrapError(err, ErrCodeNotFound, "聚合未找到")
+		return WrapError(err, ErrCodeNotFound, "aggregate not found")
 	}
 
 	var concurrencyErr *eventing.ConcurrencyError
 	if stdErrors.As(err, &concurrencyErr) {
-		return WrapError(err, ErrCodeConcurrency, "事件存储并发冲突")
+		return WrapError(err, ErrCodeConcurrency, "event store concurrency conflict")
 	}
 
 	// 领域实体/仓储错误
 	if stdErrors.Is(err, entity.ErrAggregateNotFound) || stdErrors.Is(err, repository.ErrEntityNotFound) {
-		return WrapError(err, ErrCodeNotFound, "实体未找到")
+		return WrapError(err, ErrCodeNotFound, "entity not found")
 	}
 
 	if stdErrors.Is(err, repository.ErrVersionConflict) {
-		return WrapError(err, ErrCodeConcurrency, "仓储版本冲突")
+		return WrapError(err, ErrCodeConcurrency, "repository version conflict")
 	}
 
 	// 命令总线常见错误
-	if stdErrors.Is(err, cmd.ErrAggregateNotFound) {
-		return WrapError(err, ErrCodeNotFound, "命令目标聚合未找到")
+	if stdErrors.Is(err, command.ErrAggregateNotFound) {
+		return WrapError(err, ErrCodeNotFound, "command target aggregate not found")
 	}
-	if stdErrors.Is(err, cmd.ErrConcurrencyConflict) {
-		return WrapError(err, ErrCodeConcurrency, "命令处理并发冲突")
+	if stdErrors.Is(err, command.ErrConcurrencyConflict) {
+		return WrapError(err, ErrCodeConcurrency, "command processing concurrency conflict")
 	}
-	if stdErrors.Is(err, cmd.ErrInvalidCommand) {
-		return WrapError(err, ErrCodeInvalidInput, "无效的命令")
+	if stdErrors.Is(err, command.ErrInvalidCommand) {
+		return WrapError(err, ErrCodeInvalidInput, "invalid command")
 	}
 
 	// 未识别的错误保持原样
