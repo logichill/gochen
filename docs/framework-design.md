@@ -27,6 +27,27 @@ gochen 采用 **DDD + Event Sourcing + CQRS + 消息驱动** 的组合模式，�
 - **框架无侵入**：不绑定具体 Web 框架或 ORM，HTTP/数据库通过 `http` 和 `data/db` 抽象；
 - **并发安全**：关键组件（消息总线、事件存储、投影管理器等）在设计上显式考虑并发。
 
+### 1.2 接口优先与组合根装配（核心约束）
+
+本仓库在设计上遵循一条核心约束，用于指导所有基础能力与依赖关系的实现方式：
+
+- **所有基础能力必须先以接口形式提供**  
+  - 日志、数据库、事件存储、快照、Outbox、消息总线、验证等基础设施，都应先定义稳定接口（例如 `ILogger`、`IDatabase`、`IEventStore`、`ITransport`、`ISnapshotStore`），再提供具体实现。  
+  - 包内部的具体 struct（如 `StdLogger`、`MemoryTransport`、`SQLEventStore`、`SQLStore`）应视为接口的实现细节，而不是跨包依赖的类型。
+
+- **所有依赖一律面向接口，而非具体实现**  
+  - 跨包协作的组件（领域服务、仓储、Server、MessageBus、Outbox、ProjectionManager 等）在字段、入参、返回值上都应依赖接口类型，而不是具体 struct。  
+  - 允许在实现模块内部（同一包内）使用具体 struct 作为参数或字段，但一旦暴露为公共 API，应优先改为接口。
+
+- **提供能力的模块可以提供默认实现，由上层组合根装配选择**  
+  - 每个“提供能力”的模块（如 `eventing/store/sql`、`messaging/transport/memory`、`eventing/store/snapshot`、`logging`）可以提供一组默认实现，但不直接在库代码中“硬编码选择”。  
+  - 具体选用哪种实现，应由组合根（如 examples、业务仓库的 `main`/`cmd`、或 `server.Server` 的调用方）在装配阶段显式 new 出实现，再以接口形式注入到上层服务/组件中。
+
+- **代码审查与重构时的检查要点**  
+  - 新增接口时：确保命名以 `I*` 开头，并优先在抽象包中定义（如 `logging`、`eventing/store`、`messaging`）。  
+  - 新增依赖时：检查字段/入参/返回值是否可以依赖已有接口，而不是直接依赖 struct；如果没有合适接口，考虑先补接口再引入依赖。  
+  - 在实现模块中引入新的 struct 时：只允许在“内部构造层 + 测试/示例”中直接使用，在跨包 API 上一律通过接口暴露。
+
 ### 1.2 目录结构概览
 
 当前根目录核心结构：
