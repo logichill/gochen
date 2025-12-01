@@ -95,7 +95,9 @@ patterns/retry/              # 重试模式
 
 ---
 
-## 2. 领域层（domain）
+## 2. 领域层（domain）——业务语义与模型边界
+
+领域层主要负责领域模型与业务规则的表达，尽量保持对基础设施与具体框架的无感知：不直接依赖 HTTP/数据库/事件总线实现，而是通过抽象接口（如 `errors`、`logging`、`validation`、`eventing` 抽象）协作。
 
 ### 2.1 实体与聚合根（`domain/entity`）
 
@@ -310,11 +312,13 @@ type IMessageHandler interface {
 
 ---
 
-## 5. 应用层与 HTTP 抽象
+## 5. 应用层与 HTTP 抽象——模板与 API 适配
 
-### 5.1 应用服务（`app/application.go`）
+应用层位于领域层之上，负责将领域模型与仓储组合为可复用的“应用服务模板”，并通过 HTTP 等接口对外暴露 API。应用层依赖领域抽象与 HTTP 抽象，但不直接依赖具体 Web 框架或数据库实现。
 
-`Application[T]` 在 `domain/repository` 上提供标准应用服务：
+### 5.1 应用服务模板（`app/application` 与 `domain/application`）
+
+`Application[T]` 在 `app/application` 中实现标准应用服务模板，基于 `domain/entity` + `domain/repository` 提供：
 
 - 扩展基础 CRUD 服务，提供：
   - `ListByQuery`：基于 `QueryParams` 的列表查询；
@@ -324,14 +328,27 @@ type IMessageHandler interface {
 - 配置结构 `ServiceConfig`：
   - `MaxBatchSize`：批量写入上限；
   - `MaxPageSize`：分页单页上限（与批量写入独立）；
-  - 其他开关：`AutoValidate`、`EnableCache`、`EnableAudit` 等。
+- 其他开关：`AutoValidate`、`EnableCache`、`EnableAudit` 等。
 
-注意：当仓储不支持 `IQueryableRepository` 时，带过滤/排序的 query/page 操作会返回 `ErrQueryableRepositoryRequired`，不会再静默忽略条件。
+注意：
 
-### 5.2 HTTP 抽象与 API 构建（`http` + `app/api`）
+- 当仓储不支持 `IQueryableRepository` 时，带过滤/排序的 query/page 操作会返回 `ErrQueryableRepositoryRequired`，不会再静默忽略条件；
+- `domain/application` 仅作为兼容入口：通过类型别名与构造函数转发到 `app/application`，避免领域层承载具体模板实现，新代码推荐直接导入 `gochen/app/application`。
+
+### 5.2 HTTP 抽象与 API 构建（`http` + `http/basic` + `app/api`）
 
 - `http` 提供基础 HTTP 抽象（上下文、请求、响应），以及追踪/租户中间件；
-- `app/api` 提供简化的 RESTful 构建器，将 `Application` 或领域服务暴露为 HTTP API，并与 `errors.Normalize` 协作统一错误返回。
+- `http/basic` 提供基于 `net/http` 的默认实现（`HttpServer` + `HttpContext`），负责路由注册与中间件链执行，不直接承载具体业务逻辑；
+- `app/api` 提供简化的 RESTful 构建器，将 Application 或领域服务暴露为 HTTP API，并与 `errors.Normalize` 协作统一错误返回；
+- 上层业务项目可以：
+  - 直接使用 `http/basic.HttpServer` 作为默认 HTTP 容器；
+  - 或在本地实现 `http.IHttpServer` 适配 Gin/Fiber/Echo 等框架，再交给 `server.Server` 与 `app/api` 做组合。
+
+从分层角度看：
+
+- **领域层（domain/**）定义业务模型与仓储接口，不关心 HTTP 或具体框架；
+- **应用层（app/**）在领域之上提供 Application 模板与 API 构建，仅依赖 HTTP 抽象与错误/日志接口；
+- **接口适配层（http/** + `server.Server`）只负责“怎么对外提供 API”，不参与业务决策。
 
 ---
 
@@ -353,7 +370,7 @@ type IMessageHandler interface {
 
 ---
 
-## 7. Saga 与通用模式
+## 7. Saga 与通用模式（patterns/*）——纯模式与流程
 
 ### 7.1 Saga（`saga`）
 
@@ -363,9 +380,11 @@ type IMessageHandler interface {
 - 状态持久化接口：`state_store.go` + 内存实现 `state_store_memory.go`；
 - 配合 `messaging/command` 与 `eventing` 使用。
 
-### 7.2 通用模式（`patterns/retry`）
+### 7.2 通用模式（`patterns/retry`、`patterns/workflow`）
 
-`patterns/retry` 提供简单的重试封装，可用于包装命令、事件处理或数据库操作。
+- `patterns/retry` 提供简单的重试封装，可用于包装命令、事件处理或数据库操作；
+- `patterns/workflow` 提供轻量的流程/状态机能力，可以在应用层组合使用；
+- 这些模式包的设计目标是 **不直接依赖具体领域模型或基础设施实现**，而是通过接口（如 `messaging/command`、`eventing`）进行协作，保持“纯模式”属性，便于复用与演进。
 
 ---
 
