@@ -268,3 +268,66 @@ func TestEngineStart_CancelsBackgroundTasksOnShutdown(t *testing.T) {
 	}
 }
 
+// concurrentFakeServer 用于在 -race 下验证 Engine 与 IServer 实现之间的并发交互。
+// 它在 Run 中阻塞一段时间，并在 Shutdown 中记录调用次数，配合 Engine 的信号分支/错误分支
+// 验证生命周期钩子在多 goroutine 下不会引入数据竞态。
+type concurrentFakeServer struct {
+	mu          sync.Mutex
+	runCalls    int
+	shutdownCalls int
+}
+
+func (s *concurrentFakeServer) Name() string { return "concurrent-fake" }
+
+func (s *concurrentFakeServer) LoadConfig() error { return nil }
+
+func (s *concurrentFakeServer) SetupDependencies(ctx context.Context) error { return nil }
+
+func (s *concurrentFakeServer) StartBackgroundTasks(ctx context.Context) error { return nil }
+
+func (s *concurrentFakeServer) Run(ctx context.Context) error {
+	s.mu.Lock()
+	s.runCalls++
+	s.mu.Unlock()
+
+	// 模拟一个短暂运行的主循环，随后返回 nil 触发 Engine 的“正常退出”分支。
+	select {
+	case <-time.After(50 * time.Millisecond):
+	case <-ctx.Done():
+	}
+	return nil
+}
+
+func (s *concurrentFakeServer) Shutdown(ctx context.Context) error {
+	s.mu.Lock()
+	s.shutdownCalls++
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *concurrentFakeServer) snapshot() (runCalls, shutdownCalls int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.runCalls, s.shutdownCalls
+}
+
+// TestEngineStart_ConcurrentSafe 确认 Engine 与 IServer 实现的交互在 -race 下无数据竞态。
+func TestEngineStart_ConcurrentSafe(t *testing.T) {
+	server := &concurrentFakeServer{}
+	engine := NewEngine(server,
+		WithShutdownTimeout(100*time.Millisecond),
+	)
+
+	if err := engine.Start(); err != nil {
+		t.Fatalf("Engine.Start() returned error in concurrent-safe case: %v", err)
+	}
+
+	if engine.State() != StateStopped {
+		t.Fatalf("expected engine state %v, got %v", StateStopped, engine.State())
+	}
+
+	runCalls, shutdownCalls := server.snapshot()
+	if runCalls != 1 || shutdownCalls != 1 {
+		t.Fatalf("unexpected run/shutdown calls: run=%d, shutdown=%d", runCalls, shutdownCalls)
+	}
+}

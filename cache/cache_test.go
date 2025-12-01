@@ -341,6 +341,64 @@ func TestCache_ConcurrentAccess(t *testing.T) {
 	}
 }
 
+// TestCache_ConcurrentReadWriteAndExpiry 高并发读写 + 过期清理/统计并发访问
+//
+// 设计目的：
+//   - 多个 goroutine 并发执行 Set/Get 同一批 key；
+//   - 同时由一个 goroutine 周期性调用 CleanExpired 与 Stats；
+//   - 在 -race 模式下验证内部锁与 LRU/TTL 路径无数据竞态。
+func TestCache_ConcurrentReadWriteAndExpiry(t *testing.T) {
+	cache := New[int, int](Config{
+		Name:    "concurrent_expiry",
+		MaxSize: 1024,
+		TTL:     50 * time.Millisecond,
+	})
+
+	const (
+		goroutines = 8
+		iterations = 500
+	)
+
+	stopCh := make(chan struct{})
+	// 启动清理/统计 goroutine
+	go func() {
+		ticker := time.NewTicker(10 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopCh:
+				return
+			case <-ticker.C:
+				_ = cache.CleanExpired()
+				_ = cache.Stats()
+			}
+		}
+	}()
+
+	done := make(chan struct{}, goroutines)
+	for g := 0; g < goroutines; g++ {
+		go func(id int) {
+			for i := 0; i < iterations; i++ {
+				key := i % 256
+				cache.Set(key, id+i)
+				_, _ = cache.Get(key)
+			}
+			done <- struct{}{}
+		}(g)
+	}
+
+	for g := 0; g < goroutines; g++ {
+		<-done
+	}
+	close(stopCh)
+
+	// 最终 Size 应在合理范围内（不做严格断言，只要不崩溃/不为负即可）
+	size := cache.Size()
+	if size < 0 || size > 1024 {
+		t.Fatalf("unexpected cache size after concurrent access: %d", size)
+	}
+}
+
 // TestCache_AggregateUseCase 测试聚合根缓存用例
 func TestCache_AggregateUseCase(t *testing.T) {
 	// 模拟聚合根

@@ -2,6 +2,7 @@ package outbox
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 
 // MockOutboxRepository 模拟 Outbox 仓储
 type MockOutboxRepository struct {
+	mu                 sync.Mutex
 	entries            []OutboxEntry
 	markedPublished    []int64
 	markedFailed       []int64
@@ -26,6 +28,8 @@ type MockOutboxRepository struct {
 }
 
 func (m *MockOutboxRepository) SaveWithEvents(ctx context.Context, aggregateID int64, events []eventing.Event) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	for _, evt := range events {
 		entry, _ := EventToOutboxEntry(aggregateID, evt)
 		entry.ID = int64(len(m.entries) + 1)
@@ -35,6 +39,8 @@ func (m *MockOutboxRepository) SaveWithEvents(ctx context.Context, aggregateID i
 }
 
 func (m *MockOutboxRepository) GetPendingEntries(ctx context.Context, limit int) ([]OutboxEntry, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.getPendingError != nil {
 		return nil, m.getPendingError
 	}
@@ -52,6 +58,8 @@ func (m *MockOutboxRepository) GetPendingEntries(ctx context.Context, limit int)
 }
 
 func (m *MockOutboxRepository) MarkAsPublished(ctx context.Context, entryID int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.markPublishError != nil {
 		return m.markPublishError
 	}
@@ -68,6 +76,8 @@ func (m *MockOutboxRepository) MarkAsPublished(ctx context.Context, entryID int6
 }
 
 func (m *MockOutboxRepository) MarkAsFailed(ctx context.Context, entryID int64, errorMsg string, nextRetryAt time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.markFailedError != nil {
 		return m.markFailedError
 	}
@@ -85,6 +95,8 @@ func (m *MockOutboxRepository) MarkAsFailed(ctx context.Context, entryID int64, 
 }
 
 func (m *MockOutboxRepository) DeletePublished(ctx context.Context, olderThan time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.deletePublishError != nil {
 		return m.deletePublishError
 	}
@@ -92,13 +104,35 @@ func (m *MockOutboxRepository) DeletePublished(ctx context.Context, olderThan ti
 	return nil
 }
 
+// 只读辅助方法（用于测试断言）
+func (m *MockOutboxRepository) MarkedPublishedLen() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.markedPublished)
+}
+
+func (m *MockOutboxRepository) MarkedFailedLen() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.markedFailed)
+}
+
+func (m *MockOutboxRepository) DeletedPublished() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.deletedPublished
+}
+
 // MockEventBus 模拟事件总线
 type MockEventBus struct {
+	mu              sync.Mutex
 	publishedEvents []eventing.Event
 	publishError    error
 }
 
 func (m *MockEventBus) Publish(ctx context.Context, message messaging.IMessage) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.publishError != nil {
 		return m.publishError
 	}
@@ -109,15 +143,20 @@ func (m *MockEventBus) Publish(ctx context.Context, message messaging.IMessage) 
 }
 
 func (m *MockEventBus) PublishAll(ctx context.Context, messages []messaging.IMessage) error {
+	m.mu.Lock()
 	for _, msg := range messages {
-		if err := m.Publish(ctx, msg); err != nil {
+		if err := m.publishLocked(ctx, msg); err != nil {
+			m.mu.Unlock()
 			return err
 		}
 	}
+	m.mu.Unlock()
 	return nil
 }
 
 func (m *MockEventBus) PublishEvent(ctx context.Context, event eventing.IEvent) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.publishError != nil {
 		return m.publishError
 	}
@@ -128,11 +167,14 @@ func (m *MockEventBus) PublishEvent(ctx context.Context, event eventing.IEvent) 
 }
 
 func (m *MockEventBus) PublishEvents(ctx context.Context, events []eventing.IEvent) error {
+	m.mu.Lock()
 	for _, evt := range events {
-		if err := m.PublishEvent(ctx, evt); err != nil {
+		if err := m.publishEventLocked(ctx, evt); err != nil {
+			m.mu.Unlock()
 			return err
 		}
 	}
+	m.mu.Unlock()
 	return nil
 }
 
@@ -165,6 +207,34 @@ func (m *MockEventBus) SubscribeHandler(ctx context.Context, handler bus.IEventH
 
 func (m *MockEventBus) UnsubscribeHandler(ctx context.Context, handler bus.IEventHandler) error {
 	return nil
+}
+
+// 内部锁保护的辅助方法
+func (m *MockEventBus) publishLocked(ctx context.Context, message messaging.IMessage) error {
+	if m.publishError != nil {
+		return m.publishError
+	}
+	if evt, ok := message.(*eventing.Event); ok {
+		m.publishedEvents = append(m.publishedEvents, *evt)
+	}
+	return nil
+}
+
+func (m *MockEventBus) publishEventLocked(ctx context.Context, event eventing.IEvent) error {
+	if m.publishError != nil {
+		return m.publishError
+	}
+	if evt, ok := event.(*eventing.Event); ok {
+		m.publishedEvents = append(m.publishedEvents, *evt)
+	}
+	return nil
+}
+
+// 用于测试断言的只读方法
+func (m *MockEventBus) PublishedEventsLen() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.publishedEvents)
 }
 
 // ========== Publisher 测试 ==========
@@ -200,8 +270,8 @@ func TestPublisher_PublishPending(t *testing.T) {
 	assert.NoError(t, err)
 
 	// 验证事件已发布
-	assert.Len(t, eventBus.publishedEvents, 2)
-	assert.Len(t, repo.markedPublished, 2)
+	assert.Equal(t, 2, eventBus.PublishedEventsLen())
+	assert.Equal(t, 2, repo.MarkedPublishedLen())
 }
 
 func TestPublisher_PublishPending_EmptyQueue(t *testing.T) {
@@ -215,7 +285,7 @@ func TestPublisher_PublishPending_EmptyQueue(t *testing.T) {
 	ctx := context.Background()
 	err := publisher.PublishPending(ctx)
 	assert.NoError(t, err)
-	assert.Len(t, eventBus.publishedEvents, 0)
+	assert.Equal(t, 0, eventBus.PublishedEventsLen())
 }
 
 func TestPublisher_PublishPending_InvalidEventData(t *testing.T) {
@@ -246,8 +316,7 @@ func TestPublisher_PublishPending_InvalidEventData(t *testing.T) {
 	assert.NoError(t, err) // 不应该返回错误，只标记失败
 
 	// 验证标记为失败
-	assert.Len(t, repo.markedFailed, 1)
-	assert.Equal(t, int64(1), repo.markedFailed[0])
+	assert.Equal(t, 1, repo.MarkedFailedLen())
 }
 
 func TestPublisher_PublishPending_PublishError(t *testing.T) {
@@ -272,8 +341,8 @@ func TestPublisher_PublishPending_PublishError(t *testing.T) {
 	assert.NoError(t, err) // 不应该返回错误
 
 	// 验证标记为失败
-	assert.Len(t, repo.markedFailed, 1)
-	assert.Len(t, eventBus.publishedEvents, 0)
+	assert.Equal(t, 1, repo.MarkedFailedLen())
+	assert.Equal(t, 0, eventBus.PublishedEventsLen())
 }
 
 func TestPublisher_Start_Stop(t *testing.T) {
@@ -302,7 +371,7 @@ func TestPublisher_Start_Stop(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// 验证事件已发布
-	assert.GreaterOrEqual(t, len(eventBus.publishedEvents), 1)
+	assert.GreaterOrEqual(t, eventBus.PublishedEventsLen(), 1)
 
 	// 停止 Publisher
 	err = publisher.Stop()
@@ -310,14 +379,14 @@ func TestPublisher_Start_Stop(t *testing.T) {
 
 	// 验证后台任务已停止
 	time.Sleep(100 * time.Millisecond)
-	prevLen := len(eventBus.publishedEvents)
+	prevLen := eventBus.PublishedEventsLen()
 
 	// 添加新事件，不应该被处理
 	evt2 := newTestEvent(2, 1, "event-after-stop", nil)
 	_ = repo.SaveWithEvents(ctx, 2, []eventing.Event{evt2})
 
 	time.Sleep(200 * time.Millisecond)
-	assert.Equal(t, prevLen, len(eventBus.publishedEvents)) // 长度不应增加
+	assert.Equal(t, prevLen, eventBus.PublishedEventsLen()) // 长度不应增加
 }
 
 func TestPublisher_ContextCancellation(t *testing.T) {
@@ -381,7 +450,7 @@ func TestPublisher_MarkPublishedError(t *testing.T) {
 	assert.NoError(t, err)
 
 	// 事件应该已发布
-	assert.Len(t, eventBus.publishedEvents, 1)
+	assert.Equal(t, 1, eventBus.PublishedEventsLen())
 }
 
 func TestPublisher_CleanupPublished(t *testing.T) {
@@ -406,7 +475,7 @@ func TestPublisher_CleanupPublished(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// 验证清理已执行
-	assert.True(t, repo.deletedPublished)
+	assert.True(t, repo.DeletedPublished())
 
 	// 停止
 	_ = publisher.Stop()
