@@ -38,40 +38,12 @@ func TestWrap_NilError(t *testing.T) {
 	}
 }
 
-// TestWrapWithLog 测试带日志的错误包装
-func TestWrapWithLog(t *testing.T) {
-	ctx := context.Background()
-	originalErr := errors.New("原始错误")
-
-	wrapped := WrapWithLog(ctx, originalErr, ErrCodeDatabase, "数据库错误")
-
-	if wrapped == nil {
-		t.Fatal("包装后的错误为nil")
-	}
-
-	// 验证错误不为空
-	if wrapped.Error() == "" {
-		t.Error("包装后的错误消息为空")
-	}
-}
-
-// TestWrapWithLog_NilError 测试带日志包装nil错误
-func TestWrapWithLog_NilError(t *testing.T) {
-	ctx := context.Background()
-
-	wrapped := WrapWithLog(ctx, nil, ErrCodeDatabase, "消息")
-
-	if wrapped != nil {
-		t.Error("包装nil错误应该返回nil")
-	}
-}
-
-// TestWrapDatabaseError 测试数据库错误包装
-func TestWrapDatabaseError(t *testing.T) {
+// TestWrapDbError 测试数据库错误包装
+func TestWrapDbError(t *testing.T) {
 	ctx := context.Background()
 	originalErr := errors.New("数据库连接失败")
 
-	wrapped := WrapDatabaseError(ctx, originalErr, "查询用户")
+	wrapped := WrapDbError(ctx, originalErr, "查询用户")
 
 	if wrapped == nil {
 		t.Fatal("包装后的错误为nil")
@@ -84,25 +56,25 @@ func TestWrapDatabaseError(t *testing.T) {
 	}
 }
 
-// TestWrapDatabaseError_NilError 测试包装nil数据库错误
-func TestWrapDatabaseError_NilError(t *testing.T) {
+// TestWrapDbError_NilError 测试包装nil数据库错误
+func TestWrapDbError_NilError(t *testing.T) {
 	ctx := context.Background()
 
-	wrapped := WrapDatabaseError(ctx, nil, "操作")
+	wrapped := WrapDbError(ctx, nil, "操作")
 
 	if wrapped != nil {
 		t.Error("包装nil错误应该返回nil")
 	}
 }
 
-// TestWrapDatabaseError_NotFound 测试NotFound错误特殊处理
-func TestWrapDatabaseError_NotFound(t *testing.T) {
+// TestWrapDbError_NotFound 测试NotFound错误特殊处理
+func TestWrapDbError_NotFound(t *testing.T) {
 	ctx := context.Background()
 
 	// 创建一个NotFound错误
 	notFoundErr := NewError(ErrCodeNotFound, "记录不存在")
 
-	wrapped := WrapDatabaseError(ctx, notFoundErr, "查询用户")
+	wrapped := WrapDbError(ctx, notFoundErr, "查询用户")
 
 	if wrapped == nil {
 		t.Fatal("包装后的错误为nil")
@@ -236,7 +208,7 @@ func TestMultipleWrapCalls(t *testing.T) {
 	// 多次包装
 	err1 := Wrap(ctx, originalErr, ErrCodeDatabase, "第一层")
 	err2 := Wrap(ctx, err1, ErrCodeInternal, "第二层")
-	err3 := WrapWithLog(ctx, err2, ErrCodeValidation, "第三层")
+	err3 := Wrap(ctx, err2, ErrCodeValidation, "第三层")
 
 	if err3 == nil {
 		t.Fatal("多次包装后的错误为nil")
@@ -287,17 +259,6 @@ func BenchmarkWrap(b *testing.B) {
 	}
 }
 
-// BenchmarkWrapWithLog 基准测试：带日志包装
-func BenchmarkWrapWithLog(b *testing.B) {
-	ctx := context.Background()
-	err := errors.New("测试错误")
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		WrapWithLog(ctx, err, ErrCodeDatabase, "基准测试")
-	}
-}
-
 // BenchmarkNew 基准测试：创建新错误
 func BenchmarkNew(b *testing.B) {
 	b.ResetTimer()
@@ -306,14 +267,14 @@ func BenchmarkNew(b *testing.B) {
 	}
 }
 
-// BenchmarkWrapDatabaseError 基准测试：数据库错误包装
-func BenchmarkWrapDatabaseError(b *testing.B) {
+// BenchmarkWrapDbError 基准测试：数据库错误包装
+func BenchmarkWrapDbError(b *testing.B) {
 	ctx := context.Background()
 	err := errors.New("数据库错误")
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		WrapDatabaseError(ctx, err, "查询操作")
+		WrapDbError(ctx, err, "查询操作")
 	}
 }
 

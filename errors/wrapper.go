@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"runtime"
-
-	"gochen/logging"
 )
 
 // Wrap 包装错误，添加错误码和上下文信息
@@ -19,34 +17,9 @@ func Wrap(_ context.Context, err error, code ErrorCode, msg string) error {
 	return WrapError(err, code, msg)
 }
 
-// WrapWithLog 包装错误并记录警告日志
-// 建议：用于需要立即记录的错误场景
-func WrapWithLog(ctx context.Context, err error, code ErrorCode, msg string, fields ...logging.Field) error {
-	if err == nil {
-		return nil
-	}
-
-	// 获取调用位置
-	_, file, line, _ := runtime.Caller(1)
-
-	// 创建增强错误
-	wrapped := WrapError(err, code, msg)
-
-	// 记录警告日志
-	allFields := append([]logging.Field{
-		logging.Error(err),
-		logging.String("error_code", string(code)),
-		logging.String("location", fmt.Sprintf("%s:%d", file, line)),
-	}, fields...)
-
-	logging.GetLogger().Warn(ctx, msg, allFields...)
-
-	return wrapped
-}
-
-// WrapDatabaseError 包装数据库错误
+// WrapDbError 包装数据库错误
 // 自动处理常见数据库错误类型
-func WrapDatabaseError(ctx context.Context, err error, operation string) error {
+func WrapDbError(ctx context.Context, err error, operation string) error {
 	if err == nil {
 		return nil
 	}
@@ -56,10 +29,9 @@ func WrapDatabaseError(ctx context.Context, err error, operation string) error {
 		return WrapError(err, ErrCodeNotFound, operation)
 	}
 
-	// 其他数据库错误
-	return WrapWithLog(ctx, err, ErrCodeDatabase,
+	// 其他数据库错误：仅做错误包装，不在此处记录日志
+	return WrapError(err, ErrCodeDatabase,
 		fmt.Sprintf("database operation failed: %s", operation),
-		logging.String("operation", operation),
 	)
 }
 
