@@ -15,12 +15,6 @@ import (
 	"gochen/messaging/command"
 )
 
-func bridgeLogger() logging.ILogger {
-	return logging.GetLogger().WithFields(
-		logging.String("component", "bridge.http"),
-	)
-}
-
 // HTTPBridgeConfig HTTP 桥接配置
 type HTTPBridgeConfig struct {
 	// ListenAddr 监听地址
@@ -69,6 +63,7 @@ type HTTPBridge struct {
 	server     *http.Server
 	client     *http.Client
 	mux        *http.ServeMux
+	logger     logging.ILogger
 
 	// 命令处理器
 	commandHandlers map[string]func(ctx context.Context, cmd *command.Command) error
@@ -90,11 +85,27 @@ type HTTPBridge struct {
 // 返回：
 //   - *HTTPBridge: 桥接实例
 func NewHTTPBridge(config *HTTPBridgeConfig) *HTTPBridge {
+	return NewHTTPBridgeWithLogger(config, nil)
+}
+
+// NewHTTPBridgeWithLogger 创建带自定义 Logger 的 HTTP 桥接
+//
+// 参数：
+//   - config: 配置（nil 使用默认配置）
+//   - logger: 组件级 logger（nil 时将基于全局 Logger 派生带 component 字段的默认 logger）
+//
+// 返回：
+//   - *HTTPBridge: 桥接实例
+func NewHTTPBridgeWithLogger(config *HTTPBridgeConfig, logger logging.ILogger) *HTTPBridge {
 	if config == nil {
 		config = DefaultHTTPBridgeConfig()
 	}
 
 	mux := http.NewServeMux()
+
+	if logger == nil {
+		logger = logging.GetLogger().WithField("component", "bridge.http")
+	}
 
 	bridge := &HTTPBridge{
 		config:          config,
@@ -102,6 +113,7 @@ func NewHTTPBridge(config *HTTPBridgeConfig) *HTTPBridge {
 		mux:             mux,
 		commandHandlers: make(map[string]func(ctx context.Context, cmd *command.Command) error),
 		eventHandlers:   make(map[string]messaging.IMessageHandler),
+		logger:          logger,
 		client: &http.Client{
 			Timeout: config.ClientTimeout,
 		},
@@ -159,7 +171,7 @@ func (b *HTTPBridge) SendCommand(ctx context.Context, serviceURL string, cmd *co
 		return fmt.Errorf("%w: status=%d, body=%s", ErrRemoteCallFailed, resp.StatusCode, string(body))
 	}
 
-	bridgeLogger().Debug(ctx, "命令发送成功",
+	b.logger.Debug(ctx, "命令发送成功",
 		logging.String("url", url),
 		logging.String("command_id", cmd.GetID()))
 
@@ -202,7 +214,7 @@ func (b *HTTPBridge) SendEvent(ctx context.Context, serviceURL string, event mes
 		return fmt.Errorf("%w: status=%d, body=%s", ErrRemoteCallFailed, resp.StatusCode, string(body))
 	}
 
-	bridgeLogger().Debug(ctx, "事件发送成功",
+	b.logger.Debug(ctx, "事件发送成功",
 		logging.String("url", url),
 		logging.String("event_id", event.GetID()))
 
@@ -220,7 +232,7 @@ func (b *HTTPBridge) RegisterCommandHandler(commandType string, handler func(ctx
 
 	b.commandHandlers[commandType] = handler
 
-	bridgeLogger().Info(context.Background(), "注册命令处理器",
+	b.logger.Info(context.TODO(), "注册命令处理器",
 		logging.String("command_type", commandType))
 
 	return nil
@@ -237,7 +249,7 @@ func (b *HTTPBridge) RegisterEventHandler(eventType string, handler messaging.IM
 
 	b.eventHandlers[eventType] = handler
 
-	bridgeLogger().Info(context.Background(), "注册事件处理器",
+	b.logger.Info(context.TODO(), "注册事件处理器",
 		logging.String("event_type", eventType))
 
 	return nil
@@ -283,7 +295,7 @@ func (b *HTTPBridge) handleCommand(w http.ResponseWriter, r *http.Request) {
 
 	// 执行处理器
 	if err := handler(r.Context(), cmd); err != nil {
-		bridgeLogger().Error(r.Context(), "命令处理失败", logging.Error(err),
+		b.logger.Error(r.Context(), "命令处理失败", logging.Error(err),
 			logging.String("command_type", commandType))
 		http.Error(w, fmt.Sprintf("Command handler failed: %v", err), http.StatusInternalServerError)
 		return
@@ -332,7 +344,7 @@ func (b *HTTPBridge) handleEvent(w http.ResponseWriter, r *http.Request) {
 
 	// 执行处理器
 	if err := handler.Handle(r.Context(), event); err != nil {
-		bridgeLogger().Error(r.Context(), "事件处理失败", logging.Error(err),
+		b.logger.Error(r.Context(), "事件处理失败", logging.Error(err),
 			logging.String("event_type", eventType))
 		http.Error(w, fmt.Sprintf("Event handler failed: %v", err), http.StatusInternalServerError)
 		return
@@ -358,13 +370,13 @@ func (b *HTTPBridge) Start() error {
 	b.running = true
 	b.mutex.Unlock()
 
-	bridgeLogger().Info(context.Background(), "启动 HTTP Bridge",
+	b.logger.Info(context.TODO(), "启动 HTTP Bridge",
 		logging.String("addr", b.config.ListenAddr))
 
 	// 在 goroutine 中启动服务器
 	go func() {
 		if err := b.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			bridgeLogger().Error(context.Background(), "HTTP Bridge 启动失败", logging.Error(err))
+			b.logger.Error(context.TODO(), "HTTP Bridge 启动失败", logging.Error(err))
 		}
 	}()
 
@@ -381,7 +393,7 @@ func (b *HTTPBridge) Stop() error {
 	b.running = false
 	b.mutex.Unlock()
 
-	bridgeLogger().Info(context.Background(), "停止 HTTP Bridge")
+	b.logger.Info(context.TODO(), "停止 HTTP Bridge")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

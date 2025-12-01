@@ -97,6 +97,7 @@ type IntegrationEventPublisher struct {
 	handlers    map[string][]IntegrationEventHandler
 	mutex       sync.RWMutex
 	enableStore bool // 是否启用集成事件持久化
+	logger      logging.ILogger
 }
 
 // IntegrationEventHandler 集成事件处理器
@@ -108,13 +109,15 @@ func NewIntegrationEventPublisher(
 	messageBus msg.IMessageBus,
 	eventStore store.IEventStore,
 ) *IntegrationEventPublisher {
-	return &IntegrationEventPublisher{
+	publisher := &IntegrationEventPublisher{
 		eventBus:    eventBus,
 		messageBus:  messageBus,
 		eventStore:  eventStore,
 		handlers:    make(map[string][]IntegrationEventHandler),
 		enableStore: false, // 默认不启用持久化
 	}
+	publisher.logger = logging.GetLogger().WithField("component", "integration.publisher")
+	return publisher
 }
 
 // EnableEventStore 启用集成事件持久化
@@ -130,10 +133,10 @@ func (p *IntegrationEventPublisher) DisableEventStore() {
 // Publish 发布集成事件
 // 集成事件会被发布到内部事件总线和外部消息总线
 func (p *IntegrationEventPublisher) Publish(ctx context.Context, event IIntegrationEvent) error {
-	logger := logging.GetLogger().WithFields(
-		logging.String("component", "integration.publisher"),
-		logging.String("event_type", event.GetType()),
-	)
+	var logger logging.ILogger
+	if p.logger != nil {
+		logger = p.logger.WithField("event_type", event.GetType())
+	}
 
 	// 1. 可选：持久化集成事件（确保至少一次投递）
 	if p.enableStore && p.eventStore != nil {
@@ -148,7 +151,9 @@ func (p *IntegrationEventPublisher) Publish(ctx context.Context, event IIntegrat
 	if p.eventBus != nil {
 		go func() {
 			if err := p.eventBus.PublishEvent(ctx, event); err != nil {
-				logger.Error(ctx, "failed to publish integration event asynchronously", logging.Error(err))
+				if logger != nil {
+					logger.Error(ctx, "failed to publish integration event asynchronously", logging.Error(err))
+				}
 			}
 		}()
 	}
@@ -167,7 +172,9 @@ func (p *IntegrationEventPublisher) Publish(ctx context.Context, event IIntegrat
 
 	for _, handler := range handlers {
 		if err := handler(ctx, event); err != nil {
-			logger.Error(ctx, "integration event handler error", logging.Error(err))
+			if logger != nil {
+				logger.Error(ctx, "integration event handler error", logging.Error(err))
+			}
 		}
 	}
 
@@ -176,9 +183,12 @@ func (p *IntegrationEventPublisher) Publish(ctx context.Context, event IIntegrat
 
 // PublishAsync 异步发布集成事件
 func (p *IntegrationEventPublisher) PublishAsync(ctx context.Context, event IIntegrationEvent) {
+	logger := p.logger
 	go func() {
 		if err := p.Publish(ctx, event); err != nil {
-			logging.GetLogger().Error(ctx, "failed to publish integration event asynchronously", logging.Error(err))
+			if logger != nil {
+				logger.Error(ctx, "failed to publish integration event asynchronously", logging.Error(err))
+			}
 		}
 	}()
 }

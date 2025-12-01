@@ -12,12 +12,6 @@ import (
 	"gochen/messaging/command"
 )
 
-func sagaLogger() logging.ILogger {
-	return logging.GetLogger().WithFields(
-		logging.String("component", "saga.orchestrator"),
-	)
-}
-
 // SagaOrchestrator Saga 编排器
 //
 // 负责执行 Saga 的所有步骤，包括正向执行和补偿。
@@ -36,6 +30,7 @@ type SagaOrchestrator struct {
 	commandBus *command.CommandBus
 	eventBus   bus.IEventBus
 	stateStore ISagaStateStore
+	logger     logging.ILogger
 }
 
 // NewSagaOrchestrator 创建 Saga 编排器
@@ -52,11 +47,13 @@ func NewSagaOrchestrator(
 	eventBus bus.IEventBus,
 	stateStore ISagaStateStore,
 ) *SagaOrchestrator {
-	return &SagaOrchestrator{
+	o := &SagaOrchestrator{
 		commandBus: commandBus,
 		eventBus:   eventBus,
 		stateStore: stateStore,
 	}
+	o.logger = logging.GetLogger().WithField("component", "saga.orchestrator")
+	return o
 }
 
 // Execute 执行 Saga
@@ -78,7 +75,7 @@ func (o *SagaOrchestrator) Execute(ctx context.Context, saga ISaga) error {
 		return ErrSagaNoSteps
 	}
 
-	sagaLogger().Info(ctx, "starting saga execution",
+	o.logger.Info(ctx, "starting saga execution",
 		logging.String("saga_id", sagaID),
 		logging.Int("steps", len(steps)))
 
@@ -89,7 +86,7 @@ func (o *SagaOrchestrator) Execute(ctx context.Context, saga ISaga) error {
 	// 保存初始状态
 	if o.stateStore != nil {
 		if err := o.stateStore.Save(ctx, state); err != nil {
-			sagaLogger().Warn(ctx, "failed to save saga state", logging.Error(err))
+			o.logger.Warn(ctx, "failed to save saga state", logging.Error(err))
 			// continue execution
 		}
 	}
@@ -99,14 +96,14 @@ func (o *SagaOrchestrator) Execute(ctx context.Context, saga ISaga) error {
 
 	// 执行步骤
 	for i, step := range steps {
-		sagaLogger().Info(ctx, "executing saga step",
+		o.logger.Info(ctx, "executing saga step",
 			logging.String("saga_id", sagaID),
 			logging.Int("step_index", i),
 			logging.String("step_name", step.Name))
 
 		// 执行步骤
 		if err := o.executeStep(ctx, step, state); err != nil {
-			sagaLogger().Error(ctx, "saga step failed", logging.Error(err),
+			o.logger.Error(ctx, "saga step failed", logging.Error(err),
 				logging.String("saga_id", sagaID),
 				logging.String("step_name", step.Name))
 
@@ -124,7 +121,7 @@ func (o *SagaOrchestrator) Execute(ctx context.Context, saga ISaga) error {
 
 			// 执行补偿
 			if compErr := o.compensate(ctx, saga, state, i); compErr != nil {
-				sagaLogger().Error(ctx, "saga compensation failed", logging.Error(compErr),
+				o.logger.Error(ctx, "saga compensation failed", logging.Error(compErr),
 					logging.String("saga_id", sagaID))
 
 				// 调用失败回调
@@ -170,7 +167,7 @@ func (o *SagaOrchestrator) Execute(ctx context.Context, saga ISaga) error {
 
 	// 调用完成回调
 	if err := saga.OnComplete(ctx); err != nil {
-		sagaLogger().Warn(ctx, "saga completion callback failed", logging.Error(err),
+		o.logger.Warn(ctx, "saga completion callback failed", logging.Error(err),
 			logging.String("saga_id", sagaID))
 		// don't affect saga success status
 	}
@@ -178,7 +175,7 @@ func (o *SagaOrchestrator) Execute(ctx context.Context, saga ISaga) error {
 	// 发布 Saga 完成事件
 	o.publishEvent(ctx, EventSagaCompleted, sagaID, nil)
 
-	sagaLogger().Info(ctx, "saga execution completed",
+	o.logger.Info(ctx, "saga execution completed",
 		logging.String("saga_id", sagaID),
 		logging.Int("steps", len(steps)))
 
@@ -209,7 +206,7 @@ func (o *SagaOrchestrator) executeStep(ctx context.Context, step *SagaStep, stat
 	// 调用成功回调
 	if step.OnSuccess != nil {
 		if err := step.OnSuccess(ctx, step.Name, nil); err != nil {
-			sagaLogger().Warn(ctx, "step success callback failed", logging.Error(err),
+			o.logger.Warn(ctx, "step success callback failed", logging.Error(err),
 				logging.String("step", step.Name))
 			// don't affect step success
 		}
@@ -223,7 +220,7 @@ func (o *SagaOrchestrator) compensate(ctx context.Context, saga ISaga, state *Sa
 	sagaID := saga.GetID()
 	steps := saga.GetSteps()
 
-	sagaLogger().Info(ctx, "starting saga compensation",
+	o.logger.Info(ctx, "starting saga compensation",
 		logging.String("saga_id", sagaID),
 		logging.Int("failed_step_index", failedStepIndex))
 
@@ -242,13 +239,13 @@ func (o *SagaOrchestrator) compensate(ctx context.Context, saga ISaga, state *Sa
 
 		// 如果没有补偿命令，跳过
 		if !step.HasCompensation() {
-			sagaLogger().Info(ctx, "step has no compensation, skipping",
+			o.logger.Info(ctx, "step has no compensation, skipping",
 				logging.String("saga_id", sagaID),
 				logging.String("step", step.Name))
 			continue
 		}
 
-		sagaLogger().Info(ctx, "executing compensation",
+		o.logger.Info(ctx, "executing compensation",
 			logging.String("saga_id", sagaID),
 			logging.Int("step_index", i),
 			logging.String("step", step.Name))
@@ -256,7 +253,7 @@ func (o *SagaOrchestrator) compensate(ctx context.Context, saga ISaga, state *Sa
 		// 生成补偿命令
 		compCmd, err := step.Compensation(ctx)
 		if err != nil {
-			sagaLogger().Error(ctx, "failed to generate compensation command", logging.Error(err),
+			o.logger.Error(ctx, "failed to generate compensation command", logging.Error(err),
 				logging.String("saga_id", sagaID),
 				logging.String("step", step.Name))
 			return fmt.Errorf("%w: failed to generate compensation command for step %s: %v",
@@ -264,7 +261,7 @@ func (o *SagaOrchestrator) compensate(ctx context.Context, saga ISaga, state *Sa
 		}
 
 		if compCmd == nil {
-			sagaLogger().Error(ctx, "compensation command is nil",
+			o.logger.Error(ctx, "compensation command is nil",
 				logging.String("saga_id", sagaID),
 				logging.String("step", step.Name))
 			return fmt.Errorf("%w: compensation command is nil for step %s",
@@ -273,7 +270,7 @@ func (o *SagaOrchestrator) compensate(ctx context.Context, saga ISaga, state *Sa
 
 		// 执行补偿命令
 		if err := o.commandBus.Dispatch(ctx, compCmd); err != nil {
-			sagaLogger().Error(ctx, "failed to execute compensation command", logging.Error(err),
+			o.logger.Error(ctx, "failed to execute compensation command", logging.Error(err),
 				logging.String("saga_id", sagaID),
 				logging.String("step", step.Name))
 
@@ -299,7 +296,7 @@ func (o *SagaOrchestrator) compensate(ctx context.Context, saga ISaga, state *Sa
 		o.stateStore.Update(ctx, state)
 	}
 
-	sagaLogger().Info(ctx, "saga compensation completed",
+	o.logger.Info(ctx, "saga compensation completed",
 		logging.String("saga_id", sagaID))
 
 	return nil
@@ -344,13 +341,13 @@ func (o *SagaOrchestrator) publishEvent(ctx context.Context, eventType string, s
 	}
 
 	if err := o.eventBus.PublishEvent(ctx, evt); err != nil {
-		sagaLogger().Warn(ctx, "failed to publish saga event", logging.Error(err),
+		o.logger.Warn(ctx, "failed to publish saga event", logging.Error(err),
 			logging.String("event_type", eventType),
 			logging.String("saga_id", sagaID))
 		return
 	}
 
-	sagaLogger().Debug(ctx, "saga event published",
+	o.logger.Debug(ctx, "saga event published",
 		logging.String("event_type", eventType),
 		logging.String("saga_id", sagaID))
 }
@@ -377,7 +374,7 @@ func (o *SagaOrchestrator) Resume(ctx context.Context, saga ISaga, state *SagaSt
 		return ErrSagaAlreadyFailed
 	}
 
-	sagaLogger().Info(ctx, "resuming saga execution",
+	o.logger.Info(ctx, "resuming saga execution",
 		logging.String("saga_id", sagaID),
 		logging.Int("current_step", state.CurrentStep))
 
@@ -417,7 +414,7 @@ func (o *SagaOrchestrator) Resume(ctx context.Context, saga ISaga, state *SagaSt
 
 	saga.OnComplete(ctx)
 
-	sagaLogger().Info(ctx, "saga resume execution completed",
+	o.logger.Info(ctx, "saga resume execution completed",
 		logging.String("saga_id", sagaID))
 
 	return nil

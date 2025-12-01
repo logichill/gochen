@@ -70,9 +70,7 @@ func NewEventSourcedService[T entity.IEventSourcedAggregate[int64]](
 		service.logger = opts.Logger
 	}
 	if service.logger == nil {
-		service.logger = logging.GetLogger().WithFields(
-			logging.String("component", "eventsourced.service"),
-		)
+		service.logger = logging.GetLogger().WithField("component", "eventsourced.service")
 	}
 	return service, nil
 }

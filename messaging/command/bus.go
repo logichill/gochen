@@ -36,6 +36,8 @@ type CommandBus struct {
 	//   - 当为 false（典型如 memory/redisstreams/natsjetstream 等异步 Transport），Dispatch 的 error 仅保证传输层是否成功，
 	//     handler 的业务错误不会可靠地通过返回值传播。
 	syncTransport bool
+
+	logger logging.ILogger
 }
 
 // commandRoutingHandler 根据命令类型进行路由的适配器
@@ -70,6 +72,10 @@ type CommandBusConfig struct {
 	// true: 同一聚合的命令串行执行（避免并发冲突）
 	// false: 允许并发执行（需要应用层处理并发）
 	EnableAggregateLock bool
+
+	// Logger 为命令总线注入的组件级 logger。
+	// 若为空，将在构造函数中基于全局 Logger 派生带 component 字段的默认 logger。
+	Logger logging.ILogger
 }
 
 // DefaultCommandBusConfig 默认配置
@@ -97,6 +103,13 @@ func NewCommandBus(messageBus messaging.IMessageBus, config *CommandBusConfig) *
 		handlers:   make(map[string]messaging.IMessageHandler),
 	}
 
+	// 初始化组件级 logger（优先使用显式注入，其次基于全局 Logger 派生）
+	if config.Logger != nil {
+		bus.logger = config.Logger
+	} else {
+		bus.logger = logging.GetLogger().WithField("component", "messaging.command.bus")
+	}
+
 	// 尝试探测底层 ITransport 类型，以便给出更明确的错误语义告警
 	type transportProvider interface {
 		GetTransport() messaging.ITransport
@@ -110,14 +123,16 @@ func NewCommandBus(messageBus messaging.IMessageBus, config *CommandBusConfig) *
 			bus.syncTransport = false
 		default:
 			// 未知类型：保守假定为异步，并给出一次性告警
-			logging.GetLogger().Warn(context.Background(),
+			ctx := context.TODO()
+			bus.logger.Warn(ctx,
 				"CommandBus 使用的 Transport 类型未知，Dispatch 错误语义仅保证传输层；业务错误请通过领域返回值或监控钩子处理",
 				logging.String("transport_type", fmt.Sprintf("%T", provider.GetTransport())),
 			)
 		}
 	} else {
 		// 无法探测 Transport（自定义 IMessageBus 实现），同样给出一次性告警
-		logging.GetLogger().Warn(context.Background(),
+		ctx := context.TODO()
+		bus.logger.Warn(ctx,
 			"CommandBus 无法探测底层 Transport 类型，Dispatch 错误语义仅保证传输层；请确认所用 IMessageBus/Transport 的同步语义",
 		)
 	}

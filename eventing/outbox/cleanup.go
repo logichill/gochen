@@ -94,7 +94,7 @@ func NewCleanupService(
 	logger logging.ILogger,
 ) *CleanupService {
 	if logger == nil {
-		logger = logging.GetLogger()
+		logger = logging.GetLogger().WithField("component", "eventing.outbox.cleanup")
 	}
 
 	// 设置默认值

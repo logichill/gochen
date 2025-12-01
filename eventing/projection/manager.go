@@ -14,9 +14,7 @@ import (
 )
 
 func projectionLogger() logging.ILogger {
-	return logging.GetLogger().WithFields(
-		logging.String("component", "projection.manager"),
-	)
+	return logging.GetLogger().WithField("component", "projection.manager")
 }
 
 // IProjection 投影接口
@@ -94,6 +92,7 @@ type ProjectionManager struct {
 	config          *ProjectionConfig
 	checkpointStore ICheckpointStore // 检查点存储（可选）
 	mutex           sync.RWMutex
+	logger          logging.ILogger
 }
 
 const replayBatchLimit = 1000 // 单次回放批量上限，避免一次性加载过多事件
@@ -109,7 +108,7 @@ func NewProjectionManagerWithConfig(eventStore store.IEventStore, eventBus bus.I
 		config = DefaultProjectionConfig()
 	}
 
-	return &ProjectionManager{
+	pm := &ProjectionManager{
 		projections:     make(map[string]IProjection),
 		eventStore:      eventStore,
 		eventBus:        eventBus,
@@ -118,6 +117,8 @@ func NewProjectionManagerWithConfig(eventStore store.IEventStore, eventBus bus.I
 		config:          config,
 		checkpointStore: nil, // 默认不启用检查点
 	}
+	pm.logger = logging.GetLogger().WithField("component", "projection.manager")
+	return pm
 }
 
 // WithCheckpointStore 配置检查点存储
@@ -165,7 +166,7 @@ func (pm *ProjectionManager) ResumeFromCheckpoint(ctx context.Context, projectio
 	}
 
 	if checkpointStore == nil {
-		projectionLogger().Warn(ctx, "checkpoint store not configured, skipping recovery",
+		pm.logger.Warn(ctx, "checkpoint store not configured, skipping recovery",
 			logging.String("projection", projectionName))
 		return pm.StartProjection(projectionName)
 	}
@@ -174,7 +175,7 @@ func (pm *ProjectionManager) ResumeFromCheckpoint(ctx context.Context, projectio
 	checkpoint, err := checkpointStore.Load(ctx, projectionName)
 	if err != nil {
 		if err == ErrCheckpointNotFound {
-			projectionLogger().Info(ctx, "checkpoint not found, starting from beginning",
+			pm.logger.Info(ctx, "checkpoint not found, starting from beginning",
 				logging.String("projection", projectionName))
 			checkpoint = NewCheckpoint(projectionName, 0, "", time.Time{})
 		} else {
@@ -182,7 +183,7 @@ func (pm *ProjectionManager) ResumeFromCheckpoint(ctx context.Context, projectio
 		}
 	}
 
-	projectionLogger().Info(ctx, "resuming projection from checkpoint",
+	pm.logger.Info(ctx, "resuming projection from checkpoint",
 		logging.String("projection", projectionName),
 		logging.Int64("position", checkpoint.Position),
 		logging.String("last_event_id", checkpoint.LastEventID))
@@ -200,7 +201,7 @@ func (pm *ProjectionManager) ResumeFromCheckpoint(ctx context.Context, projectio
 	pm.mutex.Unlock()
 
 	if eventStore == nil {
-		projectionLogger().Warn(ctx, "event store not configured, cannot replay from checkpoint, starting directly",
+		pm.logger.Warn(ctx, "event store not configured, cannot replay from checkpoint, starting directly",
 			logging.String("projection", projectionName))
 		return pm.StartProjection(projectionName)
 	}
@@ -210,7 +211,7 @@ func (pm *ProjectionManager) ResumeFromCheckpoint(ctx context.Context, projectio
 		return err
 	}
 
-	projectionLogger().Info(ctx, "resumed from checkpoint and completed history replay",
+	pm.logger.Info(ctx, "resumed from checkpoint and completed history replay",
 		logging.String("projection", projectionName),
 		logging.Int64("replayed_events", replayed))
 
@@ -333,7 +334,7 @@ func (pm *ProjectionManager) applyReplayEvent(ctx context.Context, projectionNam
 		}
 
 		// 记录重试日志，便于生产环境排查
-		projectionLogger().Warn(ctx, "projection replay event retry",
+		pm.logger.Warn(ctx, "projection replay event retry",
 			logging.String("projection", projectionName),
 			logging.String("event_id", evt.GetID()),
 			logging.Int("attempt", attempt+1), // retry attempt number (starting from 1)
@@ -386,7 +387,7 @@ func (pm *ProjectionManager) applyReplayEvent(ctx context.Context, projectionNam
 
 	if checkpointStore != nil && checkpointNeeded && statusCopy != nil {
 		if saveErr := checkpointStore.Save(ctx, NewCheckpoint(projectionName, processedEvents, lastEventID, lastEventTime)); saveErr != nil {
-			projectionLogger().Warn(ctx, "failed to save checkpoint", logging.Error(saveErr),
+			pm.logger.Warn(ctx, "failed to save checkpoint", logging.Error(saveErr),
 				logging.String("projection", projectionName))
 		}
 	}
@@ -413,7 +414,7 @@ func (pm *ProjectionManager) ResumeAllFromCheckpoint(ctx context.Context) error 
 
 	for _, name := range names {
 		if err := pm.ResumeFromCheckpoint(ctx, name); err != nil {
-			projectionLogger().Error(ctx, "failed to resume projection", logging.Error(err),
+			pm.logger.Error(ctx, "failed to resume projection", logging.Error(err),
 				logging.String("projection", name))
 			// continue resuming other projections
 		}
@@ -471,7 +472,7 @@ func (pm *ProjectionManager) RegisterProjectionWithContext(ctx context.Context, 
 			delete(pm.handlers, name)
 			for t, h := range subscribedHandlers {
 				if unSubErr := pm.eventBus.UnsubscribeEvent(ctx, t, h); unSubErr != nil {
-					projectionLogger().Warn(ctx, "failed to unsubscribe during rollback", logging.Error(unSubErr),
+					pm.logger.Warn(ctx, "failed to unsubscribe during rollback", logging.Error(unSubErr),
 						logging.String("projection", name), logging.String("event_type", t))
 				}
 			}
@@ -480,7 +481,7 @@ func (pm *ProjectionManager) RegisterProjectionWithContext(ctx context.Context, 
 		subscribedHandlers[eventType] = handler
 	}
 
-	projectionLogger().Info(ctx, "projection registered", logging.String("projection", name))
+	pm.logger.Info(ctx, "projection registered", logging.String("projection", name))
 	return nil
 }
 
@@ -509,14 +510,14 @@ func (pm *ProjectionManager) UnregisterProjectionWithContext(ctx context.Context
 			handler = pm.handlers[name][eventType]
 		}
 		if handler == nil {
-			projectionLogger().Warn(ctx, "registered handler instance not found, unsubscribe may fail",
+			pm.logger.Warn(ctx, "registered handler instance not found, unsubscribe may fail",
 				logging.String("projection", name),
 				logging.String("event_type", eventType),
 			)
 		}
 
 		if err := pm.eventBus.UnsubscribeEvent(ctx, eventType, handler); err != nil {
-			projectionLogger().Warn(ctx, "failed to unsubscribe from event", logging.Error(err),
+			pm.logger.Warn(ctx, "failed to unsubscribe from event", logging.Error(err),
 				logging.String("event_type", eventType),
 				logging.String("projection", name),
 			)
@@ -531,7 +532,7 @@ func (pm *ProjectionManager) UnregisterProjectionWithContext(ctx context.Context
 	delete(pm.statuses, name)
 	delete(pm.handlers, name)
 
-	projectionLogger().Info(ctx, "projection unregistered", logging.String("projection", name))
+	pm.logger.Info(ctx, "projection unregistered", logging.String("projection", name))
 	return nil
 }
 
@@ -552,7 +553,7 @@ func (pm *ProjectionManager) StartProjection(name string) error {
 	status.Status = "running"
 	status.UpdatedAt = time.Now()
 
-	projectionLogger().Info(context.Background(), "projection started", logging.String("projection", name))
+	pm.logger.Info(context.TODO(), "projection started", logging.String("projection", name))
 	return nil
 }
 
@@ -573,7 +574,7 @@ func (pm *ProjectionManager) StopProjection(name string) error {
 	status.Status = "stopped"
 	status.UpdatedAt = time.Now()
 
-	projectionLogger().Info(context.Background(), "projection stopped", logging.String("projection", name))
+	pm.logger.Info(context.TODO(), "projection stopped", logging.String("projection", name))
 	return nil
 }
 
@@ -618,14 +619,14 @@ func (pm *ProjectionManager) RebuildProjection(ctx context.Context, name string,
 		return fmt.Errorf("projection %s not found", name)
 	}
 
-	projectionLogger().Info(ctx, "starting projection rebuild",
+	pm.logger.Info(ctx, "starting projection rebuild",
 		logging.String("projection", name),
 		logging.Int("events", len(events)))
 
 	// 清空检查点（如果已配置）
 	if checkpointStore != nil {
 		if err := checkpointStore.Delete(ctx, name); err != nil {
-			projectionLogger().Warn(ctx, "failed to delete checkpoint", logging.Error(err),
+			pm.logger.Warn(ctx, "failed to delete checkpoint", logging.Error(err),
 				logging.String("projection", name))
 			// continue rebuilding
 		}
@@ -662,12 +663,12 @@ func (pm *ProjectionManager) RebuildProjection(ctx context.Context, name string,
 		)
 
 		if err := checkpointStore.Save(ctx, checkpoint); err != nil {
-			projectionLogger().Warn(ctx, "failed to save checkpoint", logging.Error(err),
+			pm.logger.Warn(ctx, "failed to save checkpoint", logging.Error(err),
 				logging.String("projection", name))
 		}
 	}
 
-	projectionLogger().Info(ctx, "projection rebuild completed",
+	pm.logger.Info(ctx, "projection rebuild completed",
 		logging.String("projection", name),
 		logging.Int("events", len(events)))
 	return nil
@@ -739,7 +740,7 @@ func (h *projectionEventHandler) HandleEvent(ctx context.Context, event eventing
 		}
 
 		// 使用快照后的计数值进行日志记录，避免在无锁状态下访问共享状态
-		projectionLogger().Error(ctx, "projection failed to handle event", logging.Error(err),
+		h.manager.logger.Error(ctx, "projection failed to handle event", logging.Error(err),
 			logging.String("projection", name),
 			logging.String("event_type", event.GetType()),
 			logging.Int64("processed_events", processedEvents),
@@ -751,13 +752,13 @@ func (h *projectionEventHandler) HandleEvent(ctx context.Context, event eventing
 	// 自动保存检查点（如果已配置）
 	if checkpoint != nil && checkpointStore != nil {
 		if err := checkpointStore.Save(ctx, checkpoint); err != nil {
-			projectionLogger().Warn(ctx, "failed to save checkpoint", logging.Error(err),
+			h.manager.logger.Warn(ctx, "failed to save checkpoint", logging.Error(err),
 				logging.String("projection", name))
 			// don't interrupt event processing
 		}
 	}
 
-	projectionLogger().Debug(ctx, "projection handled event successfully",
+	h.manager.logger.Debug(ctx, "projection handled event successfully",
 		logging.String("event_type", event.GetType()),
 		logging.String("projection", name),
 	)

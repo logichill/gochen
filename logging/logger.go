@@ -34,6 +34,9 @@ type ILogger interface {
 
 	// WithFields 添加字段，返回新的Logger
 	WithFields(fields ...Field) ILogger
+
+	// WithField 添加单个字段，返回新的 Logger（语法糖）
+	WithField(key string, value any) ILogger
 }
 
 // Field 日志字段
@@ -187,6 +190,10 @@ func (l *StdLogger) WithFields(fields ...Field) ILogger {
 	}
 }
 
+func (l *StdLogger) WithField(key string, value any) ILogger {
+	return l.WithFields(Field{Key: key, Value: value})
+}
+
 // NoopLogger 空日志实现（用于测试）
 type NoopLogger struct{}
 
@@ -199,6 +206,7 @@ func (l *NoopLogger) Info(ctx context.Context, msg string, fields ...Field)  {}
 func (l *NoopLogger) Warn(ctx context.Context, msg string, fields ...Field)  {}
 func (l *NoopLogger) Error(ctx context.Context, msg string, fields ...Field) {}
 func (l *NoopLogger) WithFields(fields ...Field) ILogger                     { return l }
+func (l *NoopLogger) WithField(key string, value any) ILogger                { return l }
 
 // 全局Logger
 var globalLogger ILogger = NewStdLogger("")

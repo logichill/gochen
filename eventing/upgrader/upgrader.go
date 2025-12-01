@@ -36,7 +36,7 @@ type UpgradeChain struct {
 func NewUpgradeChain() *UpgradeChain {
 	return &UpgradeChain{
 		upgraders: make(map[string][]IEventUpgrader),
-		logger:    logging.GetLogger(),
+		logger:    logging.GetLogger().WithField("component", "eventing.upgrader"),
 	}
 }
 
