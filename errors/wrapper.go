@@ -10,21 +10,13 @@ import (
 
 // Wrap 包装错误，添加错误码和上下文信息
 // 建议：在Service/Handler层边界使用，添加业务上下文
-func Wrap(ctx context.Context, err error, code ErrorCode, msg string) error {
+func Wrap(_ context.Context, err error, code ErrorCode, msg string) error {
 	if err == nil {
 		return nil
 	}
 
-	// 获取调用位置（简化版，不追踪完整调用栈）
-	_, file, line, _ := runtime.Caller(1)
-
-	// 创建增强错误
-	wrapped := WrapError(err, code, msg)
-
-	// 记录错误日志（避免重复记录，使用Debug级别）
-	logging.GetLogger().Debug(ctx, fmt.Sprintf("错误包装: %s (位置: %s:%d)", msg, file, line))
-
-	return wrapped
+	// 仅包装错误，不做隐式日志记录
+	return WrapError(err, code, msg)
 }
 
 // WrapWithLog 包装错误并记录警告日志
@@ -66,7 +58,7 @@ func WrapDatabaseError(ctx context.Context, err error, operation string) error {
 
 	// 其他数据库错误
 	return WrapWithLog(ctx, err, ErrCodeDatabase,
-		fmt.Sprintf("数据库操作失败: %s", operation),
+		fmt.Sprintf("database operation failed: %s", operation),
 		logging.String("operation", operation),
 	)
 }
@@ -74,7 +66,7 @@ func WrapDatabaseError(ctx context.Context, err error, operation string) error {
 // New 创建新错误（带调用位置）
 func New(code ErrorCode, msg string) error {
 	_, file, line, _ := runtime.Caller(1)
-	enhancedMsg := fmt.Sprintf("%s (位置: %s:%d)", msg, file, line)
+	enhancedMsg := fmt.Sprintf("%s (location: %s:%d)", msg, file, line)
 	return NewError(code, enhancedMsg)
 }
 
