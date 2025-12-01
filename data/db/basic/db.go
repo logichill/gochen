@@ -48,10 +48,50 @@ func New(config core.DBConfig) (core.IDatabase, error) {
 		db.SetConnMaxIdleTime(time.Duration(config.ConnMaxIdleTime) * time.Second)
 	}
 
+	return NewWithContext(context.Background(), config)
+}
+
+// NewWithContext 根据 core.DBConfig 创建基础数据库实例，并允许调用方提供初始化上下文。
+//
+// 说明：
+//   - ctx 用于 `PingContext` 的超时与取消控制；
+//   - 若 ctx 为 nil，则使用 context.Background() 作为根上下文。
+func NewWithContext(ctx context.Context, config core.DBConfig) (core.IDatabase, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	var (
+		driver = config.Driver
+		dsn    = config.Database
+	)
+	if driver == "" {
+		driver = "sqlite"
+	}
+
+	db, err := sql.Open(driver, dsn)
+	if err != nil {
+		return nil, err
+	}
+
+	// 连接池配置（可选）
+	if config.MaxOpenConns > 0 {
+		db.SetMaxOpenConns(config.MaxOpenConns)
+	}
+	if config.MaxIdleConns > 0 {
+		db.SetMaxIdleConns(config.MaxIdleConns)
+	}
+	if config.ConnMaxLifetime > 0 {
+		db.SetConnMaxLifetime(time.Duration(config.ConnMaxLifetime) * time.Second)
+	}
+	if config.ConnMaxIdleTime > 0 {
+		db.SetConnMaxIdleTime(time.Duration(config.ConnMaxIdleTime) * time.Second)
+	}
+
 	// 基础可用性检查
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	pingCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	if err := db.PingContext(ctx); err != nil {
+	if err := db.PingContext(pingCtx); err != nil {
 		_ = db.Close()
 		return nil, err
 	}

@@ -101,7 +101,7 @@ func (m *Manager) Run(ctx context.Context) error {
 	var runErr error
 	select {
 	case <-ctx.Done():
-		m.logger.Info(context.Background(), "shutdown signal received")
+		m.logger.Info(ctx, "shutdown signal received")
 	case err := <-errCh:
 		runErr = err
 		cancel()
