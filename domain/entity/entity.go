@@ -81,13 +81,13 @@ type IAuditedEntity[T comparable] interface {
 	IValidatable
 }
 
-// StringEntity 字符串 ID 类型的审计实体
-type StringEntity interface {
+// IStringEntity 字符串 ID 类型的审计实体
+type IStringEntity interface {
 	IAuditedEntity[string]
 }
 
-// Int64Entity 整数 ID 类型的审计实体
-type Int64Entity interface {
+// IInt64Entity 整数 ID 类型的审计实体
+type IInt64Entity interface {
 	IAuditedEntity[int64]
 }
 

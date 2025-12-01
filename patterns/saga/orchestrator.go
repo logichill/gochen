@@ -12,7 +12,7 @@ import (
 	"gochen/messaging/command"
 )
 
-func sagaLogger() logging.Logger {
+func sagaLogger() logging.ILogger {
 	return logging.GetLogger().WithFields(
 		logging.String("component", "saga.orchestrator"),
 	)

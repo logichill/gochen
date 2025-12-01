@@ -15,7 +15,7 @@ import (
 	"gochen/messaging/command"
 )
 
-func bridgeLogger() logging.Logger {
+func bridgeLogger() logging.ILogger {
 	return logging.GetLogger().WithFields(
 		logging.String("component", "bridge.http"),
 	)

@@ -97,9 +97,9 @@ func NewCommandBus(messageBus messaging.IMessageBus, config *CommandBusConfig) *
 		handlers:   make(map[string]messaging.IMessageHandler),
 	}
 
-	// 尝试探测底层 Transport 类型，以便给出更明确的错误语义告警
+	// 尝试探测底层 ITransport 类型，以便给出更明确的错误语义告警
 	type transportProvider interface {
-		GetTransport() messaging.Transport
+		GetTransport() messaging.ITransport
 	}
 
 	if provider, ok := messageBus.(transportProvider); ok {

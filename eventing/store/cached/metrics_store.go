@@ -8,8 +8,8 @@ import (
 	estore "gochen/eventing/store"
 )
 
-// MetricsRecorder 抽象化的指标记录器，便于对接 Prometheus 或自定义埋点
-type MetricsRecorder interface {
+// IMetricsRecorder 抽象化的指标记录器，便于对接 Prometheus 或自定义埋点
+type IMetricsRecorder interface {
 	RecordAppend(count int, d time.Duration, err bool)
 	RecordLoad(count int, d time.Duration, err bool)
 	RecordStream(count int, d time.Duration, err bool)
@@ -18,10 +18,10 @@ type MetricsRecorder interface {
 // MetricsEventStore 为任意 EventStore 增加简单的指标记录
 type MetricsEventStore struct {
 	inner estore.IEventStore
-	mr    MetricsRecorder
+	mr    IMetricsRecorder
 }
 
-func NewMetricsEventStore(inner estore.IEventStore, mr MetricsRecorder) *MetricsEventStore {
+func NewMetricsEventStore(inner estore.IEventStore, mr IMetricsRecorder) *MetricsEventStore {
 	return &MetricsEventStore{inner: inner, mr: mr}
 }
 

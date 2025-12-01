@@ -42,12 +42,12 @@ func New(name string) Dialect {
 
 // FromDatabase 从 IDatabase 实例推断方言
 //
-// 需要 IDatabase 可选实现 DialectNameProvider 接口；否则返回 Unknown。
+// 需要 IDatabase 可选实现 IDialectNameProvider 接口；否则返回 Unknown。
 func FromDatabase(db core.IDatabase) Dialect {
 	if db == nil {
 		return Dialect{name: NameUnknown}
 	}
-	if p, ok := db.(core.DialectNameProvider); ok {
+	if p, ok := db.(core.IDialectNameProvider); ok {
 		return New(p.GetDialectName())
 	}
 	return Dialect{name: NameUnknown}

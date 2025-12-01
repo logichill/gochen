@@ -24,7 +24,7 @@ import (
 type OutboxAwareRepository[T entity.IEventSourcedAggregate[int64]] struct {
 	base   *EventSourcedRepository[T]
 	outbox outbox.IOutboxRepository
-	logger logging.Logger
+	logger logging.ILogger
 }
 
 // NewOutboxAwareRepository 创建 Outbox 装饰器

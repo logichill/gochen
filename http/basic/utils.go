@@ -14,14 +14,14 @@ type HttpUtils struct{}
 func (u *HttpUtils) ParseID(ctx httpx.IHttpContext, paramName string) (int64, error) {
 	idStr := ctx.GetParam(paramName)
 	if idStr == "" {
-		return 0, errors.NewError(errors.ErrCodeInvalidInput, fmt.Sprintf("参数 %s 不能为空", paramName))
+		return 0, errors.NewError(errors.ErrCodeInvalidInput, fmt.Sprintf("parameter %s cannot be empty", paramName))
 	}
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
-		return 0, errors.WrapError(err, errors.ErrCodeInvalidInput, fmt.Sprintf("参数 %s 必须是有效的整数", paramName))
+		return 0, errors.WrapError(err, errors.ErrCodeInvalidInput, fmt.Sprintf("parameter %s must be a valid integer", paramName))
 	}
 	if id <= 0 {
-		return 0, errors.NewError(errors.ErrCodeInvalidInput, fmt.Sprintf("参数 %s 必须大于0", paramName))
+		return 0, errors.NewError(errors.ErrCodeInvalidInput, fmt.Sprintf("parameter %s must be greater than 0", paramName))
 	}
 	return id, nil
 }
@@ -37,11 +37,11 @@ func (u *HttpUtils) ParsePagination(ctx httpx.IHttpContext) (*httpx.ListRequest,
 	}
 	page, err := strconv.Atoi(pageStr)
 	if err != nil || page <= 0 {
-		return nil, errors.NewError(errors.ErrCodeInvalidInput, "页码必须是大于0的整数")
+		return nil, errors.NewError(errors.ErrCodeInvalidInput, "page number must be a positive integer")
 	}
 	pageSize, err := strconv.Atoi(pageSizeStr)
 	if err != nil || pageSize <= 0 || pageSize > 1000 {
-		return nil, errors.NewError(errors.ErrCodeInvalidInput, "页大小必须是1-1000之间的整数")
+		return nil, errors.NewError(errors.ErrCodeInvalidInput, "page size must be between 1 and 1000")
 	}
 	req := httpx.NewListRequest(page, pageSize)
 	if sortBy := ctx.GetQuery("sort_by"); sortBy != "" {

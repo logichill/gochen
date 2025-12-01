@@ -24,7 +24,7 @@ type EventSourcedHandlerOption[T any] struct {
 	Decoder     func(event eventing.Event) (T, error)
 	Handle      func(ctx context.Context, payload T) error
 	RetryPolicy RetryPolicy
-	Logger      logging.Logger
+	Logger      logging.ILogger
 }
 
 // EventSourcedTypedHandler 泛型事件处理模板
@@ -34,7 +34,7 @@ type EventSourcedTypedHandler[T any] struct {
 	decoder   func(event eventing.Event) (T, error)
 	handle    func(ctx context.Context, payload T) error
 	retry     RetryPolicy
-	logger    logging.Logger
+	logger    logging.ILogger
 }
 
 // NewEventSourcedTypedHandler 创建泛型事件处理器

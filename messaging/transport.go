@@ -5,7 +5,7 @@ import (
 	"context"
 )
 
-// Transport 消息传输接口
+// ITransport 消息传输接口
 //
 // 语义约定：
 //   - Publish/PublishAll 返回的 error 只代表“传输层本身”的错误（连接失败、队列已满、未 Start 等）；
@@ -14,7 +14,7 @@ import (
 //   - 对于同步实现（如 transport/sync），Publish/PublishAll 可能会在同一调用中直接执行所有处理器，并将其错误聚合到返回值中。
 //
 // 调用方应将非 nil error 视为“消息未成功交给传输层”的信号；业务级错误建议通过消息载荷或领域层约定返回，而不是依赖 Transport 的 error。
-type Transport interface {
+type ITransport interface {
 	Publish(ctx context.Context, message IMessage) error
 	PublishAll(ctx context.Context, messages []IMessage) error
 	Subscribe(messageType string, handler IMessageHandler) error

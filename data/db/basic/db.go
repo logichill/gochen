@@ -101,7 +101,7 @@ func (d *DB) Ping(ctx context.Context) error { return d.db.PingContext(ctx) }
 func (d *DB) Close() error                   { return d.db.Close() }
 func (d *DB) Raw() any                       { return d.db }
 
-// GetDialectName 实现 core.DialectNameProvider 接口，返回底层 driver 名
+// GetDialectName 实现 core.IDialectNameProvider 接口，返回底层 driver 名
 func (d *DB) GetDialectName() string {
 	return d.driver
 }

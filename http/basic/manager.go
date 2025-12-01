@@ -12,8 +12,8 @@ import (
 	"gochen/logging"
 )
 
-// Server 通用服务生命周期接口（供 Manager 管理）
-type Server interface {
+// IServer 通用服务生命周期接口（供 Manager 管理）
+type IServer interface {
 	Start(ctx context.Context) error
 	Close() error
 	Name() string
@@ -24,11 +24,11 @@ type Options struct {
 	ShutdownTimeout time.Duration
 }
 
-// Manager 统一管理多个 Server 的生命周期（启动/关闭/优雅退出）
+// Manager 统一管理多个 IServer 的生命周期（启动/关闭/优雅退出）
 type Manager struct {
 	Container *di.Container
-	logger    logging.Logger
-	servers   []Server
+	logger    logging.ILogger
+	servers   []IServer
 	opts      Options
 }
 
@@ -37,13 +37,13 @@ func NewManager() *Manager {
 	return &Manager{
 		Container: di.New(),
 		logger:    logging.GetLogger(),
-		servers:   make([]Server, 0),
+		servers:   make([]IServer, 0),
 		opts:      Options{ShutdownTimeout: 10 * time.Second},
 	}
 }
 
 // WithLogger 设置日志实现
-func (m *Manager) WithLogger(l logging.Logger) *Manager {
+func (m *Manager) WithLogger(l logging.ILogger) *Manager {
 	if l != nil {
 		m.logger = l
 		logging.SetLogger(l)
@@ -52,13 +52,13 @@ func (m *Manager) WithLogger(l logging.Logger) *Manager {
 }
 
 // WithServers 批量注册 Server
-func (m *Manager) WithServers(svcs ...Server) *Manager {
+func (m *Manager) WithServers(svcs ...IServer) *Manager {
 	m.servers = append(m.servers, svcs...)
 	return m
 }
 
 // Register 注册单个 Server
-func (m *Manager) Register(s Server) *Manager { return m.WithServers(s) }
+func (m *Manager) Register(s IServer) *Manager { return m.WithServers(s) }
 
 // WithShutdownTimeout 配置优雅退出超时
 func (m *Manager) WithShutdownTimeout(d time.Duration) *Manager {

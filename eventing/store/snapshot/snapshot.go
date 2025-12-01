@@ -9,7 +9,7 @@ import (
 	"gochen/logging"
 )
 
-func snapshotLogger() logging.Logger {
+func snapshotLogger() logging.ILogger {
 	return logging.GetLogger().WithFields(
 		logging.String("component", "eventstore.snapshot"),
 	)
@@ -25,8 +25,8 @@ type Snapshot struct {
 	Metadata      map[string]any `json:"metadata,omitempty"`
 }
 
-// Store 快照存储接口
-type Store interface {
+// ISnapshotStore 快照存储接口
+type ISnapshotStore interface {
 	SaveSnapshot(ctx context.Context, snapshot Snapshot) error
 	GetSnapshot(ctx context.Context, aggregateType string, aggregateID int64) (*Snapshot, error)
 	DeleteSnapshot(ctx context.Context, aggregateType string, aggregateID int64) error

@@ -29,7 +29,7 @@ func (r *Repo[T]) Query(ctx context.Context, opts srepo.QueryOptions) ([]T, erro
 		q = q.Limit(opts.Limit)
 	}
 	if err := q.Find(&entities); err != nil {
-		return nil, errors.WrapError(err, errors.ErrCodeDatabase, "通用查询失败")
+		return nil, errors.WrapError(err, errors.ErrCodeDatabase, "failed to execute query")
 	}
 	return entities, nil
 }
@@ -51,9 +51,9 @@ func (r *Repo[T]) QueryOne(ctx context.Context, opts srepo.QueryOptions) (T, err
 	var zero T
 	if err != nil {
 		if ers.Is(err, orm.ErrNotFound) {
-			return zero, errors.NewError(errors.ErrCodeNotFound, "记录不存在")
+			return zero, errors.NewError(errors.ErrCodeNotFound, "record not found")
 		}
-		return zero, errors.WrapError(err, errors.ErrCodeDatabase, "查询单条记录失败")
+		return zero, errors.WrapError(err, errors.ErrCodeDatabase, "failed to query single record")
 	}
 	return entity, nil
 }
@@ -69,7 +69,7 @@ func (r *Repo[T]) QueryCount(ctx context.Context, opts srepo.QueryOptions) (int6
 	}
 	count, err := q.Count()
 	if err != nil {
-		return 0, errors.WrapError(err, errors.ErrCodeDatabase, "统计数量失败")
+		return 0, errors.WrapError(err, errors.ErrCodeDatabase, "failed to count records")
 	}
 	return count, nil
 }

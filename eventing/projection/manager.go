@@ -13,7 +13,7 @@ import (
 	"gochen/messaging"
 )
 
-func projectionLogger() logging.Logger {
+func projectionLogger() logging.ILogger {
 	return logging.GetLogger().WithFields(
 		logging.String("component", "projection.manager"),
 	)

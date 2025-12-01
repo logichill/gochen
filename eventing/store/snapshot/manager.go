@@ -15,10 +15,10 @@ import (
 
 // Manager 快照管理器
 type Manager struct {
-	snapshotStore Store
+	snapshotStore ISnapshotStore
 	eventStore    store.IEventStore
 	config        *Config
-	strategy      Strategy // 快照策略
+	strategy      ISnapshotStrategy // 快照策略
 	mutex         sync.RWMutex
 }
 
@@ -36,7 +36,7 @@ func DefaultConfig() *Config {
 }
 
 // NewManager 创建快照管理器
-func NewManager(snapshotStore Store, eventStore store.IEventStore, config *Config) *Manager {
+func NewManager(snapshotStore ISnapshotStore, eventStore store.IEventStore, config *Config) *Manager {
 	if config == nil {
 		config = DefaultConfig()
 	}
@@ -45,14 +45,14 @@ func NewManager(snapshotStore Store, eventStore store.IEventStore, config *Confi
 }
 
 // SetStrategy 设置快照策略
-func (sm *Manager) SetStrategy(strategy Strategy) {
+func (sm *Manager) SetStrategy(strategy ISnapshotStrategy) {
 	sm.mutex.Lock()
 	sm.strategy = strategy
 	sm.mutex.Unlock()
 }
 
 // GetStrategy 获取当前快照策略
-func (sm *Manager) GetStrategy() Strategy {
+func (sm *Manager) GetStrategy() ISnapshotStrategy {
 	sm.mutex.RLock()
 	defer sm.mutex.RUnlock()
 	return sm.strategy

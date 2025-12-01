@@ -6,8 +6,8 @@ import (
 	"sync"
 )
 
-// EventUpgrader 定义事件模式升级器接口
-type EventUpgrader interface {
+// IEventUpgrader 定义事件模式升级器接口
+type IEventUpgrader interface {
 	// FromVersion 源模式版本
 	FromVersion() int
 	// ToVersion 目标模式版本
@@ -17,16 +17,16 @@ type EventUpgrader interface {
 }
 
 type upgraderRegistry struct {
-	upgraders map[string][]EventUpgrader
+	upgraders map[string][]IEventUpgrader
 	mutex     sync.RWMutex
 }
 
 var globalUpgraderRegistry = &upgraderRegistry{
-	upgraders: make(map[string][]EventUpgrader),
+	upgraders: make(map[string][]IEventUpgrader),
 }
 
 // RegisterEventUpgrader 为指定事件类型注册升级器
-func RegisterEventUpgrader(eventType string, upgrader EventUpgrader) error {
+func RegisterEventUpgrader(eventType string, upgrader IEventUpgrader) error {
 	if eventType == "" {
 		return fmt.Errorf("event type cannot be empty")
 	}
@@ -59,7 +59,7 @@ func RegisterEventUpgrader(eventType string, upgrader EventUpgrader) error {
 }
 
 // MustRegisterEventUpgrader 注册事件升级器（失败 panic）
-func MustRegisterEventUpgrader(eventType string, upgrader EventUpgrader) {
+func MustRegisterEventUpgrader(eventType string, upgrader IEventUpgrader) {
 	if err := RegisterEventUpgrader(eventType, upgrader); err != nil {
 		panic(err)
 	}
@@ -79,7 +79,7 @@ func UpgradeEventData(eventType string, currentVersion int, data map[string]any)
 	}
 
 	globalUpgraderRegistry.mutex.RLock()
-	upgraders := append([]EventUpgrader(nil), globalUpgraderRegistry.upgraders[eventType]...)
+	upgraders := append([]IEventUpgrader(nil), globalUpgraderRegistry.upgraders[eventType]...)
 	globalUpgraderRegistry.mutex.RUnlock()
 
 	if len(upgraders) == 0 {
@@ -105,7 +105,7 @@ func UpgradeEventData(eventType string, currentVersion int, data map[string]any)
 	return result, version, nil
 }
 
-func findNextUpgrader(upgraders []EventUpgrader, fromVersion int) EventUpgrader {
+func findNextUpgrader(upgraders []IEventUpgrader, fromVersion int) IEventUpgrader {
 	for _, upgrader := range upgraders {
 		if upgrader.FromVersion() == fromVersion {
 			return upgrader

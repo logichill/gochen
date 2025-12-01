@@ -18,11 +18,11 @@ import (
 	"gochen/messaging/transport/memory"
 )
 
-// RouteRegistrar 约定的路由注册器接口。
+// IRouteRegistrar 约定的路由注册器接口。
 //
 // gochen-iam / gochen-llm 等模块中的路由构造器只要实现了这三个方法，
 // 就可以被 Server 自动发现并挂载到 HTTP 路由树上。
-type RouteRegistrar interface {
+type IRouteRegistrar interface {
 	RegisterRoutes(group httpx.IRouteGroup)
 	GetName() string
 	GetPriority() int
@@ -156,7 +156,7 @@ type Server struct {
 	httpServer httpx.IHttpServer
 	eventBus   bus.IEventBus
 
-	transport         messaging.Transport
+	transport         messaging.ITransport
 	projectionManager *projection.ProjectionManager
 	projectionNames   []string
 }
@@ -346,7 +346,7 @@ func (s *Server) ensureEventBus() error {
 	s.transport = mt
 	s.eventBus = bus.NewEventBus(msgBus)
 
-	_ = registerInstanceByType(s.container, (*messaging.Transport)(nil), mt)
+	_ = registerInstanceByType(s.container, (*messaging.ITransport)(nil), mt)
 	_ = registerInstanceByType(s.container, (*messaging.IMessageBus)(nil), msgBus)
 	_ = registerInstanceByType(s.container, (*bus.IEventBus)(nil), s.eventBus)
 
@@ -411,20 +411,20 @@ func (s *Server) registerRoutes() {
 }
 
 // collectRouteRegistrars 遍历容器中所有服务，筛选出实现 RouteRegistrar 的实例并按优先级排序。
-func (s *Server) collectRouteRegistrars() []RouteRegistrar {
+func (s *Server) collectRouteRegistrars() []IRouteRegistrar {
 	if s.container == nil {
 		return nil
 	}
 
 	names := s.container.GetRegisteredNames()
-	registrars := make([]RouteRegistrar, 0)
+	registrars := make([]IRouteRegistrar, 0)
 
 	for _, name := range names {
 		inst, err := s.container.Resolve(name)
 		if err != nil {
 			continue
 		}
-		if r, ok := inst.(RouteRegistrar); ok {
+		if r, ok := inst.(IRouteRegistrar); ok {
 			registrars = append(registrars, r)
 		}
 	}

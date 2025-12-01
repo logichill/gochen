@@ -33,11 +33,11 @@ type IDatabase interface {
 	Raw() any
 }
 
-// DialectNameProvider 可选接口：提供底层数据库方言名称
+// IDialectNameProvider 可选接口：提供底层数据库方言名称
 //
 // 实现方应返回诸如 "mysql"、"sqlite"、"postgres" 等 driver/dialect 名，
 // 供 shared 层推断方言能力（如 DELETE LIMIT、唯一键错误识别等）。
-type DialectNameProvider interface {
+type IDialectNameProvider interface {
 	// GetDialectName 返回底层数据库方言名称
 	GetDialectName() string
 }
@@ -70,14 +70,14 @@ type IRow interface {
 	Err() error
 }
 
-// QueryBuilder 查询构建器接口（可选，用于复杂查询）
-type QueryBuilder interface {
-	Select(columns ...string) QueryBuilder
-	From(table string) QueryBuilder
-	Where(condition string, args ...any) QueryBuilder
-	OrderBy(column string, desc bool) QueryBuilder
-	Limit(limit int) QueryBuilder
-	Offset(offset int) QueryBuilder
+// IQueryBuilder 查询构建器接口（可选，用于复杂查询）
+type IQueryBuilder interface {
+	Select(columns ...string) IQueryBuilder
+	From(table string) IQueryBuilder
+	Where(condition string, args ...any) IQueryBuilder
+	OrderBy(column string, desc bool) IQueryBuilder
+	Limit(limit int) IQueryBuilder
+	Offset(offset int) IQueryBuilder
 
 	Build() (query string, args []any)
 }

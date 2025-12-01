@@ -249,5 +249,5 @@ func (s *SQLStore) CleanupSnapshots(ctx context.Context, retentionPeriod time.Du
 	return nil
 }
 
-// 确保 SQLStore 实现 Store 接口
-var _ Store = (*SQLStore)(nil)
+// 确保 SQLStore 实现 ISnapshotStore 接口
+var _ ISnapshotStore = (*SQLStore)(nil)

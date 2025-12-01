@@ -352,7 +352,7 @@ type IMessageHandler interface {
 
 ### 8.1 日志（`logging`）
 
-定义统一的 `logging.Logger` 接口与基础实现，所有核心组件（eventing、messaging、saga 等）通过该接口输出结构化日志，便于统一接入实际日志后台。
+定义统一的 `logging.ILogger` 接口与基础实现，所有核心组件（eventing、messaging、saga 等）通过该接口输出结构化日志，便于统一接入实际日志后台。
 
 ### 8.2 监控（`eventing/monitoring`、传输 stats 等）
 

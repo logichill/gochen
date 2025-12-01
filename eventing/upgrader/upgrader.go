@@ -10,8 +10,8 @@ import (
 	"gochen/logging"
 )
 
-// EventUpgrader 事件升级器接口
-type EventUpgrader interface {
+// IEventUpgrader 事件升级器接口
+type IEventUpgrader interface {
 	// Upgrade 升级事件
 	Upgrade(ctx context.Context, event eventing.Event) (eventing.Event, error)
 
@@ -27,21 +27,21 @@ type EventUpgrader interface {
 
 // UpgradeChain 升级链
 type UpgradeChain struct {
-	upgraders map[string][]EventUpgrader // eventType -> upgraders
-	logger    logging.Logger
+	upgraders map[string][]IEventUpgrader // eventType -> upgraders
+	logger    logging.ILogger
 	mutex     sync.RWMutex
 }
 
 // NewUpgradeChain 创建升级链
 func NewUpgradeChain() *UpgradeChain {
 	return &UpgradeChain{
-		upgraders: make(map[string][]EventUpgrader),
+		upgraders: make(map[string][]IEventUpgrader),
 		logger:    logging.GetLogger(),
 	}
 }
 
 // Register 注册升级器
-func (c *UpgradeChain) Register(upgrader EventUpgrader) error {
+func (c *UpgradeChain) Register(upgrader IEventUpgrader) error {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
@@ -123,7 +123,7 @@ func (c *UpgradeChain) UpgradeAll(ctx context.Context, events []eventing.Event) 
 var globalChain = NewUpgradeChain()
 
 // RegisterGlobal 注册到全局升级链
-func RegisterGlobal(upgrader EventUpgrader) error {
+func RegisterGlobal(upgrader IEventUpgrader) error {
 	return globalChain.Register(upgrader)
 }
 

@@ -13,7 +13,7 @@ func (r *Repo[T]) Add(ctx context.Context, entity T) error {
 		return err
 	}
 	if err := r.query(ctx).Create(entity); err != nil {
-		return errors.WrapError(err, errors.ErrCodeDatabase, "保存记录失败")
+		return errors.WrapError(err, errors.ErrCodeDatabase, "failed to save record")
 	}
 	return nil
 }
@@ -26,7 +26,7 @@ func (r *Repo[T]) Update(ctx context.Context, entity T) error {
 	if err := r.query(ctx).
 		Where("id = ? AND deleted_at IS NULL", entity.GetID()).
 		Save(entity); err != nil {
-		return errors.WrapError(err, errors.ErrCodeDatabase, "更新记录失败")
+		return errors.WrapError(err, errors.ErrCodeDatabase, "failed to update record")
 	}
 	return nil
 }
@@ -37,7 +37,7 @@ func (r *Repo[T]) Delete(ctx context.Context, id int64) error {
 	if err := r.query(ctx).
 		Where("id = ? AND deleted_at IS NULL", id).
 		UpdateValues(map[string]any{"deleted_at": now}); err != nil {
-		return errors.WrapError(err, errors.ErrCodeDatabase, "删除记录失败")
+		return errors.WrapError(err, errors.ErrCodeDatabase, "failed to delete record")
 	}
 	return nil
 }
@@ -57,7 +57,7 @@ func (r *Repo[T]) AddAll(ctx context.Context, entities []T) error {
 		items[i] = entities[i]
 	}
 	if err := r.query(ctx).Create(items...); err != nil {
-		return errors.WrapError(err, errors.ErrCodeDatabase, "批量保存记录失败")
+		return errors.WrapError(err, errors.ErrCodeDatabase, "failed to batch save records")
 	}
 	return nil
 }
@@ -73,7 +73,7 @@ func (r *Repo[T]) UpdateAll(ctx context.Context, entities []T) error {
 		if err := r.query(ctx).
 			Where("id = ? AND deleted_at IS NULL", entity.GetID()).
 			Save(entity); err != nil {
-			return errors.WrapError(err, errors.ErrCodeDatabase, "批量更新记录失败")
+			return errors.WrapError(err, errors.ErrCodeDatabase, "failed to batch update records")
 		}
 	}
 	return nil
@@ -87,7 +87,7 @@ func (r *Repo[T]) DeleteAll(ctx context.Context, ids []int64) error {
 	if err := r.query(ctx).
 		Where("id IN ? AND deleted_at IS NULL", ids).
 		UpdateValues(map[string]any{"deleted_at": now}); err != nil {
-		return errors.WrapError(err, errors.ErrCodeDatabase, "批量删除记录失败")
+		return errors.WrapError(err, errors.ErrCodeDatabase, "failed to batch delete records")
 	}
 	return nil
 }

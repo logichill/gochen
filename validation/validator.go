@@ -36,11 +36,11 @@ func ValidateStringLength(value, fieldName string, min, max int) error {
 	length := len(value)
 	if length < min {
 		return errors.NewError(errors.ErrCodeValidation,
-			fmt.Sprintf("%s长度不能少于%d个字符（当前%d）", fieldName, min, length))
+			fmt.Sprintf("%s length must be at least %d characters (current %d)", fieldName, min, length))
 	}
 	if max > 0 && length > max {
 		return errors.NewError(errors.ErrCodeValidation,
-			fmt.Sprintf("%s长度不能超过%d个字符（当前%d）", fieldName, max, length))
+			fmt.Sprintf("%s length must be at most %d characters (current %d)", fieldName, max, length))
 	}
 	return nil
 }
@@ -49,7 +49,7 @@ func ValidateStringLength(value, fieldName string, min, max int) error {
 func ValidateRequired(value, fieldName string) error {
 	if strings.TrimSpace(value) == "" {
 		return errors.NewError(errors.ErrCodeValidation,
-			fmt.Sprintf("%s不能为空", fieldName))
+			fmt.Sprintf("%s cannot be empty", fieldName))
 	}
 	return nil
 }
@@ -58,11 +58,11 @@ func ValidateRequired(value, fieldName string) error {
 func ValidateIntRange(value int, fieldName string, min, max int) error {
 	if value < min {
 		return errors.NewError(errors.ErrCodeValidation,
-			fmt.Sprintf("%s不能小于%d（当前%d）", fieldName, min, value))
+			fmt.Sprintf("%s cannot be less than %d (current %d)", fieldName, min, value))
 	}
 	if value > max {
 		return errors.NewError(errors.ErrCodeValidation,
-			fmt.Sprintf("%s不能大于%d（当前%d）", fieldName, max, value))
+			fmt.Sprintf("%s cannot be greater than %d (current %d)", fieldName, max, value))
 	}
 	return nil
 }
@@ -71,7 +71,7 @@ func ValidateIntRange(value int, fieldName string, min, max int) error {
 func ValidatePositive(value int, fieldName string) error {
 	if value <= 0 {
 		return errors.NewError(errors.ErrCodeValidation,
-			fmt.Sprintf("%s必须为正数（当前%d）", fieldName, value))
+			fmt.Sprintf("%s must be positive (current %d)", fieldName, value))
 	}
 	return nil
 }
@@ -79,39 +79,39 @@ func ValidatePositive(value int, fieldName string) error {
 // ValidateEmail 验证邮箱格式
 func ValidateEmail(email string) error {
 	if email == "" {
-		return errors.NewError(errors.ErrCodeValidation, "邮箱不能为空")
+		return errors.NewError(errors.ErrCodeValidation, "email cannot be empty")
 	}
 
 	if !emailRegex.MatchString(email) {
-		return errors.NewError(errors.ErrCodeValidation, "邮箱格式不正确")
+		return errors.NewError(errors.ErrCodeValidation, "invalid email format")
 	}
 	return nil
 }
 
 // ValidateUsername 验证用户名
 func ValidateUsername(username string) error {
-	if err := ValidateRequired(username, "用户名"); err != nil {
+	if err := ValidateRequired(username, "username"); err != nil {
 		return err
 	}
 
-	if err := ValidateStringLength(username, "用户名", 3, 50); err != nil {
+	if err := ValidateStringLength(username, "username", 3, 50); err != nil {
 		return err
 	}
 
 	if !usernameRegex.MatchString(username) {
 		return errors.NewError(errors.ErrCodeValidation,
-			"用户名只能包含字母、数字和下划线")
+			"username can only contain letters, numbers and underscores")
 	}
 	return nil
 }
 
 // ValidatePassword 验证密码强度
 func ValidatePassword(password string) error {
-	if err := ValidateRequired(password, "密码"); err != nil {
+	if err := ValidateRequired(password, "password"); err != nil {
 		return err
 	}
 
-	if err := ValidateStringLength(password, "密码", 6, 100); err != nil {
+	if err := ValidateStringLength(password, "password", 6, 100); err != nil {
 		return err
 	}
 
@@ -126,19 +126,19 @@ func ValidateEnum(value, fieldName string, validValues []string) error {
 		}
 	}
 	return errors.NewError(errors.ErrCodeValidation,
-		fmt.Sprintf("%s的值无效，必须是以下之一: %v", fieldName, validValues))
+		fmt.Sprintf("invalid value for %s, must be one of: %v", fieldName, validValues))
 }
 
 // ValidatePageParams 验证分页参数
 func ValidatePageParams(page, pageSize int) error {
 	if page <= 0 {
-		return errors.NewError(errors.ErrCodeValidation, "页码必须大于0")
+		return errors.NewError(errors.ErrCodeValidation, "page number must be greater than 0")
 	}
 	if pageSize <= 0 {
-		return errors.NewError(errors.ErrCodeValidation, "每页大小必须大于0")
+		return errors.NewError(errors.ErrCodeValidation, "page size must be greater than 0")
 	}
 	if pageSize > 100 {
-		return errors.NewError(errors.ErrCodeValidation, "每页大小不能超过100")
+		return errors.NewError(errors.ErrCodeValidation, "page size must not exceed 100")
 	}
 	return nil
 }
@@ -147,7 +147,7 @@ func ValidatePageParams(page, pageSize int) error {
 func ValidateID(id int64, fieldName string) error {
 	if id <= 0 {
 		return errors.NewError(errors.ErrCodeValidation,
-			fmt.Sprintf("%s必须为正整数", fieldName))
+			fmt.Sprintf("%s must be a positive integer", fieldName))
 	}
 	return nil
 }

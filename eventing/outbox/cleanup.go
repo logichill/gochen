@@ -69,7 +69,7 @@ type CleanupService struct {
 	db      database.IDatabase
 	dialect dialect.Dialect
 	policy  CleanupPolicy
-	log     logging.Logger
+	log     logging.ILogger
 }
 
 // CleanupResult 清理结果
@@ -91,7 +91,7 @@ type CleanupResult struct {
 func NewCleanupService(
 	db database.IDatabase,
 	policy CleanupPolicy,
-	logger logging.Logger,
+	logger logging.ILogger,
 ) *CleanupService {
 	if logger == nil {
 		logger = logging.GetLogger()

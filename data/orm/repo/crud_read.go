@@ -18,9 +18,9 @@ func (r *Repo[T]) Get(ctx context.Context, id int64) (T, error) {
 	var zero T
 	if err != nil {
 		if ers.Is(err, orm.ErrNotFound) {
-			return zero, errors.NewError(errors.ErrCodeNotFound, "记录不存在")
+			return zero, errors.NewError(errors.ErrCodeNotFound, "record not found")
 		}
-		return zero, errors.WrapError(err, errors.ErrCodeDatabase, "查询记录失败")
+		return zero, errors.WrapError(err, errors.ErrCodeDatabase, "failed to query record")
 	}
 	return entity, nil
 }
@@ -42,7 +42,7 @@ func (r *Repo[T]) List(ctx context.Context, offset, limit int) ([]T, error) {
 		q = q.Limit(limit)
 	}
 	if err := q.Find(&entities); err != nil {
-		return nil, errors.WrapError(err, errors.ErrCodeDatabase, "列表查询失败")
+		return nil, errors.WrapError(err, errors.ErrCodeDatabase, "failed to list records")
 	}
 	return entities, nil
 }
@@ -52,7 +52,7 @@ func (r *Repo[T]) Count(ctx context.Context) (int64, error) {
 	q := r.query(ctx).Where("deleted_at IS NULL")
 	count, err := q.Count()
 	if err != nil {
-		return 0, errors.WrapError(err, errors.ErrCodeDatabase, "统计记录数量失败")
+		return 0, errors.WrapError(err, errors.ErrCodeDatabase, "failed to count records")
 	}
 	return count, nil
 }
@@ -62,7 +62,7 @@ func (r *Repo[T]) Exists(ctx context.Context, id int64) (bool, error) {
 		Where("id = ? AND deleted_at IS NULL", id).
 		Count()
 	if err != nil {
-		return false, errors.WrapError(err, errors.ErrCodeDatabase, "检查记录存在性失败")
+		return false, errors.WrapError(err, errors.ErrCodeDatabase, "failed to check record existence")
 	}
 	return count > 0, nil
 }
@@ -74,7 +74,7 @@ func (r *Repo[T]) CountWithFilters(ctx context.Context, query *map[string]string
 	}
 	count, err := qb.Count()
 	if err != nil {
-		return 0, errors.WrapError(err, errors.ErrCodeDatabase, "统计记录数量失败")
+		return 0, errors.WrapError(err, errors.ErrCodeDatabase, "failed to count records")
 	}
 	return count, nil
 }
@@ -86,7 +86,7 @@ func (r *Repo[T]) Find(ctx context.Context, query *map[string]string) ([]T, erro
 		qb = qb.withFilters(*query)
 	}
 	if err := qb.Find(&entities); err != nil {
-		return nil, errors.WrapError(err, errors.ErrCodeDatabase, "查询记录列表失败")
+		return nil, errors.WrapError(err, errors.ErrCodeDatabase, "failed to find records")
 	}
 	return entities, nil
 }
@@ -94,7 +94,7 @@ func (r *Repo[T]) Find(ctx context.Context, query *map[string]string) ([]T, erro
 func (r *Repo[T]) ListAll(ctx context.Context) ([]T, error) {
 	var entities []T
 	if err := r.query(ctx).Where("deleted_at IS NULL").Find(&entities); err != nil {
-		return nil, errors.WrapError(err, errors.ErrCodeDatabase, "查询所有记录失败")
+		return nil, errors.WrapError(err, errors.ErrCodeDatabase, "failed to list all records")
 	}
 	return entities, nil
 }
@@ -107,7 +107,7 @@ func (r *Repo[T]) ListByIds(ctx context.Context, ids []int64) ([]T, error) {
 	if err := r.query(ctx).
 		Where("id IN ? AND deleted_at IS NULL", ids).
 		Find(&entities); err != nil {
-		return nil, errors.WrapError(err, errors.ErrCodeDatabase, "根据ID列表查询记录失败")
+		return nil, errors.WrapError(err, errors.ErrCodeDatabase, "failed to list records by IDs")
 	}
 	return entities, nil
 }

@@ -32,9 +32,9 @@ type IMessageBus interface {
 }
 
 // MessageBus 消息总线基础实现
-// 它依赖于 Transport 接口来处理实际的消息传输，并支持中间件
+// 它依赖于 ITransport 接口来处理实际的消息传输，并支持中间件
 type MessageBus struct {
-	transport   Transport
+	transport   ITransport
 	middlewares []IMiddleware
 	mutex       sync.RWMutex
 
@@ -52,7 +52,7 @@ type MessageBus struct {
 }
 
 // NewMessageBus 创建消息总线
-func NewMessageBus(transport Transport) *MessageBus {
+func NewMessageBus(transport ITransport) *MessageBus {
 	return &MessageBus{
 		transport:       transport,
 		middlewares:     make([]IMiddleware, 0),
@@ -63,9 +63,9 @@ func NewMessageBus(transport Transport) *MessageBus {
 // GetTransport 返回底层传输实现
 //
 // 该方法主要用于内部组件（例如 CommandBus、SagaOrchestrator）在运行时探测
-// Transport 的同步/异步语义，从而给出更明确的错误语义说明或告警。普通调用方
+// ITransport 的同步/异步语义，从而给出更明确的错误语义说明或告警。普通调用方
 // 不应依赖具体 Transport 类型来实现业务逻辑。
-func (bus *MessageBus) GetTransport() Transport {
+func (bus *MessageBus) GetTransport() ITransport {
 	return bus.transport
 }
 

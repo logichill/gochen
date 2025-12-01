@@ -330,7 +330,7 @@ func main() {
 
 - 为每个 `domain.IModule` 调用 `RegisterProviders`，注册仓储/服务/路由构造器；
 - 创建或复用一个 `eventing/bus.IEventBus`（默认使用 `messaging/transport/memory` 内存实现）；
-- 从 DI 容器中自动发现所有实现了 `RouteRegistrar` 接口的路由构造器，并将其挂载到 `BasePath`（默认 `/api/v1`）；
+- 从 DI 容器中自动发现所有实现了 `IRouteRegistrar` 接口的路由构造器，并将其挂载到 `BasePath`（默认 `/api/v1`）；
 - 在 `StartBackgroundTasks` 中启动内存消息传输层；
 - 在 `Run` 中启动基于 `http/basic.HttpServer` 的 HTTP 服务，并在 `/api/v1/health` 暴露健康检查。
 

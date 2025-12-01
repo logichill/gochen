@@ -28,7 +28,7 @@ type ParallelPublisher struct {
 	repo        IOutboxRepository
 	bus         bus.IEventBus
 	cfg         OutboxConfig
-	log         logging.Logger
+	log         logging.ILogger
 	workerCount int
 
 	// 可选：DLQ 仓储
@@ -51,7 +51,7 @@ func NewParallelPublisher(
 	repo IOutboxRepository,
 	bus bus.IEventBus,
 	cfg OutboxConfig,
-	logger logging.Logger,
+	logger logging.ILogger,
 	workerCount int,
 ) *ParallelPublisher {
 	if logger == nil {

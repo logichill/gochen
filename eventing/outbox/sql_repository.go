@@ -38,14 +38,14 @@ func newOutboxError(code, msg string, cause error) error {
 // SimpleSQLOutboxRepository 简化的 SQL Outbox 仓储实现
 type SimpleSQLOutboxRepository struct {
 	db          database.IDatabase
-	eventStore  EventStoreWithDB
+	eventStore  IEventStoreWithDB
 	tableName   string
 	outboxTable string
-	logger      logging.Logger
+	logger      logging.ILogger
 }
 
-// EventStoreWithDB 支持数据库接口的事件存储接口
-type EventStoreWithDB interface {
+// IEventStoreWithDB 支持数据库接口的事件存储接口
+type IEventStoreWithDB interface {
 	// 从 eventing/store 包导入
 	Init(ctx context.Context) error
 	AppendEvents(ctx context.Context, aggregateID int64, events []eventing.IStorableEvent, expectedVersion uint64) error
@@ -54,7 +54,7 @@ type EventStoreWithDB interface {
 }
 
 // NewSimpleSQLOutboxRepository 创建简化的 SQL Outbox 仓储
-func NewSimpleSQLOutboxRepository(db database.IDatabase, eventStore EventStoreWithDB, logger logging.Logger) *SimpleSQLOutboxRepository {
+func NewSimpleSQLOutboxRepository(db database.IDatabase, eventStore IEventStoreWithDB, logger logging.ILogger) *SimpleSQLOutboxRepository {
 	if logger == nil {
 		logger = logging.GetLogger()
 	}

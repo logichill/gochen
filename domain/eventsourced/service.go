@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"gochen/domain/entity"
+	repo "gochen/domain/repository"
 	"gochen/eventing/bus"
 	"gochen/logging"
 	"gochen/messaging"
@@ -24,7 +25,7 @@ type EventSourcedCommandHandler[T entity.IEventSourcedAggregate[int64]] func(ctx
 // EventSourcedServiceOptions 服务配置
 type EventSourcedServiceOptions[T entity.IEventSourcedAggregate[int64]] struct {
 	EventBus       bus.IEventBus
-	Logger         logging.Logger
+	Logger         logging.ILogger
 	CommandHooks   []EventSourcedCommandHook[T]
 	ICommandTracer ICommandTracer
 }
@@ -42,17 +43,17 @@ type ICommandTracer interface {
 
 // EventSourcedService 统一的命令执行模板
 type EventSourcedService[T entity.IEventSourcedAggregate[int64]] struct {
-	repository *EventSourcedRepository[T]
+	repository repo.IEventSourcedRepository[T, int64]
 	handlers   map[reflect.Type]EventSourcedCommandHandler[T]
 	eventBus   bus.IEventBus
-	logger     logging.Logger
+	logger     logging.ILogger
 	hooks      []EventSourcedCommandHook[T]
 	tracer     ICommandTracer
 }
 
 // NewEventSourcedService 创建事件溯源服务模板
 func NewEventSourcedService[T entity.IEventSourcedAggregate[int64]](
-	repository *EventSourcedRepository[T],
+	repository repo.IEventSourcedRepository[T, int64],
 	opts *EventSourcedServiceOptions[T],
 ) (*EventSourcedService[T], error) {
 	if repository == nil {

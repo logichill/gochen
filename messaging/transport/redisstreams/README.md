@@ -85,7 +85,7 @@ type Config struct {
 	ConsumerName string
 	BlockTimeout time.Duration
 	ReadCount    int64
-	Logger       logging.Logger
+	Logger       logging.ILogger
 
 	// 并发与背压配置
 	MaxPublishConcurrency int           // 限制同时进行的 XADD 数，0 表示不限制
@@ -93,12 +93,12 @@ type Config struct {
 	MaxReadBackoff        time.Duration // 订阅错误最大退避，默认 5s
 }
 
-// Transport is a messaging.Transport backed by Redis Streams consumer groups.
+// Transport is a messaging.ITransport backed by Redis Streams consumer groups.
 type Transport struct {
 	cfg       Config
 	client    client
 	ownClient bool
-	logger    logging.Logger
+	logger    logging.ILogger
 
 	handlers      map[string][]messaging.IMessageHandler
 	subscriptions map[string]bool
@@ -410,4 +410,3 @@ func decodeMessage(values map[string]any, out *messaging.Message) error {
 	return nil
 }
 ```
-

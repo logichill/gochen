@@ -78,7 +78,7 @@ type Config struct {
 	DurablePrefix string
 	AckWait       time.Duration
 	MaxAckPending int
-	Logger        logging.Logger
+	Logger        logging.ILogger
 	Conn          *nats.Conn
 
 	// 可选：流参数
@@ -88,10 +88,10 @@ type Config struct {
 	MaxMsgsPerSubject int64  // 每主题最大消息数，默认 -1
 }
 
-// Transport implements messaging.Transport on top of NATS JetStream.
+// Transport implements messaging.ITransport on top of NATS JetStream.
 type Transport struct {
 	cfg      Config
-	logger   logging.Logger
+	logger   logging.ILogger
 	conn     *nats.Conn
 	js       nats.JetStreamContext
 	ownsConn bool
@@ -365,4 +365,3 @@ func marshalMessage(msg messaging.IMessage) ([]byte, error) {
 	return json.Marshal(m)
 }
 ```
-

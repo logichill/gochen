@@ -97,9 +97,6 @@ func New[K comparable, V any](config Config) *Cache[K, V] {
 	if config.Name == "" {
 		config.Name = "unnamed"
 	}
-	if !config.EnableStats {
-		config.EnableStats = true // 默认启用
-	}
 
 	return &Cache[K, V]{
 		name:    config.Name,
@@ -226,11 +223,10 @@ func (c *Cache[K, V]) CleanExpired() int {
 	cleaned := 0
 	now := time.Now()
 
-	for key, entry := range c.items {
+	for _, entry := range c.items {
 		if now.Sub(entry.accessedAt) >= c.config.TTL {
 			c.removeEntryUnsafe(entry)
 			cleaned++
-			delete(c.items, key)
 		}
 	}
 

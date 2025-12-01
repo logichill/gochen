@@ -13,9 +13,9 @@ type ISnapshotAggregate interface {
 	GetAggregateType() string
 }
 
-// Strategy 快照策略接口
+// ISnapshotStrategy 快照策略接口
 // 用于判断是否应该为聚合根创建快照
-type Strategy interface {
+type ISnapshotStrategy interface {
 	ShouldCreateSnapshot(ctx context.Context, aggregate ISnapshotAggregate) (bool, error)
 	GetName() string // 策略名称
 }
@@ -54,11 +54,11 @@ func (s *EventCountStrategy) GetName() string {
 type TimeDurationStrategy struct {
 	Duration          time.Duration
 	lastSnapshotTimes map[string]time.Time // 聚合键 -> 上次快照时间
-	snapshotStore     Store
+	snapshotStore     ISnapshotStore
 }
 
 // NewTimeDurationStrategy 创建时间间隔策略
-func NewTimeDurationStrategy(duration time.Duration, snapshotStore Store) *TimeDurationStrategy {
+func NewTimeDurationStrategy(duration time.Duration, snapshotStore ISnapshotStore) *TimeDurationStrategy {
 	if duration <= 0 {
 		duration = 24 * time.Hour // 默认24小时
 	}
@@ -159,7 +159,7 @@ func (s *AggregateSizeStrategy) GetName() string {
 // CompositeSnapshotStrategy 组合快照策略
 // 支持多个策略组合，任一策略满足条件即创建快照
 type CompositeSnapshotStrategy struct {
-	strategies []Strategy
+	strategies []ISnapshotStrategy
 	mode       CompositeMode
 }
 
@@ -174,7 +174,7 @@ const (
 )
 
 // NewCompositeSnapshotStrategy 创建组合策略
-func NewCompositeSnapshotStrategy(mode CompositeMode, strategies ...Strategy) *CompositeSnapshotStrategy {
+func NewCompositeSnapshotStrategy(mode CompositeMode, strategies ...ISnapshotStrategy) *CompositeSnapshotStrategy {
 	if mode == "" {
 		mode = CompositeModeAny // 默认使用ANY模式
 	}
@@ -185,7 +185,7 @@ func NewCompositeSnapshotStrategy(mode CompositeMode, strategies ...Strategy) *C
 }
 
 // AddStrategy 添加策略
-func (s *CompositeSnapshotStrategy) AddStrategy(strategy Strategy) {
+func (s *CompositeSnapshotStrategy) AddStrategy(strategy ISnapshotStrategy) {
 	s.strategies = append(s.strategies, strategy)
 }
 
@@ -233,7 +233,7 @@ func (s *CompositeSnapshotStrategy) GetName() string {
 }
 
 // GetStrategies 获取所有子策略
-func (s *CompositeSnapshotStrategy) GetStrategies() []Strategy {
+func (s *CompositeSnapshotStrategy) GetStrategies() []ISnapshotStrategy {
 	return s.strategies
 }
 
@@ -246,12 +246,12 @@ func (s *CompositeSnapshotStrategy) GetMode() CompositeMode {
 type PresetSnapshotStrategies struct{}
 
 // DefaultStrategy 默认策略（每100个事件）
-func (PresetSnapshotStrategies) DefaultStrategy() Strategy {
+func (PresetSnapshotStrategies) DefaultStrategy() ISnapshotStrategy {
 	return NewEventCountStrategy(100)
 }
 
 // AggressiveStrategy 激进策略（每50个事件或12小时）
-func (PresetSnapshotStrategies) AggressiveStrategy(snapshotStore Store) Strategy {
+func (PresetSnapshotStrategies) AggressiveStrategy(snapshotStore ISnapshotStore) ISnapshotStrategy {
 	return NewCompositeSnapshotStrategy(
 		CompositeModeAny,
 		NewEventCountStrategy(50),
@@ -260,7 +260,7 @@ func (PresetSnapshotStrategies) AggressiveStrategy(snapshotStore Store) Strategy
 }
 
 // ConservativeStrategy 保守策略（每200个事件且至少48小时）
-func (PresetSnapshotStrategies) ConservativeStrategy(snapshotStore Store) Strategy {
+func (PresetSnapshotStrategies) ConservativeStrategy(snapshotStore ISnapshotStore) ISnapshotStrategy {
 	return NewCompositeSnapshotStrategy(
 		CompositeModeAll,
 		NewEventCountStrategy(200),
@@ -269,7 +269,7 @@ func (PresetSnapshotStrategies) ConservativeStrategy(snapshotStore Store) Strate
 }
 
 // HighVolumeStrategy 高频策略（适合高并发聚合）
-func (PresetSnapshotStrategies) HighVolumeStrategy(snapshotStore Store) Strategy {
+func (PresetSnapshotStrategies) HighVolumeStrategy(snapshotStore ISnapshotStore) ISnapshotStrategy {
 	return NewCompositeSnapshotStrategy(
 		CompositeModeAny,
 		NewEventCountStrategy(20),

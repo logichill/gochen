@@ -13,7 +13,7 @@ type Publisher struct {
 	repo IOutboxRepository
 	bus  bus.IEventBus
 	cfg  OutboxConfig
-	log  logging.Logger
+	log  logging.ILogger
 
 	// 可选：DLQ 仓储，用于超过最大重试次数后的迁移
 	dlq IDLQRepository
@@ -22,7 +22,7 @@ type Publisher struct {
 	doneCh chan struct{}
 }
 
-func NewPublisher(repo IOutboxRepository, bus bus.IEventBus, cfg OutboxConfig, logger logging.Logger) *Publisher {
+func NewPublisher(repo IOutboxRepository, bus bus.IEventBus, cfg OutboxConfig, logger logging.ILogger) *Publisher {
 	if logger == nil {
 		logger = logging.GetLogger()
 	}

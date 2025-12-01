@@ -45,7 +45,7 @@ func (c *HttpContext) GetBody() ([]byte, error) {
 	buf := make([]byte, c.request.ContentLength)
 	_, err := c.request.Body.Read(buf)
 	if err != nil {
-		return nil, errors.WrapError(err, errors.ErrCodeInternal, "读取请求体失败")
+		return nil, errors.WrapError(err, errors.ErrCodeInternal, "failed to read request body")
 	}
 	return buf, nil
 }
@@ -55,7 +55,7 @@ func (c *HttpContext) BindJSON(obj any) error {
 		return err
 	}
 	if err := json.Unmarshal(body, obj); err != nil {
-		return errors.WrapError(err, errors.ErrCodeInvalidInput, "JSON解析失败")
+		return errors.WrapError(err, errors.ErrCodeInvalidInput, "failed to parse JSON")
 	}
 	return nil
 }
@@ -68,7 +68,7 @@ func (c *HttpContext) JSON(code int, obj any) error {
 	c.SetStatus(code)
 	data, err := json.Marshal(obj)
 	if err != nil {
-		return errors.WrapError(err, errors.ErrCodeInternal, "JSON序列化失败")
+		return errors.WrapError(err, errors.ErrCodeInternal, "failed to serialize JSON")
 	}
 	c.writer.WriteHeader(c.status)
 	_, err = c.writer.Write(data)

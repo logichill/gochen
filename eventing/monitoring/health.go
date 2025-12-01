@@ -11,12 +11,12 @@ type MonitoringService struct {
 	metrics     *Metrics
 	eventStore  any         // 事件存储接口
 	snapshotMgr any         // 快照管理器接口
-	cachedStore CachedStore // 可选
+	cachedStore ICachedStore // 可选
 	mutex       sync.RWMutex
 }
 
 // NewMonitoringService 创建监控服务
-func NewMonitoringService(eventStore any, snapshotMgr any, cachedStore CachedStore) *MonitoringService {
+func NewMonitoringService(eventStore any, snapshotMgr any, cachedStore ICachedStore) *MonitoringService {
 	return &MonitoringService{
 		metrics:     NewMetrics(),
 		eventStore:  eventStore,

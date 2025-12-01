@@ -376,11 +376,11 @@ func TestStdLogger_NoFields(t *testing.T) {
 	}
 }
 
-// TestLoggerInterface 测试Logger接口实现
+// TestLoggerInterface 测试 ILogger 接口实现
 func TestLoggerInterface(t *testing.T) {
-	// 验证StdLogger实现了Logger接口
-	var _ Logger = (*StdLogger)(nil)
-	var _ Logger = (*NoopLogger)(nil)
+	// 验证StdLogger/NoopLogger 实现了 ILogger 接口
+	var _ ILogger = (*StdLogger)(nil)
+	var _ ILogger = (*NoopLogger)(nil)
 
 	// 捕获标准输出，避免日志输出引发panic
 	oldWriter := log.Writer()
@@ -391,7 +391,7 @@ func TestLoggerInterface(t *testing.T) {
 	stdLogger := NewStdLogger("test")
 	noopLogger := NewNoopLogger()
 
-	loggers := []Logger{stdLogger, noopLogger}
+	loggers := []ILogger{stdLogger, noopLogger}
 	ctx := context.Background()
 
 	for _, logger := range loggers {

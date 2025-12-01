@@ -15,8 +15,8 @@ type State struct {
 	UpdatedAt time.Time
 }
 
-// Store 流程状态存储接口（最小化）
-type Store interface {
+// IStore 流程状态存储接口（最小化）
+type IStore interface {
 	Get(ctx context.Context, id ID) (*State, error)
 	Save(ctx context.Context, st *State) error
 	Delete(ctx context.Context, id ID) error
@@ -25,10 +25,10 @@ type Store interface {
 // Manager 进程管理器（最小骨架）
 // 目标：为 Saga/流程编排提供最少必要抽象，避免框架耦合
 type Manager struct {
-	store Store
+	store IStore
 }
 
-func NewManager(store Store) *Manager { return &Manager{store: store} }
+func NewManager(store IStore) *Manager { return &Manager{store: store} }
 
 // HandleCommand 处理命令触发（占位）
 func (m *Manager) HandleCommand(ctx context.Context, instance ID, update func(st *State) error) error {

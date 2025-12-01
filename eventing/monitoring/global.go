@@ -6,7 +6,7 @@ var globalMonitoring *MonitoringService
 var monitoringOnce sync.Once
 
 // InitGlobalMonitoring 初始化全局监控服务
-func InitGlobalMonitoring(eventStore any, snapshotMgr any, cachedStore CachedStore) {
+func InitGlobalMonitoring(eventStore any, snapshotMgr any, cachedStore ICachedStore) {
 	monitoringOnce.Do(func() { globalMonitoring = NewMonitoringService(eventStore, snapshotMgr, cachedStore) })
 }
 

@@ -22,7 +22,7 @@ type EventSourcedRepositoryOptions[T entity.IEventSourcedAggregate[int64]] struc
 	SnapshotManager *snapshot.Manager
 	EventBus        bus.IEventBus
 	PublishEvents   bool
-	Logger          logging.Logger
+	Logger          logging.ILogger
 }
 
 // EventSourcedRepository 提供统一的事件溯源仓储实现
@@ -33,7 +33,7 @@ type EventSourcedRepository[T entity.IEventSourcedAggregate[int64]] struct {
 	snapshotManager *snapshot.Manager
 	eventBus        bus.IEventBus
 	publishEvents   bool
-	logger          logging.Logger
+	logger          logging.ILogger
 }
 
 // NewEventSourcedRepository 创建新的事件溯源仓储模板

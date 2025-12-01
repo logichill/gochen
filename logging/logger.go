@@ -18,8 +18,8 @@ const (
 	ErrorLevel
 )
 
-// Logger 日志接口
-type Logger interface {
+// ILogger 日志接口
+type ILogger interface {
 	// Debug 调试日志
 	Debug(ctx context.Context, msg string, fields ...Field)
 
@@ -33,7 +33,7 @@ type Logger interface {
 	Error(ctx context.Context, msg string, fields ...Field)
 
 	// WithFields 添加字段，返回新的Logger
-	WithFields(fields ...Field) Logger
+	WithFields(fields ...Field) ILogger
 }
 
 // Field 日志字段
@@ -177,7 +177,7 @@ func (l *StdLogger) Error(ctx context.Context, msg string, fields ...Field) {
 	log.Println("[ERROR]", l.format(msg, fields...))
 }
 
-func (l *StdLogger) WithFields(fields ...Field) Logger {
+func (l *StdLogger) WithFields(fields ...Field) ILogger {
 	newFields := make([]Field, len(l.fields)+len(fields))
 	copy(newFields, l.fields)
 	copy(newFields[len(l.fields):], fields)
@@ -198,17 +198,17 @@ func (l *NoopLogger) Debug(ctx context.Context, msg string, fields ...Field) {}
 func (l *NoopLogger) Info(ctx context.Context, msg string, fields ...Field)  {}
 func (l *NoopLogger) Warn(ctx context.Context, msg string, fields ...Field)  {}
 func (l *NoopLogger) Error(ctx context.Context, msg string, fields ...Field) {}
-func (l *NoopLogger) WithFields(fields ...Field) Logger                      { return l }
+func (l *NoopLogger) WithFields(fields ...Field) ILogger                     { return l }
 
 // 全局Logger
-var globalLogger Logger = NewStdLogger("")
+var globalLogger ILogger = NewStdLogger("")
 
 // SetLogger 设置全局Logger
-func SetLogger(logger Logger) {
+func SetLogger(logger ILogger) {
 	globalLogger = logger
 }
 
 // GetLogger 获取全局Logger
-func GetLogger() Logger {
+func GetLogger() ILogger {
 	return globalLogger
 }

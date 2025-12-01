@@ -1,4 +1,14 @@
-// Package di 提供简单的依赖注入容器
+// Package di 提供简单的依赖注入容器。
+//
+// 注意：本包暴露的全局容器（globalContainer 及 RegisterGlobal/ResolveGlobal/MustResolveGlobal）
+// 仅推荐用于快速原型、demo、示例程序或遗留代码迁移过程。
+// 在生产代码中，应优先通过显式注入的方式使用依赖：
+// - 在应用启动阶段构造并传递一个实现了 IContainer 的容器实例；
+// - 通过构造函数参数将依赖传入业务对象，而不是在函数内部直接访问全局容器。
+// 直接依赖全局容器会引入全局状态风险，包括但不限于：
+// - 测试隔离困难（不同测试用例共享同一容器状态）；
+// - 对启动顺序产生隐式依赖（必须按特定顺序注册服务）；
+// - 隐式依赖难以追踪（调用方无法从函数签名看出所需依赖）。
 package di
 
 import (
@@ -169,14 +179,14 @@ func NewBasic() *BasicContainer {
 
 func (c *BasicContainer) RegisterConstructor(constructor any) error {
 	if constructor == nil {
-		return errors.NewError(errors.ErrCodeInvalidInput, "构造函数不能为空")
+		return errors.NewError(errors.ErrCodeInvalidInput, "constructor cannot be nil")
 	}
 	t := reflect.TypeOf(constructor)
 	if t.Kind() != reflect.Func {
-		return errors.NewError(errors.ErrCodeInvalidInput, "参数必须是函数")
+		return errors.NewError(errors.ErrCodeInvalidInput, "parameter must be a function")
 	}
 	if t.NumOut() == 0 {
-		return errors.NewError(errors.ErrCodeInvalidInput, "构造函数必须有返回值")
+		return errors.NewError(errors.ErrCodeInvalidInput, "constructor must have a return value")
 	}
 	name := t.Out(0).String()
 	return c.RegisterSingleton(name, constructor)
@@ -186,7 +196,7 @@ func (c *BasicContainer) RegisterSingleton(name string, factory any) error {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	if _, exists := c.services[name]; exists {
-		return errors.NewError(errors.ErrCodeConflict, fmt.Sprintf("服务 %s 已注册", name))
+		return errors.NewError(errors.ErrCodeConflict, fmt.Sprintf("service %s already registered", name))
 	}
 	c.services[name] = factory
 	return nil
@@ -200,7 +210,7 @@ func (c *BasicContainer) RegisterInstance(name string, instance any) error {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	if _, exists := c.services[name]; exists {
-		return errors.NewError(errors.ErrCodeConflict, fmt.Sprintf("服务 %s 已注册", name))
+		return errors.NewError(errors.ErrCodeConflict, fmt.Sprintf("service %s already registered", name))
 	}
 	c.instances[name] = instance
 	c.services[name] = instance
@@ -212,7 +222,7 @@ func (c *BasicContainer) Resolve(name string) (any, error) {
 	_, exists := c.services[name]
 	c.mutex.RUnlock()
 	if !exists {
-		return nil, errors.NewError(errors.ErrCodeNotFound, fmt.Sprintf("服务 %s 未注册", name))
+		return nil, errors.NewError(errors.ErrCodeNotFound, fmt.Sprintf("service %s not registered", name))
 	}
 	c.mutex.RLock()
 	if inst, ok := c.instances[name]; ok {
@@ -227,7 +237,7 @@ func (c *BasicContainer) Resolve(name string) (any, error) {
 
 	inst, err := c.createInstance(factory)
 	if err != nil {
-		return nil, errors.WrapError(err, errors.ErrCodeInternal, fmt.Sprintf("创建服务 %s 失败", name))
+		return nil, errors.WrapError(err, errors.ErrCodeInternal, fmt.Sprintf("failed to create service %s", name))
 	}
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
@@ -244,15 +254,15 @@ func (c *BasicContainer) ResolveTo(name string, target any) error {
 		return err
 	}
 	if target == nil {
-		return errors.NewError(errors.ErrCodeInvalidInput, "目标不能为空")
+		return errors.NewError(errors.ErrCodeInvalidInput, "target cannot be nil")
 	}
 	v := reflect.ValueOf(target)
 	if v.Kind() != reflect.Ptr {
-		return errors.NewError(errors.ErrCodeInvalidInput, "目标必须是指针")
+		return errors.NewError(errors.ErrCodeInvalidInput, "target must be a pointer")
 	}
 	iv := reflect.ValueOf(inst)
 	if !iv.Type().AssignableTo(v.Elem().Type()) {
-		return errors.NewError(errors.ErrCodeInvalidInput, fmt.Sprintf("无法将 %s 赋值给 %s", iv.Type(), v.Elem().Type()))
+		return errors.NewError(errors.ErrCodeInvalidInput, fmt.Sprintf("cannot assign %s to %s", iv.Type(), v.Elem().Type()))
 	}
 	v.Elem().Set(iv)
 	return nil
@@ -277,18 +287,18 @@ func (c *BasicContainer) GetRegisteredNames() []string {
 
 func (c *BasicContainer) Invoke(function any) error {
 	if function == nil {
-		return errors.NewError(errors.ErrCodeInvalidInput, "函数不能为空")
+		return errors.NewError(errors.ErrCodeInvalidInput, "function cannot be nil")
 	}
 	fv := reflect.ValueOf(function)
 	if fv.Type().Kind() != reflect.Func {
-		return errors.NewError(errors.ErrCodeInvalidInput, "参数必须是函数")
+		return errors.NewError(errors.ErrCodeInvalidInput, "parameter must be a function")
 	}
 	args := make([]reflect.Value, fv.Type().NumIn())
 	for i := 0; i < fv.Type().NumIn(); i++ {
 		paramType := fv.Type().In(i)
 		inst, err := c.resolveParameter(paramType)
 		if err != nil {
-			return errors.WrapError(err, errors.ErrCodeDependency, fmt.Sprintf("解析参数 %s 失败", paramType))
+			return errors.WrapError(err, errors.ErrCodeDependency, fmt.Sprintf("failed to resolve parameter %s", paramType))
 		}
 		args[i] = reflect.ValueOf(inst)
 	}
@@ -297,7 +307,7 @@ func (c *BasicContainer) Invoke(function any) error {
 		last := results[len(results)-1]
 		if last.Type().Implements(reflect.TypeOf((*error)(nil)).Elem()) {
 			if !last.IsNil() {
-				return errors.WrapError(last.Interface().(error), errors.ErrCodeInternal, "函数执行失败")
+				return errors.WrapError(last.Interface().(error), errors.ErrCodeInternal, "function execution failed")
 			}
 		}
 	}
@@ -328,11 +338,11 @@ func (c *BasicContainer) createInstance(factory any) (any, error) {
 	}
 	results := fv.Call(args)
 	if len(results) == 0 {
-		return nil, errors.NewError(errors.ErrCodeInternal, "工厂函数没有返回值")
+		return nil, errors.NewError(errors.ErrCodeInternal, "factory function has no return value")
 	}
 	if len(results) == 2 && !results[1].IsNil() {
 		if err, ok := results[1].Interface().(error); ok {
-			return nil, errors.WrapError(err, errors.ErrCodeInternal, "工厂函数执行失败")
+			return nil, errors.WrapError(err, errors.ErrCodeInternal, "factory function execution failed")
 		}
 	}
 	return results[0].Interface(), nil
@@ -355,5 +365,5 @@ func (c *BasicContainer) resolveParameter(paramType reflect.Type) (any, error) {
 			return c.Resolve(paramType.Name())
 		}
 	}
-	return nil, errors.NewError(errors.ErrCodeNotFound, fmt.Sprintf("无法解析参数类型: %s", paramType))
+	return nil, errors.NewError(errors.ErrCodeNotFound, fmt.Sprintf("cannot resolve parameter type: %s", paramType))
 }

@@ -18,7 +18,7 @@ type EventSourcedProjectionOption[T any] struct {
 	Decoder    func(event eventing.Event) (T, error)
 	Handle     func(ctx context.Context, payload T) error
 	Rebuild    func(ctx context.Context, events []eventing.Event) error
-	Logger     logging.Logger
+	Logger     logging.ILogger
 }
 
 // EventSourcedProjection 泛型投影模板
@@ -28,7 +28,7 @@ type EventSourcedProjection[T any] struct {
 	decoder    func(event eventing.Event) (T, error)
 	handle     func(ctx context.Context, payload T) error
 	rebuild    func(ctx context.Context, events []eventing.Event) error
-	logger     logging.Logger
+	logger     logging.ILogger
 
 	statusMu sync.RWMutex
 	status   projection.ProjectionStatus

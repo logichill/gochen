@@ -6,8 +6,8 @@ import (
 	"time"
 )
 
-// CachedStore 缓存存储接口，用于监控
-type CachedStore interface {
+// ICachedStore 缓存存储接口，用于监控
+type ICachedStore interface {
 	// 可以添加需要监控的缓存方法
 	GetCacheStats() (hits, misses int64)
 }

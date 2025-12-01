@@ -21,7 +21,7 @@ func (r *Repo[T]) ListPage(ctx context.Context, options *QueryOptions) (*PagedRe
 
 	total, err := q.Count()
 	if err != nil {
-		return nil, errors.WrapError(err, errors.ErrCodeDatabase, "统计总记录数失败")
+		return nil, errors.WrapError(err, errors.ErrCodeDatabase, "failed to count total records")
 	}
 
 	q = r.applySorting(q, options)
@@ -32,7 +32,7 @@ func (r *Repo[T]) ListPage(ctx context.Context, options *QueryOptions) (*PagedRe
 	q = q.Offset(offset).Limit(options.Size)
 
 	if err := q.Find(&entities); err != nil {
-		return nil, errors.WrapError(err, errors.ErrCodeDatabase, "分页查询失败")
+		return nil, errors.WrapError(err, errors.ErrCodeDatabase, "failed to execute paginated query")
 	}
 
 	totalPages := int(math.Ceil(float64(total) / float64(options.Size)))

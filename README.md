@@ -697,8 +697,8 @@ func main() {
 }
 
 // 自定义异步传输示例（伪代码）
-// 业务侧可以在自己的仓库中实现基于 Redis Streams / NATS JetStream 等的 Transport
-func newCustomAsyncTransport() messaging.Transport {
+// 业务侧可以在自己的仓库中实现基于 Redis Streams / NATS JetStream 等的 ITransport
+func newCustomAsyncTransport() messaging.ITransport {
     // return mypkg.NewRedisStreamsTransport(...)
     // return mypkg.NewNATSJetStreamTransport(...)
     panic("implement in application repo")
@@ -959,6 +959,44 @@ _ = repo.Save(ctx, aggregate)
 - 未启用 Outbox 时仍可使用基础仓储，保持向后兼容；
 - 启用 Outbox 后 Save 不再直接发布事件，推荐运行 outbox.Publisher 处理发布与重试；
 - 快照策略仍按基础仓储逻辑执行（允许失败告警）。
+
+---
+
+## API 稳定性
+
+各模块的 API 稳定性级别如下：
+
+### Stable (稳定)
+API 稳定，遵循语义化版本，破坏性变更仅在主版本升级时发生。
+
+| 模块 | 说明 |
+|------|------|
+| `domain/entity` | 实体/聚合接口 |
+| `domain/repository` | 仓储接口 |
+| `eventing/store` | 事件存储接口 |
+| `messaging` | 消息总线 |
+| `cache` | 缓存系统 |
+| `errors` | 错误处理 |
+| `di` | 依赖注入 |
+
+### Beta (测试中)
+API 基本稳定，可能在次版本中有小幅调整。
+
+| 模块 | 说明 |
+|------|------|
+| `patterns/saga` | Saga 模式 |
+| `patterns/workflow` | 工作流模式 |
+| `eventing/projection` | 投影管理 |
+| `messaging/command` | 命令总线 |
+| `app/api` | RESTful API 构建器 |
+
+### Experimental (实验性)
+API 可能随时变更，不建议生产环境使用。
+
+| 模块 | 说明 |
+|------|------|
+| `eventing/outbox/parallel` | 并行 Outbox 处理 |
+| `messaging/bridge` | 远程桥接 |
 
 ---
 
