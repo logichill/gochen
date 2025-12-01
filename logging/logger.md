@@ -104,9 +104,9 @@ logging 包内部维护一个进程级的全局 Logger：
 2. 为核心组件注入派生 Logger：
 
    ```go
-   outboxLogger := logging.GetLogger().WithFields(logging.String("component", "eventing.outbox.publisher"))
-   projLogger := logging.GetLogger().WithFields(logging.String("component", "eventing.projection.manager"))
-   cmdBusLogger := logging.GetLogger().WithFields(logging.String("component", "messaging.command.bus"))
+   outboxLogger := logging.ComponentLogger("eventing.outbox.publisher")
+   projLogger := logging.ComponentLogger("eventing.projection.manager")
+   cmdBusLogger := logging.ComponentLogger("messaging.command.bus")
    ```
 
 3. 将这些 Logger 通过 Options/Config 注入到相应组件：

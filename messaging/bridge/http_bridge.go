@@ -232,7 +232,7 @@ func (b *HTTPBridge) RegisterCommandHandler(commandType string, handler func(ctx
 
 	b.commandHandlers[commandType] = handler
 
-	b.logger.Info(context.TODO(), "注册命令处理器",
+	b.logger.Info(context.Background(), "注册命令处理器",
 		logging.String("command_type", commandType))
 
 	return nil
@@ -249,7 +249,7 @@ func (b *HTTPBridge) RegisterEventHandler(eventType string, handler messaging.IM
 
 	b.eventHandlers[eventType] = handler
 
-	b.logger.Info(context.TODO(), "注册事件处理器",
+	b.logger.Info(context.Background(), "注册事件处理器",
 		logging.String("event_type", eventType))
 
 	return nil
@@ -370,13 +370,13 @@ func (b *HTTPBridge) Start() error {
 	b.running = true
 	b.mutex.Unlock()
 
-	b.logger.Info(context.TODO(), "启动 HTTP Bridge",
+	b.logger.Info(context.Background(), "启动 HTTP Bridge",
 		logging.String("addr", b.config.ListenAddr))
 
 	// 在 goroutine 中启动服务器
 	go func() {
 		if err := b.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			b.logger.Error(context.TODO(), "HTTP Bridge 启动失败", logging.Error(err))
+			b.logger.Error(context.Background(), "HTTP Bridge 启动失败", logging.Error(err))
 		}
 	}()
 
@@ -393,7 +393,7 @@ func (b *HTTPBridge) Stop() error {
 	b.running = false
 	b.mutex.Unlock()
 
-	b.logger.Info(context.TODO(), "停止 HTTP Bridge")
+	b.logger.Info(context.Background(), "停止 HTTP Bridge")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

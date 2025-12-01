@@ -123,16 +123,14 @@ func NewCommandBus(messageBus messaging.IMessageBus, config *CommandBusConfig) *
 			bus.syncTransport = false
 		default:
 			// 未知类型：保守假定为异步，并给出一次性告警
-			ctx := context.TODO()
-			bus.logger.Warn(ctx,
+			bus.logger.Warn(context.Background(),
 				"CommandBus 使用的 Transport 类型未知，Dispatch 错误语义仅保证传输层；业务错误请通过领域返回值或监控钩子处理",
 				logging.String("transport_type", fmt.Sprintf("%T", provider.GetTransport())),
 			)
 		}
 	} else {
 		// 无法探测 Transport（自定义 IMessageBus 实现），同样给出一次性告警
-		ctx := context.TODO()
-		bus.logger.Warn(ctx,
+		bus.logger.Warn(context.Background(),
 			"CommandBus 无法探测底层 Transport 类型，Dispatch 错误语义仅保证传输层；请确认所用 IMessageBus/Transport 的同步语义",
 		)
 	}

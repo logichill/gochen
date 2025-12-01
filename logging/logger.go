@@ -220,3 +220,12 @@ func SetLogger(logger ILogger) {
 func GetLogger() ILogger {
 	return globalLogger
 }
+
+// ComponentLogger 基于全局 Logger 构造带 component 字段的组件级 Logger。
+//
+// 约定：
+//   - 仅在组合根或组件构造函数中用作兜底；
+//   - 运行期日志应通过结构体字段持有的 logger 输出，而不是直接调用 GetLogger/ComponentLogger。
+func ComponentLogger(component string) ILogger {
+	return GetLogger().WithField("component", component)
+}
