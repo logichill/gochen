@@ -10,7 +10,7 @@ import (
 )
 
 func snapshotLogger() logging.ILogger {
-	return logging.GetLogger().WithField("component", "eventstore.snapshot")
+	return logging.ComponentLogger("eventstore.snapshot")
 }
 
 // Snapshot 定义聚合快照

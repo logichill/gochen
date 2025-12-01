@@ -104,7 +104,7 @@ func NewHTTPBridgeWithLogger(config *HTTPBridgeConfig, logger logging.ILogger) *
 	mux := http.NewServeMux()
 
 	if logger == nil {
-		logger = logging.GetLogger().WithField("component", "bridge.http")
+		logger = logging.ComponentLogger("bridge.http")
 	}
 
 	bridge := &HTTPBridge{

@@ -73,7 +73,7 @@ func NewEventSourcedProjection[T any](opt EventSourcedProjectionOption[T]) (*Eve
 		},
 	}
 	if p.logger == nil {
-		p.logger = logging.GetLogger().WithField("component", "eventsourced.projection").
+		p.logger = logging.ComponentLogger("eventsourced.projection").
 			WithField("projection", opt.Name)
 	}
 	return p, nil

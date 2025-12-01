@@ -10,7 +10,7 @@ import (
 
 	sqlbuilder "gochen/data/db/sql"
 
-	"gochen/data/db"
+	database "gochen/data/db"
 	"gochen/eventing"
 	"gochen/logging"
 )
@@ -56,7 +56,7 @@ type IEventStoreWithDB interface {
 // NewSimpleSQLOutboxRepository 创建简化的 SQL Outbox 仓储
 func NewSimpleSQLOutboxRepository(db database.IDatabase, eventStore IEventStoreWithDB, logger logging.ILogger) *SimpleSQLOutboxRepository {
 	if logger == nil {
-		logger = logging.GetLogger().WithField("component", "eventing.outbox.repository")
+		logger = logging.ComponentLogger("eventing.outbox.repository")
 	}
 	return &SimpleSQLOutboxRepository{
 		db:          db,

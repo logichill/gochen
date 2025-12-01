@@ -107,7 +107,7 @@ func NewCommandBus(messageBus messaging.IMessageBus, config *CommandBusConfig) *
 	if config.Logger != nil {
 		bus.logger = config.Logger
 	} else {
-		bus.logger = logging.GetLogger().WithField("component", "messaging.command.bus")
+		bus.logger = logging.ComponentLogger("messaging.command.bus")
 	}
 
 	// 尝试探测底层 ITransport 类型，以便给出更明确的错误语义告警

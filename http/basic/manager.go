@@ -36,7 +36,7 @@ type Manager struct {
 func NewManager() *Manager {
 	return &Manager{
 		Container: di.New(),
-		logger: logging.GetLogger().WithField("component", "http.manager"),
+		logger:    logging.ComponentLogger("http.manager"),
 		servers:   make([]IServer, 0),
 		opts:      Options{ShutdownTimeout: 10 * time.Second},
 	}

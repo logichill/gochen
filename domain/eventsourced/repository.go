@@ -57,7 +57,7 @@ func NewEventSourcedRepository[T entity.IEventSourcedAggregate[int64]](opts Even
 		logger:          opts.Logger,
 	}
 	if repo.logger == nil {
-		repo.logger = logging.GetLogger().WithField("component", "eventsourced.repository").
+		repo.logger = logging.ComponentLogger("eventsourced.repository").
 			WithField("aggregate_type", opts.AggregateType)
 	}
 	return repo, nil

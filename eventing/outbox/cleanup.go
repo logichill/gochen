@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"gochen/data/db"
+	database "gochen/data/db"
 	"gochen/data/db/dialect"
 	"gochen/logging"
 )
@@ -94,7 +94,7 @@ func NewCleanupService(
 	logger logging.ILogger,
 ) *CleanupService {
 	if logger == nil {
-		logger = logging.GetLogger().WithField("component", "eventing.outbox.cleanup")
+		logger = logging.ComponentLogger("eventing.outbox.cleanup")
 	}
 
 	// 设置默认值

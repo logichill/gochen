@@ -55,7 +55,7 @@ func NewParallelPublisher(
 	workerCount int,
 ) *ParallelPublisher {
 	if logger == nil {
-		logger = logging.GetLogger().WithField("component", "eventing.outbox.parallel_publisher")
+		logger = logging.ComponentLogger("eventing.outbox.parallel_publisher")
 	}
 	if workerCount <= 0 {
 		workerCount = 1

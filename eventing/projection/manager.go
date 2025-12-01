@@ -14,7 +14,7 @@ import (
 )
 
 func projectionLogger() logging.ILogger {
-	return logging.GetLogger().WithField("component", "projection.manager")
+	return logging.ComponentLogger("projection.manager")
 }
 
 // IProjection 投影接口
@@ -117,7 +117,7 @@ func NewProjectionManagerWithConfig(eventStore store.IEventStore, eventBus bus.I
 		config:          config,
 		checkpointStore: nil, // 默认不启用检查点
 	}
-	pm.logger = logging.GetLogger().WithField("component", "projection.manager")
+	pm.logger = logging.ComponentLogger("projection.manager")
 	return pm
 }
 

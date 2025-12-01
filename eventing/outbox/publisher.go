@@ -24,7 +24,7 @@ type Publisher struct {
 
 func NewPublisher(repo IOutboxRepository, bus bus.IEventBus, cfg OutboxConfig, logger logging.ILogger) *Publisher {
 	if logger == nil {
-		logger = logging.GetLogger().WithField("component", "eventing.outbox.publisher")
+		logger = logging.ComponentLogger("eventing.outbox.publisher")
 	}
 	return &Publisher{repo: repo, bus: bus, cfg: cfg, log: logger, stopCh: make(chan struct{}), doneCh: make(chan struct{})}
 }

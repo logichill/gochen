@@ -69,7 +69,7 @@ func NewEventSourcedTypedHandler[T any](opt EventSourcedHandlerOption[T]) (*Even
 		handler.name = fmt.Sprintf("EventSourcedHandler<%s>", opt.EventType)
 	}
 	if handler.logger == nil {
-		handler.logger = logging.GetLogger().WithField("component", "eventsourced.handler").
+		handler.logger = logging.ComponentLogger("eventsourced.handler").
 			WithField("handler", handler.name)
 	}
 	return handler, nil

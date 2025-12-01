@@ -38,7 +38,7 @@ func NewOutboxAwareRepository[T entity.IEventSourcedAggregate[int64]](base *Even
 		logger: base.logger,
 	}
 	if repo.logger == nil {
-		repo.logger = logging.GetLogger().WithField("component", "eventsourced.repository.outbox").
+		repo.logger = logging.ComponentLogger("eventsourced.repository.outbox").
 			WithField("aggregate_type", base.aggregateType)
 	}
 	return repo, nil

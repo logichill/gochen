@@ -52,7 +52,7 @@ func NewSagaOrchestrator(
 		eventBus:   eventBus,
 		stateStore: stateStore,
 	}
-	o.logger = logging.GetLogger().WithField("component", "saga.orchestrator")
+	o.logger = logging.ComponentLogger("saga.orchestrator")
 	return o
 }
 

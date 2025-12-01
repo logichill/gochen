@@ -116,7 +116,7 @@ func NewIntegrationEventPublisher(
 		handlers:    make(map[string][]IntegrationEventHandler),
 		enableStore: false, // 默认不启用持久化
 	}
-	publisher.logger = logging.GetLogger().WithField("component", "integration.publisher")
+	publisher.logger = logging.ComponentLogger("integration.publisher")
 	return publisher
 }
 
