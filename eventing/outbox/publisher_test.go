@@ -47,7 +47,10 @@ func (m *MockOutboxRepository) GetPendingEntries(ctx context.Context, limit int)
 
 	var pending []OutboxEntry
 	for _, entry := range m.entries {
-		if entry.Status == OutboxStatusPending {
+		// 模拟 SQL 仓储语义：pending 或可重试的 failed 记录都会被视为“待处理”
+		if entry.Status == OutboxStatusPending ||
+			(entry.Status == OutboxStatusFailed &&
+				(entry.NextRetryAt == nil || !entry.NextRetryAt.After(time.Now()))) {
 			pending = append(pending, entry)
 			if len(pending) >= limit {
 				break
@@ -237,6 +240,46 @@ func (m *MockEventBus) PublishedEventsLen() int {
 	return len(m.publishedEvents)
 }
 
+// MockDLQRepository 简单的 DLQ 仓储，用于验证移入 DLQ 语义。
+type MockDLQRepository struct {
+	mu     sync.Mutex
+	moved  []OutboxEntry
+}
+
+func (d *MockDLQRepository) MoveToDLQ(ctx context.Context, entry OutboxEntry) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.moved = append(d.moved, entry)
+	return nil
+}
+
+func (d *MockDLQRepository) GetDLQEntries(ctx context.Context, limit int) ([]DLQEntry, error) {
+	return nil, nil
+}
+
+func (d *MockDLQRepository) RetryFromDLQ(ctx context.Context, entryID int64) error {
+	return nil
+}
+
+func (d *MockDLQRepository) DeleteDLQEntry(ctx context.Context, entryID int64) error {
+	return nil
+}
+
+func (d *MockDLQRepository) GetDLQCount(ctx context.Context) (int64, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return int64(len(d.moved)), nil
+}
+
+// MovedEntries 返回已移入 DLQ 的 entry 副本（测试断言用）。
+func (d *MockDLQRepository) MovedEntries() []OutboxEntry {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	cpy := make([]OutboxEntry, len(d.moved))
+	copy(cpy, d.moved)
+	return cpy
+}
+
 // ========== Publisher 测试 ==========
 
 func TestNewPublisher(t *testing.T) {
@@ -317,6 +360,93 @@ func TestPublisher_PublishPending_InvalidEventData(t *testing.T) {
 
 	// 验证标记为失败
 	assert.Equal(t, 1, repo.MarkedFailedLen())
+}
+
+// 当反序列化失败且重试次数达到上限时，应该在标记失败的同时移入 DLQ。
+func TestPublisher_DeserializeError_MoveToDLQWhenMaxRetriesExceeded(t *testing.T) {
+	maxRetries := 3
+
+	// 构造一条已失败多次、到达重试时间的记录
+	past := time.Now().Add(-1 * time.Minute)
+	repo := &MockOutboxRepository{
+		entries: []OutboxEntry{
+			{
+				ID:          1,
+				AggregateID: 123,
+				EventID:     "event-invalid",
+				EventType:   "TestEvent",
+				EventData:   "invalid json {{{",
+				Status:      OutboxStatusFailed,
+				CreatedAt:   time.Now().Add(-2 * time.Minute),
+				RetryCount:  maxRetries - 1, // 再失败一次即达到上限
+				NextRetryAt: &past,          // 已到下次重试时间
+			},
+		},
+	}
+	eventBus := &MockEventBus{}
+	cfg := OutboxConfig{
+		BatchSize:     10,
+		RetryInterval: 30 * time.Second,
+		MaxRetries:    maxRetries,
+	}
+
+	publisher := NewPublisher(repo, eventBus, cfg, logging.NewNoopLogger())
+	dlq := &MockDLQRepository{}
+	publisher.SetDLQRepository(dlq)
+
+	ctx := context.Background()
+	err := publisher.PublishPending(ctx)
+	assert.NoError(t, err)
+
+	// 应该标记为失败
+	assert.Equal(t, 1, repo.MarkedFailedLen())
+	// 且应移入 DLQ
+	moved := dlq.MovedEntries()
+	if assert.Len(t, moved, 1) {
+		assert.Equal(t, int64(1), moved[0].ID)
+		assert.Equal(t, maxRetries, moved[0].RetryCount)
+	}
+}
+
+// 当重试次数尚未达到上限时，只标记失败，不应移入 DLQ。
+func TestPublisher_DeserializeError_NotMovedToDLQBelowMaxRetries(t *testing.T) {
+	maxRetries := 3
+
+	past := time.Now().Add(-1 * time.Minute)
+	repo := &MockOutboxRepository{
+		entries: []OutboxEntry{
+			{
+				ID:          1,
+				AggregateID: 123,
+				EventID:     "event-invalid",
+				EventType:   "TestEvent",
+				EventData:   "invalid json {{{",
+				Status:      OutboxStatusFailed,
+				CreatedAt:   time.Now().Add(-2 * time.Minute),
+				RetryCount:  0,      // 远未达到上限
+				NextRetryAt: &past,  // 已到重试时间
+			},
+		},
+	}
+	eventBus := &MockEventBus{}
+	cfg := OutboxConfig{
+		BatchSize:     10,
+		RetryInterval: 30 * time.Second,
+		MaxRetries:    maxRetries,
+	}
+
+	publisher := NewPublisher(repo, eventBus, cfg, logging.NewNoopLogger())
+	dlq := &MockDLQRepository{}
+	publisher.SetDLQRepository(dlq)
+
+	ctx := context.Background()
+	err := publisher.PublishPending(ctx)
+	assert.NoError(t, err)
+
+	// 标记失败一次
+	assert.Equal(t, 1, repo.MarkedFailedLen())
+	// 但不会移入 DLQ
+	assert.Len(t, dlq.MovedEntries(), 0)
 }
 
 func TestPublisher_PublishPending_PublishError(t *testing.T) {

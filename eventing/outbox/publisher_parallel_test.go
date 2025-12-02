@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"gochen/eventing"
@@ -154,6 +155,91 @@ func (b *concurrentEventBus) UnsubscribeHandler(ctx context.Context, handler bus
 
 // 其余 bus 接口为本测试不关心的 no-op
 
+// dlqRecordingRepo 用于验证 ParallelPublisher 在失败时的 DLQ 语义。
+type dlqRecordingRepo struct {
+	mu     sync.Mutex
+	failed []struct {
+		id        int64
+		errorMsg  string
+		nextRetry time.Time
+	}
+}
+
+func (r *dlqRecordingRepo) SaveWithEvents(ctx context.Context, aggregateID int64, events []eventing.Event) error {
+	return nil
+}
+
+func (r *dlqRecordingRepo) GetPendingEntries(ctx context.Context, limit int) ([]OutboxEntry, error) {
+	return nil, nil
+}
+
+func (r *dlqRecordingRepo) MarkAsPublished(ctx context.Context, entryID int64) error {
+	return nil
+}
+
+func (r *dlqRecordingRepo) MarkAsFailed(ctx context.Context, entryID int64, errorMsg string, nextRetryAt time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.failed = append(r.failed, struct {
+		id        int64
+		errorMsg  string
+		nextRetry time.Time
+	}{
+		id:        entryID,
+		errorMsg:  errorMsg,
+		nextRetry: nextRetryAt,
+	})
+	return nil
+}
+
+func (r *dlqRecordingRepo) DeletePublished(ctx context.Context, olderThan time.Time) error {
+	return nil
+}
+
+func (r *dlqRecordingRepo) FailedCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.failed)
+}
+
+type dlqRecordingDLQ struct {
+	mu    sync.Mutex
+	moved []OutboxEntry
+}
+
+func (d *dlqRecordingDLQ) MoveToDLQ(ctx context.Context, entry OutboxEntry) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.moved = append(d.moved, entry)
+	return nil
+}
+
+func (d *dlqRecordingDLQ) GetDLQEntries(ctx context.Context, limit int) ([]DLQEntry, error) {
+	return nil, nil
+}
+
+func (d *dlqRecordingDLQ) RetryFromDLQ(ctx context.Context, entryID int64) error {
+	return nil
+}
+
+func (d *dlqRecordingDLQ) DeleteDLQEntry(ctx context.Context, entryID int64) error {
+	return nil
+}
+
+func (d *dlqRecordingDLQ) GetDLQCount(ctx context.Context) (int64, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return int64(len(d.moved)), nil
+}
+
+func (d *dlqRecordingDLQ) Moved() []OutboxEntry {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	out := make([]OutboxEntry, len(d.moved))
+	copy(out, d.moved)
+	return out
+}
+
 // TestParallelPublisher_ConcurrentWorkers_SinglePublishPerEntry
 //
 // 多 worker 场景下，验证同一批 pending 记录在并行处理时，每条记录最多被标记已发布一次，
@@ -216,4 +302,36 @@ func TestParallelPublisher_ConcurrentWorkers_SinglePublishPerEntry(t *testing.T)
 	if atomic.LoadInt32(&bus.count) != int32(entryCount) {
 		t.Fatalf("expected %d events published to bus, got %d", entryCount, bus.count)
 	}
+}
+
+// 当并行发布器处理失败记录且达到最大重试次数时，应在标记失败的同时将记录移入 DLQ。
+func TestParallelPublisher_MarkFailed_MovesToDLQWhenMaxRetriesExceeded(t *testing.T) {
+	repo := &dlqRecordingRepo{}
+	bus := &concurrentEventBus{}
+
+	cfg := OutboxConfig{
+		RetryInterval: 30 * time.Second,
+		MaxRetries:    3,
+	}
+
+	p := NewParallelPublisher(repo, bus, cfg, logging.NewNoopLogger(), 1)
+	dlq := &dlqRecordingDLQ{}
+	p.SetDLQRepository(dlq)
+
+	entry := OutboxEntry{
+		ID:         42,
+		RetryCount: cfg.MaxRetries - 1, // 再失败一次即达到上限
+	}
+
+	ctx := context.Background()
+	p.markFailed(ctx, entry, "test-error")
+
+	// 应该调用 MarkAsFailed 一次
+	require.Equal(t, 1, repo.FailedCount())
+
+	// 且应移入 DLQ
+	moved := dlq.Moved()
+	require.Len(t, moved, 1)
+	assert.Equal(t, int64(42), moved[0].ID)
+	assert.Equal(t, cfg.MaxRetries, moved[0].RetryCount)
 }
