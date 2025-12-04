@@ -1,6 +1,6 @@
-# Application Layer - 应用服务层
+# Application Layer - 应用服务层 & 事件溯源模板
 
-应用服务层位于领域层之上，协调领域对象完成业务用例。
+应用服务层位于领域层与基础设施层之上，协调领域对象完成业务用例，并基于事件与消息提供应用级模板能力（包括事件溯源）。
 
 ## 概述
 
@@ -12,7 +12,7 @@
 
 ## 核心组件
 
-### Application Service
+### Application Service（`app/application`）
 
 通用应用服务，支持 CRUD 操作。
 
@@ -32,7 +32,7 @@ func NewApplication[T entity.IEntity[ID], ID comparable](
 ) *Application[T, ID]
 ```
 
-### 服务配置
+### 服务配置（`ServiceConfig`）
 
 ```go
 type ServiceConfig struct {
@@ -69,7 +69,7 @@ type ServiceConfig struct {
 }
 ```
 
-## 核心方法
+## 核心方法（Application Service）
 
 ### CRUD 操作
 
@@ -103,7 +103,7 @@ func (s *Application[T, ID]) UpdateBatch(ctx context.Context, entities []T) erro
 func (s *Application[T, ID]) DeleteBatch(ctx context.Context, ids []ID) error
 ```
 
-## 使用示例
+## 使用示例（Application Service）
 
 ### 基础用法
 
@@ -223,7 +223,7 @@ func (s *ProductService) Create(ctx context.Context, product *Product) error {
 }
 ```
 
-## 配置场景
+## 配置场景（Application Service）
 
 ### 场景 1: 高性能读取服务
 
@@ -265,7 +265,7 @@ config := &application.ServiceConfig{
 }
 ```
 
-## 最佳实践
+## 最佳实践（Application Service）
 
 ### 1. 验证策略
 
@@ -337,11 +337,33 @@ func (s *ProductService) ListProducts(ctx context.Context, page, size int) ([]*P
 }
 ```
 
+## 事件溯源应用模板（`app/eventsourced`）
+
+在应用层中，`app/eventsourced` 提供了基于领域事件与事件存储的事件溯源模板，实现：
+
+- 基于 `domain/eventsourced.IEventSourcedAggregate` 的通用仓储实现 `EventSourcedRepository`（依赖 `eventing/store.IEventStore`、可选快照与事件总线）；
+- Outbox 装饰器 `OutboxAwareRepository`，与 `eventing/outbox` 协作实现“写事件 + 写 Outbox”原子操作；
+- 历史视图与分页查询（`GetEventHistory*`）；
+- 泛型事件处理器与投影模板（`EventSourcedTypedHandler`、`EventSourcedProjection`）；
+- 与 `domain/eventsourced.EventSourcedService` 协同的命令适配器 `AsCommandMessageHandler`，便于挂到 `messaging/command.CommandBus` 上。
+
+典型使用路径：
+
+1. 在领域层基于 `domain/eventsourced` 定义聚合与领域事件；
+2. 在应用层通过 `app/eventsourced.NewEventSourcedRepository` 组合 EventStore / SnapshotManager / EventBus；
+3. 使用 `domain/eventsourced.EventSourcedService` 作为命令执行模板，并通过 `AsCommandMessageHandler` 接入命令总线；
+4. 使用 `EventSourcedProjection` 与 `eventing/projection.ProjectionManager` 构建 CQRS 读模型。
+
+具体 API 说明与完整示例请参考下方相关文档。
+
 ## 相关文档
 
 - [RESTful API 构建器](./api/README.md) - 自动生成 RESTful API
-- [领域层](../domain/README.md) - 实体和仓储接口
-- [示例代码](../examples/README.md) - 完整使用示例
+- 事件溯源与 CQRS：
+  - `docs/framework-design.md` 第 2.3 节（`domain/eventsourced` + `app/eventsourced`）
+  - `docs/ddd-eventsourcing-quick-reference.md`
+- 领域层：`domain/` 目录（聚合、仓储与服务抽象）
+- 示例代码：`examples/` 目录（包括 CRUD/Audited/EventSourced 等完整使用示例）
 
 ## 许可证
 

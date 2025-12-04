@@ -174,7 +174,7 @@ publisher := outbox.NewPublisher(repo, eventBus, cfg, noop)
 
 ### 3.4 EventSourcedService（`domain/eventsourced`）
 
-- 当前已经通过 `EventSourcedServiceOptions.Logger` 提供 Logger 注入点：
+- 当前已经通过 `domain/eventsourced.EventSourcedServiceOptions.Logger` 提供 Logger 注入点：
   - 若未注入，则默认 `logging.GetLogger().WithField("component", "eventsourced.service")`。
 - 建议在文档与调用示例中明确：
   - 生产环境下推荐显式注入业务 Logger；

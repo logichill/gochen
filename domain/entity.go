@@ -23,3 +23,11 @@ type IValidatable interface {
 	// 返回 error 表示验证失败，nil 表示验证成功
 	Validate() error
 }
+
+// IDomainEvent 领域事件接口。
+// 领域层仅关注事件本身的语义，不关心传输信封与存储细节。
+type IDomainEvent interface {
+	// EventType 返回领域事件类型标识。
+	// 建议使用稳定的枚举字符串，便于路由与演进。
+	EventType() string
+}

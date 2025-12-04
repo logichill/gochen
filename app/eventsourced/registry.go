@@ -8,13 +8,13 @@ import (
 	"gochen/eventing/projection"
 )
 
-// EventSourcedAutoRegistrar 简化事件处理器与投影注册
+// EventSourcedAutoRegistrar 简化事件处理器与投影注册。
 type EventSourcedAutoRegistrar struct {
 	eventBus          bus.IEventBus
 	projectionManager *projection.ProjectionManager
 }
 
-// NewEventSourcedAutoRegistrar 创建注册器
+// NewEventSourcedAutoRegistrar 创建注册器。
 func NewEventSourcedAutoRegistrar(eventBus bus.IEventBus, manager *projection.ProjectionManager) *EventSourcedAutoRegistrar {
 	return &EventSourcedAutoRegistrar{
 		eventBus:          eventBus,
@@ -22,7 +22,7 @@ func NewEventSourcedAutoRegistrar(eventBus bus.IEventBus, manager *projection.Pr
 	}
 }
 
-// RegisterHandlers 注册事件处理器
+// RegisterHandlers 注册事件处理器。
 func (r *EventSourcedAutoRegistrar) RegisterHandlers(ctx context.Context, handlers ...bus.IEventHandler) error {
 	if r.eventBus == nil {
 		return fmt.Errorf("event bus is nil")
@@ -38,7 +38,7 @@ func (r *EventSourcedAutoRegistrar) RegisterHandlers(ctx context.Context, handle
 	return nil
 }
 
-// UnregisterHandlers 取消注册事件处理器
+// UnregisterHandlers 取消注册事件处理器。
 func (r *EventSourcedAutoRegistrar) UnregisterHandlers(ctx context.Context, handlers ...bus.IEventHandler) error {
 	if r.eventBus == nil {
 		return fmt.Errorf("event bus is nil")
@@ -54,7 +54,7 @@ func (r *EventSourcedAutoRegistrar) UnregisterHandlers(ctx context.Context, hand
 	return nil
 }
 
-// RegisterProjections 注册投影
+// RegisterProjections 注册投影。
 func (r *EventSourcedAutoRegistrar) RegisterProjections(projections ...projection.IProjection) error {
 	if r.projectionManager == nil {
 		return fmt.Errorf("projection manager is nil")
@@ -70,7 +70,7 @@ func (r *EventSourcedAutoRegistrar) RegisterProjections(projections ...projectio
 	return nil
 }
 
-// UnregisterProjections 取消注册投影
+// UnregisterProjections 取消注册投影。
 func (r *EventSourcedAutoRegistrar) UnregisterProjections(names ...string) error {
 	if r.projectionManager == nil {
 		return fmt.Errorf("projection manager is nil")
@@ -85,3 +85,4 @@ func (r *EventSourcedAutoRegistrar) UnregisterProjections(names ...string) error
 	}
 	return nil
 }
+

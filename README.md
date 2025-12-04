@@ -938,18 +938,22 @@ func ToJson(v any) ([]byte, error)
 为避免“状态已落库但事件未发布”的不一致，可启用 Outbox 装饰器仓储，在同一事务中写入事件与 Outbox 表，并由 Publisher 异步发布：
 
 ```go
-// 基础 ES 仓储
-base, _ := eventsourced.NewEventSourcedRepository[*Account](eventsourced.EventSourcedRepositoryOptions[*Account]{
-    AggregateType: "account",
-    Factory:       NewAccount,
-    EventStore:    sqlEventStore, // SQL 实现，支持 AppendEventsWithDB
-})
+// 基础 EventStore（SQL 实现）
+sqlEventStore := eventstore.NewSQLEventStore(db, "event_store")
 
 // Outbox 仓储（与 SQL EventStore 共用数据库连接）
 obRepo := outbox.NewSimpleSQLOutboxRepository(db, sqlEventStore, logging.GetLogger())
 
-// 包装为 OutboxAwareRepository
-repo, _ := eventsourced.NewOutboxAwareRepository(base, obRepo)
+// 应用层：构建 IEventStore 实现（含 Outbox）
+storeWithOutbox, _ := appeventsourced.NewDomainEventStore[*Account](appeventsourced.DomainEventStoreOptions[*Account]{
+    AggregateType: "account",
+    Factory:       NewAccount,
+    EventStore:    sqlEventStore,
+    OutboxRepo:    obRepo,
+})
+
+// 领域层：基于 IEventStore 构建仓储
+repo, _ := deventsourced.NewEventSourcedRepository[*Account]("account", NewAccount, storeWithOutbox)
 
 // 保存：同事务写入事件与 Outbox；发布由 Publisher 异步完成
 _ = repo.Save(ctx, aggregate)

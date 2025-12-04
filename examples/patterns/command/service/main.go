@@ -6,7 +6,9 @@ import (
 	"log"
 	"time"
 
-	"gochen/domain/eventsourced"
+	"gochen/app/eventsourced"
+	"gochen/domain"
+	deventsourced "gochen/domain/eventsourced"
 	"gochen/eventing"
 	ebus "gochen/eventing/bus"
 	estore "gochen/eventing/store"
@@ -18,18 +20,20 @@ import (
 // 领域事件载荷
 type ValueSet struct{ V int }
 
+func (e *ValueSet) EventType() string { return "ValueSet" }
+
 // 聚合
 type Counter struct {
-	*eventsourced.EventSourcedAggregate[int64]
+	*deventsourced.EventSourcedAggregate[int64]
 	Value int
 }
 
 func NewCounter(id int64) *Counter {
-	return &Counter{EventSourcedAggregate: eventsourced.NewEventSourcedAggregate[int64](id, "Counter")}
+	return &Counter{EventSourcedAggregate: deventsourced.NewEventSourcedAggregate[int64](id, "Counter")}
 }
 
-func (a *Counter) ApplyEvent(evt eventing.IEvent) error {
-	switch p := evt.GetPayload().(type) {
+func (a *Counter) ApplyEvent(evt domain.IDomainEvent) error {
+	switch p := evt.(type) {
 	case *ValueSet:
 		a.Value = p.V
 	}
@@ -54,7 +58,7 @@ func main() {
 
 	// 事件存储（内存） + ES 仓储
 	store := estore.NewMemoryEventStore()
-	repo, err := eventsourced.NewEventSourcedRepository[*Counter](eventsourced.EventSourcedRepositoryOptions[*Counter]{
+	storeAdapter, err := eventsourced.NewDomainEventStore[*Counter](eventsourced.DomainEventStoreOptions[*Counter]{
 		AggregateType: "Counter",
 		Factory:       NewCounter,
 		EventStore:    store,
@@ -63,19 +67,21 @@ func main() {
 	})
 	must(err)
 
-	// 事件溯源服务
-	service, err := eventsourced.NewEventSourcedService(repo, nil)
+	repo, err := deventsourced.NewEventSourcedRepository[*Counter]("Counter", NewCounter, storeAdapter)
+	must(err)
+
+	// 事件溯源服务（领域层定义）
+	service, err := deventsourced.NewEventSourcedService(repo, nil)
 	must(err)
 
 	// 注册命令处理：SetValue -> 产生 ValueSet 事件
-	must(service.RegisterCommandHandler(&SetValue{}, func(ctx context.Context, cmd eventsourced.IEventSourcedCommand, agg *Counter) error {
+	must(service.RegisterCommandHandler(&SetValue{}, func(ctx context.Context, cmd deventsourced.IEventSourcedCommand, agg *Counter) error {
 		c := cmd.(*SetValue)
-		evt := eventing.NewDomainEvent(agg.GetID(), agg.GetAggregateType(), "ValueSet", uint64(agg.GetVersion()+1), &ValueSet{V: c.V})
-		return agg.ApplyAndRecord(evt)
+		return agg.ApplyAndRecord(&ValueSet{V: c.V})
 	}))
 
 	// 适配为命令消息处理器，并订阅到 MessageBus（按 command_type 匹配）
-	handler := service.AsCommandMessageHandler("SetValue", func(c *cmd.Command) (eventsourced.IEventSourcedCommand, error) {
+	handler := eventsourced.AsCommandMessageHandler[*Counter](service, "SetValue", func(c *cmd.Command) (deventsourced.IEventSourcedCommand, error) {
 		v, _ := c.GetPayload().(int)
 		return &SetValue{ID: c.GetAggregateID(), V: v}, nil
 	})

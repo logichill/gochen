@@ -3,7 +3,7 @@ package proj
 import (
 	"context"
 
-	"gochen/domain/eventsourced"
+	"gochen/app/eventsourced"
 	"gochen/eventing"
 	"gochen/eventing/projection"
 	"gochen/examples/infra/projection/idempotent/internal/idemp"

@@ -190,7 +190,7 @@ func (rb *RouteBuilder[T]) handleGet(c http.IHttpContext) error {
 		return errors.NewValidationError("无效的ID格式")
 	}
 
-	entity, err := rb.service.GetByID(c.GetContext(), id)
+	entity, err := rb.service.Get(c.GetContext(), id)
 	if err != nil {
 		return err
 	}
@@ -231,7 +231,7 @@ func (rb *RouteBuilder[T]) handleUpdate(c http.IHttpContext) error {
 	}
 
 	// 首先获取现有实体
-	entity, err := rb.service.GetByID(c.GetContext(), id)
+	entity, err := rb.service.Get(c.GetContext(), id)
 	if err != nil {
 		return err
 	}

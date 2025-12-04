@@ -8,10 +8,11 @@ import (
 
 	_ "modernc.org/sqlite"
 
+	"gochen/app/eventsourced"
 	dbcore "gochen/data/db"
 	basicdb "gochen/data/db/basic"
-	"gochen/domain/eventsourced"
-	"gochen/eventing"
+	"gochen/domain"
+	deventsourced "gochen/domain/eventsourced"
 	estore "gochen/eventing/store"
 	ssnap "gochen/eventing/store/snapshot"
 )
@@ -19,18 +20,20 @@ import (
 // Counter 事件载荷
 type ValueSet struct{ V int }
 
+func (e *ValueSet) EventType() string { return "ValueSet" }
+
 // Counter 聚合
 type Counter struct {
-	*eventsourced.EventSourcedAggregate[int64]
+	*deventsourced.EventSourcedAggregate[int64]
 	Value int
 }
 
 func NewCounter(id int64) *Counter {
-	return &Counter{EventSourcedAggregate: eventsourced.NewEventSourcedAggregate[int64](id, "Counter")}
+	return &Counter{EventSourcedAggregate: deventsourced.NewEventSourcedAggregate[int64](id, "Counter")}
 }
 
-func (c *Counter) ApplyEvent(evt eventing.IEvent) error {
-	if p, ok := evt.GetPayload().(*ValueSet); ok {
+func (c *Counter) ApplyEvent(evt domain.IDomainEvent) error {
+	if p, ok := evt.(*ValueSet); ok {
 		c.Value = p.V
 	}
 	return c.EventSourcedAggregate.ApplyEvent(evt)
@@ -49,11 +52,15 @@ func main() {
 	snapMgr := ssnap.NewManager(snapStore, eventStore, snapCfg)
 
 	// 2) 构建 ES 仓储
-	repo, err := eventsourced.NewEventSourcedRepository[*Counter](eventsourced.EventSourcedRepositoryOptions[*Counter]{
-		AggregateType: "Counter",
-		Factory:       NewCounter,
-		EventStore:    eventStore,
+	storeAdapter, err := eventsourced.NewDomainEventStore[*Counter](eventsourced.DomainEventStoreOptions[*Counter]{
+		AggregateType:   "Counter",
+		Factory:         NewCounter,
+		EventStore:      eventStore,
+		SnapshotManager: snapMgr,
 	})
+	must(err)
+
+	repo, err := deventsourced.NewEventSourcedRepository[*Counter]("Counter", NewCounter, storeAdapter)
 	must(err)
 
 	aggID := int64(1001)
@@ -83,7 +90,9 @@ func main() {
 		must(err)
 		for i := range events {
 			evt := events[i]
-			_ = loadedFromSnap.ApplyEvent(&evt)
+			if de, ok := evt.GetPayload().(domain.IDomainEvent); ok {
+				_ = loadedFromSnap.ApplyEvent(de)
+			}
 		}
 	} else {
 		log.Printf("load snapshot failed, fallback to full replay: %v", err)
@@ -92,7 +101,9 @@ func main() {
 		must(err)
 		for i := range events {
 			evt := events[i]
-			_ = loadedFromSnap.ApplyEvent(&evt)
+			if de, ok := evt.GetPayload().(domain.IDomainEvent); ok {
+				_ = loadedFromSnap.ApplyEvent(de)
+			}
 		}
 	}
 	secondDuration := time.Since(start)
@@ -100,15 +111,14 @@ func main() {
 }
 
 // createAndSave 追加 n 个 ValueSet 事件并保存
-func createAndSave(ctx context.Context, repo *eventsourced.EventSourcedRepository[*Counter], id int64, n int) {
+func createAndSave(ctx context.Context, repo deventsourced.IEventSourcedRepository[*Counter, int64], id int64, n int) {
 	agg, _ := repo.GetByID(ctx, id)
 	if agg == nil {
 		agg = NewCounter(id)
 	}
 	for i := 0; i < n; i++ {
 		v := agg.Value + 1
-		evt := eventing.NewDomainEvent(agg.GetID(), agg.GetAggregateType(), "ValueSet", uint64(agg.GetVersion()+1), &ValueSet{V: v})
-		_ = agg.ApplyAndRecord(evt)
+		_ = agg.ApplyAndRecord(&ValueSet{V: v})
 	}
 	must(repo.Save(ctx, agg))
 }

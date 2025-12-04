@@ -35,14 +35,14 @@ type IRepository[T domain.IEntity[ID], ID comparable] interface {
 	// Create 创建实体
 	Create(ctx context.Context, e T) error
 
-	// GetByID 通过 ID 获取实体
-	GetByID(ctx context.Context, id ID) (T, error)
-
 	// Update 更新实体
 	Update(ctx context.Context, e T) error
 
 	// Delete 物理删除实体
 	Delete(ctx context.Context, id ID) error
+
+	// Get 通过 ID 获取实体
+	Get(ctx context.Context, id ID) (T, error)
 
 	// List 分页查询（偏移量 + 限制）
 	List(ctx context.Context, offset, limit int) ([]T, error)

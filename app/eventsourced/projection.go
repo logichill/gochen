@@ -11,7 +11,7 @@ import (
 	"gochen/logging"
 )
 
-// EventSourcedProjectionOption 投影配置
+// EventSourcedProjectionOption 投影配置。
 type EventSourcedProjectionOption[T any] struct {
 	Name       string
 	EventTypes []string
@@ -21,7 +21,7 @@ type EventSourcedProjectionOption[T any] struct {
 	Logger     logging.ILogger
 }
 
-// EventSourcedProjection 泛型投影模板
+// EventSourcedProjection 泛型投影模板。
 type EventSourcedProjection[T any] struct {
 	name       string
 	eventTypes []string
@@ -34,7 +34,7 @@ type EventSourcedProjection[T any] struct {
 	status   projection.ProjectionStatus
 }
 
-// NewEventSourcedProjection 创建投影
+// NewEventSourcedProjection 创建投影。
 func NewEventSourcedProjection[T any](opt EventSourcedProjectionOption[T]) (*EventSourcedProjection[T], error) {
 	if opt.Name == "" {
 		return nil, fmt.Errorf("projection name cannot be empty")
@@ -73,18 +73,18 @@ func NewEventSourcedProjection[T any](opt EventSourcedProjectionOption[T]) (*Eve
 		},
 	}
 	if p.logger == nil {
-		p.logger = logging.ComponentLogger("eventsourced.projection").
+		p.logger = logging.ComponentLogger("app.eventsourced.projection").
 			WithField("projection", opt.Name)
 	}
 	return p, nil
 }
 
-// GetName 投影名称
+// GetName 投影名称。
 func (p *EventSourcedProjection[T]) GetName() string {
 	return p.name
 }
 
-// Handle 处理事件
+// Handle 处理事件。
 func (p *EventSourcedProjection[T]) Handle(ctx context.Context, evt eventing.IEvent) error {
 	domainEvent, ok := evt.(*eventing.Event)
 	if !ok {
@@ -110,12 +110,12 @@ func (p *EventSourcedProjection[T]) Handle(ctx context.Context, evt eventing.IEv
 	return nil
 }
 
-// GetSupportedEventTypes 返回订阅事件
+// GetSupportedEventTypes 返回订阅事件。
 func (p *EventSourcedProjection[T]) GetSupportedEventTypes() []string {
 	return append([]string{}, p.eventTypes...)
 }
 
-// Rebuild 重建投影
+// Rebuild 重建投影。
 func (p *EventSourcedProjection[T]) Rebuild(ctx context.Context, events []eventing.Event) error {
 	if p.rebuild != nil {
 		return p.rebuild(ctx, events)
@@ -128,7 +128,7 @@ func (p *EventSourcedProjection[T]) Rebuild(ctx context.Context, events []eventi
 	return nil
 }
 
-// GetStatus 投影状态
+// GetStatus 投影状态。
 func (p *EventSourcedProjection[T]) GetStatus() projection.ProjectionStatus {
 	p.statusMu.RLock()
 	defer p.statusMu.RUnlock()
@@ -157,5 +157,6 @@ func (p *EventSourcedProjection[T]) updateStatusError(evt *eventing.Event, err e
 	p.status.UpdatedAt = time.Now()
 }
 
-// Ensure interface compliance
+// Ensure interface compliance.
 var _ projection.IProjection = (*EventSourcedProjection[any])(nil)
+

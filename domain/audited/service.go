@@ -36,8 +36,8 @@ type AuditedService[T IAuditedEntity[ID], ID comparable] struct {
 func NewAuditedService[T IAuditedEntity[ID], ID comparable](r IAuditedRepository[T, ID], store IAuditStore) *AuditedService[T, ID] {
 	return &AuditedService[T, ID]{
 		CRUDService: crud.NewCRUDService[T, ID](r),
-		repo:       r,
-		auditStore: store,
+		repo:        r,
+		auditStore:  store,
 	}
 }
 
@@ -54,8 +54,8 @@ func (s *AuditedService[T, ID]) ListDeleted(ctx context.Context, o, l int) ([]T,
 	// 优先使用可查询仓储接口
 	if qr, ok := any(s.repo).(crud.IQueryableRepository[T, ID]); ok {
 		opts := crud.QueryOptions{
-			Offset:        o,
-			Limit:         l,
+			Offset:         o,
+			Limit:          l,
 			IncludeDeleted: true,
 		}
 		entities, err := qr.Query(ctx, opts)
@@ -94,7 +94,7 @@ func (s *AuditedService[T, ID]) ListDeleted(ctx context.Context, o, l int) ([]T,
 }
 
 func (s *AuditedService[T, ID]) Restore(ctx context.Context, id ID, by string) error {
-	e, err := s.repo.GetByID(ctx, id)
+	e, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -110,7 +110,7 @@ func (s *AuditedService[T, ID]) Restore(ctx context.Context, id ID, by string) e
 }
 
 func (s *AuditedService[T, ID]) SoftDelete(ctx context.Context, id ID, by string) error {
-	e, err := s.repo.GetByID(ctx, id)
+	e, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return err
 	}

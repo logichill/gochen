@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"log"
 
-	"gochen/domain/eventsourced"
+	"gochen/app/eventsourced"
+	"gochen/domain"
+	deventsourced "gochen/domain/eventsourced"
 	"gochen/eventing"
 	ebus "gochen/eventing/bus"
 	estore "gochen/eventing/store"
@@ -13,42 +15,47 @@ import (
 	mtransport "gochen/messaging/transport/memory"
 )
 
-// 事件载荷
+// 领域事件载荷
 type AccountOpened struct{ Initial int }
+
+func (e *AccountOpened) EventType() string { return "AccountOpened" }
+
 type Deposited struct{ Amount int }
+
+func (e *Deposited) EventType() string { return "Deposited" }
+
 type Withdrawn struct{ Amount int }
+
+func (e *Withdrawn) EventType() string { return "Withdrawn" }
 
 // 聚合
 type Account struct {
-	*eventsourced.EventSourcedAggregate[int64]
+	*deventsourced.EventSourcedAggregate[int64]
 	Balance int
 }
 
 func NewAccount(id int64) *Account {
-	return &Account{EventSourcedAggregate: eventsourced.NewEventSourcedAggregate[int64](id, "account")}
+	return &Account{EventSourcedAggregate: deventsourced.NewEventSourcedAggregate[int64](id, "account")}
 }
 
 func (a *Account) Open(initial int) error {
 	if a.GetVersion() != 0 {
 		return fmt.Errorf("already opened")
 	}
-	evt := eventing.NewDomainEvent(a.GetID(), a.GetAggregateType(), "AccountOpened", uint64(a.GetVersion()+1), &AccountOpened{Initial: initial})
-	return a.ApplyAndRecord(evt)
+	return a.ApplyAndRecord(&AccountOpened{Initial: initial})
 }
 func (a *Account) Deposit(n int) error {
-	evt := eventing.NewDomainEvent(a.GetID(), a.GetAggregateType(), "Deposited", uint64(a.GetVersion()+1), &Deposited{Amount: n})
-	return a.ApplyAndRecord(evt)
+	return a.ApplyAndRecord(&Deposited{Amount: n})
 }
 func (a *Account) Withdraw(n int) error {
 	if a.Balance < n {
 		return fmt.Errorf("insufficient")
 	}
-	evt := eventing.NewDomainEvent(a.GetID(), a.GetAggregateType(), "Withdrawn", uint64(a.GetVersion()+1), &Withdrawn{Amount: n})
-	return a.ApplyAndRecord(evt)
+	return a.ApplyAndRecord(&Withdrawn{Amount: n})
 }
 
-func (a *Account) ApplyEvent(evt eventing.IEvent) error {
-	switch e := evt.GetPayload().(type) {
+func (a *Account) ApplyEvent(evt domain.IDomainEvent) error {
+	switch e := evt.(type) {
 	case *AccountOpened:
 		a.Balance = e.Initial
 	case *Deposited:
@@ -59,17 +66,6 @@ func (a *Account) ApplyEvent(evt eventing.IEvent) error {
 	return a.EventSourcedAggregate.ApplyEvent(evt)
 }
 
-func (a *Account) When(evt eventing.IEvent) error { return a.ApplyEvent(evt) }
-
-func (a *Account) LoadFromHistory(events []eventing.IEvent) error {
-	for _, evt := range events {
-		if err := a.ApplyEvent(evt); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func main() {
 	log.Println("=== Event Sourcing Demo ===")
 
@@ -77,14 +73,20 @@ func main() {
 	store := estore.NewMemoryEventStore()
 	bus := ebus.NewEventBus(messaging.NewMessageBus(mtransport.NewMemoryTransport(1000, 2)))
 
-	// 构造仓储模板
-	repo, err := eventsourced.NewEventSourcedRepository[*Account](eventsourced.EventSourcedRepositoryOptions[*Account]{
+	// 构造 IEventStore 实现
+	eventStoreAdapter, err := eventsourced.NewDomainEventStore[*Account](eventsourced.DomainEventStoreOptions[*Account]{
 		AggregateType: "account",
-		Factory:       func(id int64) *Account { return NewAccount(id) },
+		Factory:       NewAccount,
 		EventStore:    store,
 		EventBus:      bus,
 		PublishEvents: true,
 	})
+	if err != nil {
+		panic(err)
+	}
+
+	// 构造领域层仓储
+	repo, err := deventsourced.NewEventSourcedRepository[*Account]("account", NewAccount, eventStoreAdapter)
 	if err != nil {
 		panic(err)
 	}

@@ -31,7 +31,7 @@ type ArticleRepo struct {
 
 // Publish 示例业务方法：发布文章
 func (r *ArticleRepo) Publish(ctx context.Context, id int64, by string) error {
-	art, err := r.GetByID(ctx, id)
+	art, err := r.Get(ctx, id)
 	if err != nil {
 		return err
 	}

@@ -6,7 +6,9 @@ import (
 	"log"
 	"time"
 
-	"gochen/domain/eventsourced"
+	"gochen/app/eventsourced"
+	"gochen/domain"
+	deventsourced "gochen/domain/eventsourced"
 	"gochen/eventing"
 	"gochen/eventing/outbox"
 	estore "gochen/eventing/store"
@@ -15,18 +17,20 @@ import (
 // 领域事件
 type Deposited struct{ Amount int }
 
+func (e *Deposited) EventType() string { return "Deposited" }
+
 // 聚合
 type Wallet struct {
-	*eventsourced.EventSourcedAggregate[int64]
+	*deventsourced.EventSourcedAggregate[int64]
 	Balance int
 }
 
 func NewWallet(id int64) *Wallet {
-	return &Wallet{EventSourcedAggregate: eventsourced.NewEventSourcedAggregate[int64](id, "Wallet")}
+	return &Wallet{EventSourcedAggregate: deventsourced.NewEventSourcedAggregate[int64](id, "Wallet")}
 }
 
-func (a *Wallet) ApplyEvent(evt eventing.IEvent) error {
-	switch p := evt.GetPayload().(type) {
+func (a *Wallet) ApplyEvent(evt domain.IDomainEvent) error {
+	switch p := evt.(type) {
 	case *Deposited:
 		a.Balance += p.Amount
 	}
@@ -58,25 +62,25 @@ func main() {
 	ctx := context.Background()
 
 	// 基础 ES 仓储（内存事件存储）
-	base, err := eventsourced.NewEventSourcedRepository[*Wallet](eventsourced.EventSourcedRepositoryOptions[*Wallet]{
+	storeAdapter, err := eventsourced.NewDomainEventStore[*Wallet](eventsourced.DomainEventStoreOptions[*Wallet]{
 		AggregateType: "Wallet",
 		Factory:       NewWallet,
 		EventStore:    estore.NewMemoryEventStore(),
+		OutboxRepo:    &mockOutbox{},
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// Outbox-aware 装饰器（此处使用 mockOutbox 打印）
-	repo, err := eventsourced.NewOutboxAwareRepository(base, &mockOutbox{})
+	repo, err := deventsourced.NewEventSourcedRepository[*Wallet]("Wallet", NewWallet, storeAdapter)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	// 构造聚合与事件
 	w := NewWallet(7001)
-	_ = w.ApplyAndRecord(eventing.NewDomainEvent(w.GetID(), w.GetAggregateType(), "Deposited", uint64(w.GetVersion()+1), &Deposited{Amount: 100}))
-	_ = w.ApplyAndRecord(eventing.NewDomainEvent(w.GetID(), w.GetAggregateType(), "Deposited", uint64(w.GetVersion()+1), &Deposited{Amount: 50}))
+	_ = w.ApplyAndRecord(&Deposited{Amount: 100})
+	_ = w.ApplyAndRecord(&Deposited{Amount: 50})
 
 	// 保存：同事务写事件与 Outbox（示例为 mock 打印）
 	if err := repo.Save(ctx, w); err != nil {

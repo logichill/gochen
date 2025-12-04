@@ -11,9 +11,9 @@ import (
 // 依赖 IRepository，适合配置/主数据等场景
 type IService[T domain.IEntity[ID], ID comparable] interface {
 	Create(ctx context.Context, e T) error
-	GetByID(ctx context.Context, id ID) (T, error)
 	Update(ctx context.Context, e T) error
 	Delete(ctx context.Context, id ID) error
+	Get(ctx context.Context, id ID) (T, error)
 	List(ctx context.Context, offset, limit int) ([]T, error)
 	Count(ctx context.Context) (int64, error)
 
@@ -34,16 +34,16 @@ func (s *CRUDService[T, ID]) Create(ctx context.Context, e T) error {
 	return s.repository.Create(ctx, e)
 }
 
-func (s *CRUDService[T, ID]) GetByID(ctx context.Context, id ID) (T, error) {
-	return s.repository.GetByID(ctx, id)
-}
-
 func (s *CRUDService[T, ID]) Update(ctx context.Context, e T) error {
 	return s.repository.Update(ctx, e)
 }
 
 func (s *CRUDService[T, ID]) Delete(ctx context.Context, id ID) error {
 	return s.repository.Delete(ctx, id)
+}
+
+func (s *CRUDService[T, ID]) Get(ctx context.Context, id ID) (T, error) {
+	return s.repository.Get(ctx, id)
 }
 
 func (s *CRUDService[T, ID]) List(ctx context.Context, o, l int) ([]T, error) {

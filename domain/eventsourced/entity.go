@@ -1,12 +1,9 @@
-// Package entity 提供事件溯源聚合根接口与实现，
-// 用于配合 `gochen/domain/eventsourced` 仓储与服务模板。
 package eventsourced
 
 import (
 	"sync"
 
 	"gochen/domain"
-	"gochen/eventing"
 )
 
 // IEventSourcedAggregate 事件溯源聚合根接口。
@@ -18,23 +15,23 @@ type IEventSourcedAggregate[T comparable] interface {
 	GetAggregateType() string
 
 	// ApplyEvent 应用事件到聚合根（修改状态），应为幂等。
-	ApplyEvent(evt eventing.IEvent) error
+	ApplyEvent(evt domain.IDomainEvent) error
 
 	// GetUncommittedEvents 获取未提交的事件。
-	GetUncommittedEvents() []eventing.IEvent
+	GetUncommittedEvents() []domain.IDomainEvent
 
 	// MarkEventsAsCommitted 标记事件为已提交。
 	MarkEventsAsCommitted()
 
 	// LoadFromHistory 从事件历史重建状态。
-	LoadFromHistory(events []eventing.IEvent) error
+	LoadFromHistory(events []domain.IDomainEvent) error
 }
 
 // EventSourcedAggregate 事件溯源聚合根（泛型实现）。
 type EventSourcedAggregate[T comparable] struct {
 	id                T
 	version           uint64
-	uncommittedEvents []eventing.IEvent
+	uncommittedEvents []domain.IDomainEvent
 	aggregateType     string
 	mu                sync.RWMutex
 }
@@ -44,7 +41,7 @@ func NewEventSourcedAggregate[T comparable](id T, aggregateType string) *EventSo
 	return &EventSourcedAggregate[T]{
 		id:                id,
 		version:           0,
-		uncommittedEvents: make([]eventing.IEvent, 0),
+		uncommittedEvents: make([]domain.IDomainEvent, 0),
 		aggregateType:     aggregateType,
 	}
 }
@@ -71,10 +68,10 @@ func (a *EventSourcedAggregate[T]) GetAggregateType() string {
 }
 
 // GetDomainEvents 返回未提交事件的副本。
-func (a *EventSourcedAggregate[T]) GetDomainEvents() []eventing.IEvent {
+func (a *EventSourcedAggregate[T]) GetDomainEvents() []domain.IDomainEvent {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	events := make([]eventing.IEvent, len(a.uncommittedEvents))
+	events := make([]domain.IDomainEvent, len(a.uncommittedEvents))
 	copy(events, a.uncommittedEvents)
 	return events
 }
@@ -87,17 +84,17 @@ func (a *EventSourcedAggregate[T]) ClearDomainEvents() {
 }
 
 // AddDomainEvent 添加领域事件。
-func (a *EventSourcedAggregate[T]) AddDomainEvent(evt eventing.IEvent) {
+func (a *EventSourcedAggregate[T]) AddDomainEvent(evt domain.IDomainEvent) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.uncommittedEvents == nil {
-		a.uncommittedEvents = make([]eventing.IEvent, 0)
+		a.uncommittedEvents = make([]domain.IDomainEvent, 0)
 	}
 	a.uncommittedEvents = append(a.uncommittedEvents, evt)
 }
 
 // GetUncommittedEvents 实现 IEventSourcedAggregate。
-func (a *EventSourcedAggregate[T]) GetUncommittedEvents() []eventing.IEvent {
+func (a *EventSourcedAggregate[T]) GetUncommittedEvents() []domain.IDomainEvent {
 	return a.GetDomainEvents()
 }
 
@@ -109,7 +106,7 @@ func (a *EventSourcedAggregate[T]) MarkEventsAsCommitted() {
 }
 
 // ApplyEvent 默认实现：仅递增版本号，具体聚合应在外部重写并调用此方法。
-func (a *EventSourcedAggregate[T]) ApplyEvent(evt eventing.IEvent) error {
+func (a *EventSourcedAggregate[T]) ApplyEvent(evt domain.IDomainEvent) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.version++
@@ -117,7 +114,7 @@ func (a *EventSourcedAggregate[T]) ApplyEvent(evt eventing.IEvent) error {
 }
 
 // LoadFromHistory 实现 IEventSourcedAggregate。
-func (a *EventSourcedAggregate[T]) LoadFromHistory(events []eventing.IEvent) error {
+func (a *EventSourcedAggregate[T]) LoadFromHistory(events []domain.IDomainEvent) error {
 	for _, evt := range events {
 		if err := a.ApplyEvent(evt); err != nil {
 			return err
@@ -132,7 +129,7 @@ func (a *EventSourcedAggregate[T]) Validate() error {
 }
 
 // ApplyAndRecord 应用事件并记录为未提交。
-func (a *EventSourcedAggregate[T]) ApplyAndRecord(evt eventing.IEvent) error {
+func (a *EventSourcedAggregate[T]) ApplyAndRecord(evt domain.IDomainEvent) error {
 	if err := a.ApplyEvent(evt); err != nil {
 		return err
 	}

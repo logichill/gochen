@@ -25,10 +25,10 @@ func (f *fakeEntity) GetVersion() int64 { return f.Version }
 
 type noopRepository struct{}
 
-func (noopRepository) Create(context.Context, *fakeEntity) error           { return nil }
-func (noopRepository) GetByID(context.Context, int64) (*fakeEntity, error) { return nil, nil }
-func (noopRepository) Update(context.Context, *fakeEntity) error           { return nil }
-func (noopRepository) Delete(context.Context, int64) error                 { return nil }
+func (noopRepository) Create(context.Context, *fakeEntity) error       { return nil }
+func (noopRepository) Get(context.Context, int64) (*fakeEntity, error) { return nil, nil }
+func (noopRepository) Update(context.Context, *fakeEntity) error       { return nil }
+func (noopRepository) Delete(context.Context, int64) error             { return nil }
 func (noopRepository) List(context.Context, int, int) ([]*fakeEntity, error) {
 	return []*fakeEntity{}, nil
 }
@@ -87,15 +87,15 @@ func newStubAppService(order *[]string) *stubAppService {
 	}
 }
 
-func (s *stubAppService) Create(context.Context, *fakeEntity) error           { return nil }
-func (s *stubAppService) GetByID(context.Context, int64) (*fakeEntity, error) { return nil, nil }
-func (s *stubAppService) Update(context.Context, *fakeEntity) error           { return nil }
-func (s *stubAppService) Delete(context.Context, int64) error                 { return nil }
+func (s *stubAppService) Create(context.Context, *fakeEntity) error       { return nil }
+func (s *stubAppService) Get(context.Context, int64) (*fakeEntity, error) { return nil, nil }
+func (s *stubAppService) Update(context.Context, *fakeEntity) error       { return nil }
+func (s *stubAppService) Delete(context.Context, int64) error             { return nil }
 func (s *stubAppService) List(context.Context, int, int) ([]*fakeEntity, error) {
 	return []*fakeEntity{}, nil
 }
-func (s *stubAppService) Count(context.Context) (int64, error)                   { return 0, nil }
-func (s *stubAppService) Repository() crud.IRepository[*fakeEntity, int64]       { return nil }
+func (s *stubAppService) Count(context.Context) (int64, error)             { return 0, nil }
+func (s *stubAppService) Repository() crud.IRepository[*fakeEntity, int64] { return nil }
 func (s *stubAppService) ListByQuery(context.Context, *application.QueryParams) ([]*fakeEntity, error) {
 	if s.order != nil {
 		*s.order = append(*s.order, "handler-list")

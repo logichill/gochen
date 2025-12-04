@@ -2,7 +2,8 @@
 
 本指南基于当前仓库结构，演示如何使用：
 
-- 领域层：`domain/entity`（事件溯源聚合根）、`domain/eventsourced`（命令服务 / 仓储模板）
+- 领域层：`domain/entity`（基础实体接口）、`domain/eventsourced`（事件溯源聚合根与仓储接口）
+- 应用层 ES 模板：`app/eventsourced`（事件溯源仓储/Outbox/投影与命令适配模板）
 - 事件层：`eventing/event.go`、`eventing/store`、`eventing/bus`、`eventing/projection`、`eventing/outbox`
 - 消息层：`messaging` 与 `messaging/command`
 
@@ -12,33 +13,31 @@
 
 ---
 
-## 1. 事件溯源聚合根（domain/entity）
+## 1. 事件溯源聚合根（domain/eventsourced）
 
 ### 1.1 定义聚合根
 
-文件位置：`domain/entity/aggregate_eventsourced.go`
+文件位置：`domain/eventsourced/entity.go`
 
 ```go
 type BankAccount struct {
-    *entity.EventSourcedAggregate[int64]
+    *eventsourced.EventSourcedAggregate[int64]
     Balance int64
 }
 
 func NewBankAccount(id int64) *BankAccount {
     return &BankAccount{
-        EventSourcedAggregate: entity.NewEventSourcedAggregate[int64](id, "BankAccount"),
+        EventSourcedAggregate: eventsourced.NewEventSourcedAggregate[int64](id, "BankAccount"),
     }
 }
 
 // ApplyEvent 应用事件
-func (a *BankAccount) ApplyEvent(evt eventing.IEvent) error {
-    switch evt.GetType() {
-    case "MoneyDeposited":
-        amount := evt.GetPayload().(int64)
-        a.Balance += amount
-    case "MoneyWithdrawn":
-        amount := evt.GetPayload().(int64)
-        a.Balance -= amount
+func (a *BankAccount) ApplyEvent(evt domain.IDomainEvent) error {
+    switch e := evt.(type) {
+    case *MoneyDeposited:
+        a.Balance += e.Amount
+    case *MoneyWithdrawn:
+        a.Balance -= e.Amount
     }
     // 基类负责版本号递增等通用处理
     return a.EventSourcedAggregate.ApplyEvent(evt)
@@ -55,15 +54,8 @@ func (a *BankAccount) Deposit(amount int64) error {
         return fmt.Errorf("amount must be positive")
     }
 
-    evt := eventing.NewDomainEvent(
-        a.GetID(),        // AggregateID
-        a.GetAggregateType(),
-        "MoneyDeposited", // event type
-        uint64(a.GetVersion()+1),
-        amount,           // payload
-    )
-
-    return a.ApplyAndRecord(evt)
+    // MoneyDeposited 实现了 domain.IDomainEvent
+    return a.ApplyAndRecord(&MoneyDeposited{Amount: amount})
 }
 ```
 
@@ -101,20 +93,15 @@ CREATE TABLE event_store (
 
 ---
 
-## 3. 事件溯源仓储与服务（domain/eventsourced）
+## 3. 事件溯源仓储与服务（domain/eventsourced + app/eventsourced）
 
 ### 3.1 事件溯源仓储
 
-文件位置：`domain/eventsourced/repository.go`
-
-核心职责：
-
-- 使用 `IEventStore` 加载聚合事件流；
-- 调用 `LoadFromHistory` 重建聚合状态；
-- 将未提交事件通过 `AppendEvents` 持久化。
+领域层通过 `domain/eventsourced.IEventSourcedRepository[T, ID]` 抽象仓储接口，
+应用层在 `app/eventsourced` 中提供基于 `IEventStore` 的默认实现（`EventSourcedRepository[T]`）：
 
 ```go
-type EventSourcedRepository[T entity.IEventSourcedAggregate[int64]] struct {
+type EventSourcedRepository[T eventsourced.IEventSourcedAggregate[int64]] struct {
     store store.IEventStore
     // 省略类型工厂等
 }
@@ -129,23 +116,36 @@ func (r *EventSourcedRepository[T]) GetByID(ctx context.Context, id int64) (T, e
         return agg, err
     }
 
-    // 3. 重放事件
-    if err := agg.LoadFromHistory(events); err != nil {
-        return agg, err
+    // 3. 将事件载荷还原为 IDomainEvent 并重放
+    for i := range events {
+        payload, ok := events[i].GetPayload().(domain.IDomainEvent)
+        if !ok {
+            return agg, fmt.Errorf("payload does not implement IDomainEvent: %T", events[i].GetPayload())
+        }
+        if err := agg.ApplyEvent(payload); err != nil {
+            return agg, err
+        }
     }
+    agg.MarkEventsAsCommitted()
     return agg, nil
 }
 
 func (r *EventSourcedRepository[T]) Save(ctx context.Context, agg T) error {
-    events := agg.GetUncommittedEvents()
+    events := agg.GetUncommittedEvents() // []domain.IDomainEvent
     if len(events) == 0 {
         return nil
     }
     storable := make([]eventing.IStorableEvent, len(events))
-    for i, e := range events {
-        storable[i] = e.(eventing.IStorableEvent)
+    for i, de := range events {
+        storable[i] = eventing.NewDomainEvent(
+            agg.GetID(),
+            agg.GetAggregateType(),
+            de.EventType(),
+            uint64(agg.GetVersion())+uint64(i)+1,
+            de,
+        )
     }
-    if err := r.store.AppendEvents(ctx, agg.GetID(), storable, uint64(agg.GetVersion())); err != nil {
+    if err := r.store.AppendEvents(ctx, agg.GetID(), storable, /*expectedVersion*/ 0); err != nil {
         return err
     }
     agg.MarkEventsAsCommitted()
@@ -164,7 +164,7 @@ type IEventSourcedCommand interface {
     AggregateID() int64
 }
 
-type EventSourcedCommandHandler[T entity.IEventSourcedAggregate[int64]] func(
+type EventSourcedCommandHandler[T eventsourced.IEventSourcedAggregate[int64]] func(
     ctx context.Context,
     cmd IEventSourcedCommand,
     aggregate T,
@@ -324,4 +324,3 @@ Outbox 模式用于在同一事务内写入领域事件和“待发布消息”�
 
 通过上述组件的组合，gochen 在不强制绑定具体框架/ORM 的前提下，提供了一套相对完整的 DDD + Event Sourcing + CQRS 基础设施。  
 进一步的细节（如具体 SQL schema、迁移实践）可参考 `migration-guide.md` 与 `eventing` 相关源代码。
-

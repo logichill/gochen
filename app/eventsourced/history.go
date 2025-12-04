@@ -4,16 +4,17 @@ import (
 	"context"
 	"time"
 
+	deventsourced "gochen/domain/eventsourced"
 	"gochen/eventing"
 	"gochen/eventing/store"
 )
 
-// EventHistoryEntry 代表一条对用户可读的业务历史记录（单个事件的视图）
+// EventHistoryEntry 代表一条对用户可读的业务历史记录（单个事件的视图）。
 //
 // 说明：
-// - SummaryKey/SummaryParams 用于前端或上层根据 key + 参数渲染人类可读文案（支持 i18n）；
-// - ActorID 通常从事件 Metadata 中提取（例如 "actor_id"），由领域层的 mapper 决定；
-// - RawPayload 可选携带原始载荷，便于调试或高级展示（可为 nil）。
+//   - SummaryKey/SummaryParams 用于前端或上层根据 key + 参数渲染人类可读文案（支持 i18n）；
+//   - ActorID 通常从事件 Metadata 中提取（例如 "actor_id"），由领域层的 mapper 决定；
+//   - RawPayload 可选携带原始载荷，便于调试或高级展示（可为 nil）。
 type EventHistoryEntry struct {
 	EventID       string         `json:"event_id"`
 	AggregateID   int64          `json:"aggregate_id"`
@@ -27,7 +28,7 @@ type EventHistoryEntry struct {
 	RawPayload    any            `json:"raw_payload,omitempty"`
 }
 
-// EventHistoryPage 封装分页后的历史记录结果
+// EventHistoryPage 封装分页后的历史记录结果。
 type EventHistoryPage struct {
 	Entries  []*EventHistoryEntry `json:"entries"`
 	Total    int                  `json:"total"`
@@ -35,15 +36,15 @@ type EventHistoryPage struct {
 	PageSize int                  `json:"page_size"`
 }
 
-// EventHistoryMapper 将单个事件映射为业务可读的历史条目
+// EventHistoryMapper 将单个事件映射为业务可读的历史条目。
 //
 // 返回 nil 表示该事件不需要出现在历史视图中。
 type EventHistoryMapper func(evt eventing.IEvent) *EventHistoryEntry
 
 // defaultEventHistoryMapper 是一个退化但可用的默认实现：
-// - SummaryKey 使用事件类型
-// - SummaryParams 直接塞入 Payload（如果是简单类型/struct）
-// - ActorID 尝试从 metadata["actor_id"] 中读取
+//   - SummaryKey 使用事件类型
+//   - SummaryParams 直接塞入 Payload（如果是简单类型/struct）
+//   - ActorID 尝试从 metadata["actor_id"] 中读取
 func defaultEventHistoryMapper(evt eventing.IEvent) *EventHistoryEntry {
 	if evt == nil {
 		return nil
@@ -72,16 +73,21 @@ func defaultEventHistoryMapper(evt eventing.IEvent) *EventHistoryEntry {
 	}
 }
 
-// GetEventHistory 获取聚合的事件历史
-func (r *EventSourcedRepository[T]) GetEventHistory(ctx context.Context, id int64) ([]eventing.IEvent, error) {
+// GetEventHistory 获取聚合的事件历史。
+func GetEventHistory(
+	ctx context.Context,
+	eventStore store.IEventStore,
+	aggregateType string,
+	id int64,
+) ([]eventing.IEvent, error) {
 	var (
 		events []eventing.Event
 		err    error
 	)
-	if typedStore, ok := r.eventStore.(store.ITypedEventStore); ok {
-		events, err = typedStore.LoadEventsByType(ctx, r.aggregateType, id, 0)
+	if typedStore, ok := eventStore.(store.ITypedEventStore); ok {
+		events, err = typedStore.LoadEventsByType(ctx, aggregateType, id, 0)
 	} else {
-		events, err = r.eventStore.LoadEvents(ctx, id, 0)
+		events, err = eventStore.LoadEvents(ctx, id, 0)
 	}
 	if err != nil {
 		return nil, err
@@ -94,16 +100,22 @@ func (r *EventSourcedRepository[T]) GetEventHistory(ctx context.Context, id int6
 	return result, nil
 }
 
-// GetEventHistoryAfter 获取指定版本之后的事件历史
-func (r *EventSourcedRepository[T]) GetEventHistoryAfter(ctx context.Context, id int64, afterVersion uint64) ([]eventing.IEvent, error) {
+// GetEventHistoryAfter 获取指定版本之后的事件历史。
+func GetEventHistoryAfter(
+	ctx context.Context,
+	eventStore store.IEventStore,
+	aggregateType string,
+	id int64,
+	afterVersion uint64,
+) ([]eventing.IEvent, error) {
 	var (
 		events []eventing.Event
 		err    error
 	)
-	if typedStore, ok := r.eventStore.(store.ITypedEventStore); ok {
-		events, err = typedStore.LoadEventsByType(ctx, r.aggregateType, id, afterVersion)
+	if typedStore, ok := eventStore.(store.ITypedEventStore); ok {
+		events, err = typedStore.LoadEventsByType(ctx, aggregateType, id, afterVersion)
 	} else {
-		events, err = r.eventStore.LoadEvents(ctx, id, afterVersion)
+		events, err = eventStore.LoadEvents(ctx, id, afterVersion)
 	}
 	if err != nil {
 		return nil, err
@@ -117,11 +129,13 @@ func (r *EventSourcedRepository[T]) GetEventHistoryAfter(ctx context.Context, id
 }
 
 // GetEventHistoryPage 按页获取聚合的事件历史视图：
-// - page 从 1 开始；pageSize > 0
-// - mapper 负责将 IEvent → EventHistoryEntry；若为 nil，则使用默认映射
-// - 当前实现优先使用 IAggregateEventStore + IAggregateInspector，其次回退为内存分页
-func (r *EventSourcedRepository[T]) GetEventHistoryPage(
+//   - page 从 1 开始；pageSize > 0
+//   - mapper 负责将 IEvent → EventHistoryEntry；若为 nil，则使用默认映射
+//   - 当前实现优先使用 IAggregateEventStore + IAggregateInspector，其次回退为内存分页
+func GetEventHistoryPage(
 	ctx context.Context,
+	eventStore store.IEventStore,
+	aggregateType string,
 	id int64,
 	page int,
 	pageSize int,
@@ -138,8 +152,8 @@ func (r *EventSourcedRepository[T]) GetEventHistoryPage(
 	}
 
 	// 优先使用 IAggregateEventStore + IAggregateInspector 做基于版本的分页
-	if aggStore, ok := r.eventStore.(store.IAggregateEventStore); ok {
-		if inspector, ok2 := r.eventStore.(store.IAggregateInspector); ok2 {
+	if aggStore, ok := eventStore.(store.IAggregateEventStore); ok {
+		if inspector, ok2 := eventStore.(store.IAggregateInspector); ok2 {
 			// 版本即事件总数（按聚合内版本连续的假设）
 			totalVersion, err := inspector.GetAggregateVersion(ctx, id)
 			if err != nil {
@@ -156,7 +170,7 @@ func (r *EventSourcedRepository[T]) GetEventHistoryPage(
 			}
 
 			opts := &store.AggregateStreamOptions{
-				AggregateType: r.aggregateType,
+				AggregateType: aggregateType,
 				AggregateID:   id,
 				AfterVersion:  uint64(start),
 				Limit:         pageSize,
@@ -185,7 +199,7 @@ func (r *EventSourcedRepository[T]) GetEventHistoryPage(
 	}
 
 	// 回退方案：一次性加载该聚合全部事件，再内存映射 + 分页
-	events, err := r.GetEventHistory(ctx, id)
+	events, err := GetEventHistory(ctx, eventStore, aggregateType, id)
 	if err != nil {
 		return nil, err
 	}
@@ -211,7 +225,8 @@ func (r *EventSourcedRepository[T]) GetEventHistoryPage(
 	return &EventHistoryPage{Entries: pageEntries, Total: total, Page: page, PageSize: pageSize}, nil
 }
 
-type snapshotAggregateAdapter[T IEventSourcedAggregate[int64]] struct {
+// snapshotAggregateAdapter 将领域聚合适配为快照管理器所需的接口。
+type snapshotAggregateAdapter[T deventsourced.IEventSourcedAggregate[int64]] struct {
 	aggregate T
 }
 

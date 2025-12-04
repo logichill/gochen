@@ -2,196 +2,130 @@ package eventsourced
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
-	"gochen/eventing"
-	"gochen/eventing/bus"
-	"gochen/eventing/store"
-	"gochen/eventing/store/snapshot"
-	"gochen/logging"
+	"gochen/domain"
 )
 
-// EventSourcedRepositoryOptions 配置事件溯源仓储
-type EventSourcedRepositoryOptions[T IEventSourcedAggregate[int64]] struct {
-	AggregateType   string
-	Factory         func(id int64) T
-	EventStore      store.IEventStore
-	SnapshotManager *snapshot.Manager
-	EventBus        bus.IEventBus
-	PublishEvents   bool
-	Logger          logging.ILogger
+// IEventSourcedRepository 事件溯源仓储接口
+// 适用于完全审计型数据（金融交易、积分系统等）
+type IEventSourcedRepository[T IEventSourcedAggregate[ID], ID comparable] interface {
+	// Save 保存聚合（保存事件，不保存状态）。
+	Save(ctx context.Context, aggregate T) error
+
+	// GetByID 通过 ID 获取聚合。
+	// 具体实现通常通过重放事件重建聚合状态。
+	GetByID(ctx context.Context, id ID) (T, error)
+
+	// Exists 检查聚合是否存在。
+	Exists(ctx context.Context, id ID) (bool, error)
+
+	// GetAggregateVersion 获取聚合的当前版本号。
+	// 若聚合不存在，应返回 (0, nil)。
+	GetAggregateVersion(ctx context.Context, id ID) (uint64, error)
 }
 
-// EventSourcedRepository 提供统一的事件溯源仓储实现
+// IEventStore 领域层的事件存储抽象。
+//
+// 注意：该接口以领域事件（IDomainEvent）为中心，不关心具体存储实现与传输信封，
+// 由上层通过适配器对接 eventing/store.IEventStore、Outbox、Snapshot 等基础设施。
+type IEventStore interface {
+	// AppendEvents 追加领域事件到聚合的事件流中。
+	AppendEvents(ctx context.Context, aggregateID int64, events []domain.IDomainEvent, expectedVersion uint64) error
+
+	// RestoreAggregate 根据底层事件流（及可选快照）恢复聚合状态。
+	// 若聚合不存在，应返回 (0, nil) 并保持 aggregate 为初始状态。
+	//
+	// 返回值为当前聚合版本号（即最后一个事件的版本），用于上层判断是否存在或做乐观锁控制。
+	RestoreAggregate(ctx context.Context, aggregate IEventSourcedAggregate[int64]) (uint64, error)
+
+	// Exists 检查聚合是否存在。
+	Exists(ctx context.Context, aggregateID int64) (bool, error)
+
+	// GetAggregateVersion 获取聚合当前版本。
+	// 若聚合不存在，应返回 (0, nil)。
+	GetAggregateVersion(ctx context.Context, aggregateID int64) (uint64, error)
+}
+
+// EventSourcedRepository 领域层默认事件溯源仓储实现。
+//
+// 该实现仅依赖领域抽象：
+//   - IEventSourcedAggregate[int64]：聚合根；
+//   - IEventStore：领域事件存储接口。
+//
+// 具体的事件存储/快照/Outbox/EventBus 等能力由上层通过 IEventStore 适配器提供。
 type EventSourcedRepository[T IEventSourcedAggregate[int64]] struct {
-	aggregateType   string
-	factory         func(id int64) T
-	eventStore      store.IEventStore
-	snapshotManager *snapshot.Manager
-	eventBus        bus.IEventBus
-	publishEvents   bool
-	logger          logging.ILogger
+	aggregateType string
+	factory       func(id int64) T
+	store         IEventStore
 }
 
-// NewEventSourcedRepository 创建新的事件溯源仓储模板
-func NewEventSourcedRepository[T IEventSourcedAggregate[int64]](opts EventSourcedRepositoryOptions[T]) (*EventSourcedRepository[T], error) {
-	if opts.AggregateType == "" {
+// NewEventSourcedRepository 创建领域层默认事件溯源仓储。
+func NewEventSourcedRepository[T IEventSourcedAggregate[int64]](
+	aggregateType string,
+	factory func(id int64) T,
+	store IEventStore,
+) (*EventSourcedRepository[T], error) {
+	if aggregateType == "" {
 		return nil, fmt.Errorf("aggregate type cannot be empty")
 	}
-	if opts.Factory == nil {
+	if factory == nil {
 		return nil, fmt.Errorf("aggregate factory cannot be nil")
 	}
-	if opts.EventStore == nil {
+	if store == nil {
 		return nil, fmt.Errorf("event store cannot be nil")
 	}
-	repo := &EventSourcedRepository[T]{
-		aggregateType:   opts.AggregateType,
-		factory:         opts.Factory,
-		eventStore:      opts.EventStore,
-		snapshotManager: opts.SnapshotManager,
-		eventBus:        opts.EventBus,
-		publishEvents:   opts.PublishEvents,
-		logger:          opts.Logger,
-	}
-	if repo.logger == nil {
-		repo.logger = logging.ComponentLogger("eventsourced.repository").
-			WithField("aggregate_type", opts.AggregateType)
-	}
-	return repo, nil
+	return &EventSourcedRepository[T]{
+		aggregateType: aggregateType,
+		factory:       factory,
+		store:         store,
+	}, nil
 }
 
-// NewAggregate 使用工厂创建聚合实例
-func (r *EventSourcedRepository[T]) NewAggregate(id int64) T {
-	return r.factory(id)
-}
-
-// Save 持久化聚合的未提交事件
+// Save 保存聚合的未提交事件。
 func (r *EventSourcedRepository[T]) Save(ctx context.Context, aggregate T) error {
 	events := aggregate.GetUncommittedEvents()
 	if len(events) == 0 {
 		return nil
 	}
 
-	aggregateID := aggregate.GetID()
 	currentVersion := uint64(aggregate.GetVersion())
 	var expectedVersion uint64
 	if currentVersion >= uint64(len(events)) {
 		expectedVersion = currentVersion - uint64(len(events))
 	}
 
-	storableEvents := make([]eventing.IStorableEvent, len(events))
-	for i, evt := range events {
-		storable, ok := evt.(eventing.IStorableEvent)
-		if !ok {
-			return fmt.Errorf("event does not implement IStorableEvent: %T", evt)
-		}
-		if storable.GetAggregateType() == "" {
-			storable.SetAggregateType(r.aggregateType)
-		}
-		storableEvents[i] = storable
-	}
-
-	if err := r.eventStore.AppendEvents(ctx, aggregateID, storableEvents, expectedVersion); err != nil {
+	if err := r.store.AppendEvents(ctx, aggregate.GetID(), events, expectedVersion); err != nil {
 		return err
 	}
 
 	aggregate.MarkEventsAsCommitted()
-
-	if r.snapshotManager != nil {
-		if should, err := r.snapshotManager.ShouldCreateSnapshot(ctx, snapshotAggregateAdapter[T]{aggregate: aggregate}); err == nil && should {
-			if err := r.snapshotManager.CreateSnapshot(ctx, aggregateID, r.aggregateType, aggregate, currentVersion); err != nil {
-				r.logger.Warn(ctx, "failed to create snapshot",
-					logging.Error(err),
-					logging.Int64("aggregate_id", aggregateID),
-					logging.Uint64("version", currentVersion))
-			}
-		}
-	}
-
-	if r.publishEvents && r.eventBus != nil {
-		if err := r.eventBus.PublishEvents(ctx, events); err != nil {
-			r.logger.Warn(ctx, "failed to publish events", logging.Error(err), logging.Int64("aggregate_id", aggregateID))
-		}
-	}
-
 	return nil
 }
 
-// GetByID 加载聚合（从快照和事件恢复）
+// GetByID 根据 ID 加载聚合（通过 RestoreAggregate 恢复）。
 func (r *EventSourcedRepository[T]) GetByID(ctx context.Context, id int64) (T, error) {
-	aggregate := r.NewAggregate(id)
-
-	var fromVersion uint64
-	if r.snapshotManager != nil {
-		version, err := r.snapshotManager.RestoreAggregate(ctx, id, aggregate)
-		if err == nil {
-			fromVersion = version
-			r.logger.Debug(ctx, "aggregate restored from snapshot",
-				logging.Int64("aggregate_id", id),
-				logging.Uint64("snapshot_version", version))
-		}
-	}
-
-	var (
-		events []eventing.Event
-		err    error
-	)
-
-	if typedStore, ok := r.eventStore.(store.ITypedEventStore); ok {
-		events, err = typedStore.LoadEventsByType(ctx, r.aggregateType, id, fromVersion)
-	} else {
-		events, err = r.eventStore.LoadEvents(ctx, id, fromVersion)
-	}
-
-	if err != nil {
-		if errors.Is(err, eventing.ErrAggregateNotFound) {
-			return aggregate, nil
-		}
+	aggregate := r.factory(id)
+	if _, err := r.store.RestoreAggregate(ctx, aggregate); err != nil {
 		return aggregate, err
 	}
-
-	for i := range events {
-		evt := events[i]
-		if _, err := eventing.UpgradeEventPayload(ctx, &evt); err != nil {
-			r.logger.Debug(ctx, "event payload upgrade/hydrate failed",
-				logging.String("event_type", evt.GetType()), logging.Error(err))
-		}
-		if err := aggregate.ApplyEvent(&evt); err != nil {
-			return aggregate, fmt.Errorf("apply event failed: %w", err)
-		}
-	}
-	aggregate.MarkEventsAsCommitted()
 	return aggregate, nil
 }
 
-// Exists 判断聚合是否存在
+// Exists 检查聚合是否存在。
 func (r *EventSourcedRepository[T]) Exists(ctx context.Context, id int64) (bool, error) {
-	if inspector, ok := r.eventStore.(store.IAggregateInspector); ok {
-		return inspector.HasAggregate(ctx, id)
-	}
-
-	events, err := r.eventStore.LoadEvents(ctx, id, 0)
-	if err != nil {
-		if errors.Is(err, eventing.ErrAggregateNotFound) {
-			return false, nil
-		}
-		return false, err
-	}
-	return len(events) > 0, nil
+	return r.store.Exists(ctx, id)
 }
 
-// GetVersion 获取聚合当前版本
+// GetAggregateVersion 获取聚合当前版本。
 func (r *EventSourcedRepository[T]) GetAggregateVersion(ctx context.Context, id int64) (uint64, error) {
-	if inspector, ok := r.eventStore.(store.IAggregateInspector); ok {
-		return inspector.GetAggregateVersion(ctx, id)
-	}
-	events, err := r.eventStore.LoadEvents(ctx, id, 0)
+	version, err := r.store.GetAggregateVersion(ctx, id)
 	if err != nil {
 		return 0, err
 	}
-	if len(events) == 0 {
-		return 0, nil
-	}
-	return events[len(events)-1].Version, nil
+	// 语义约定：不存在返回 0。
+	return version, nil
 }
+
+// Ensure interface compliance.
+var _ IEventSourcedRepository[IEventSourcedAggregate[int64], int64] = (*EventSourcedRepository[IEventSourcedAggregate[int64]])(nil)

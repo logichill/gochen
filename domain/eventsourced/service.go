@@ -6,21 +6,26 @@ import (
 	"reflect"
 	"time"
 
-	"gochen/eventing/bus"
 	"gochen/logging"
 )
 
-// EventSourcedService 统一的命令执行模板
+// EventSourcedService 统一的命令执行模板。
+//
+// 该服务基于领域层的事件溯源仓储与命令处理器，封装了：
+//   - 加载聚合；
+//   - 执行命令（含前后钩子与追踪）；
+//   - 保存聚合（由 IEventSourcedRepository 实现具体持久化策略）。
+//
+// 注意：该实现仅依赖领域抽象与日志接口，不直接依赖 EventStore、EventBus 等基础设施。
 type EventSourcedService[T IEventSourcedAggregate[int64]] struct {
 	repository IEventSourcedRepository[T, int64]
 	handlers   map[reflect.Type]EventSourcedCommandHandler[T]
-	eventBus   bus.IEventBus
 	logger     logging.ILogger
 	hooks      []EventSourcedCommandHook[T]
 	tracer     ICommandTracer
 }
 
-// NewEventSourcedService 创建事件溯源服务模板
+// NewEventSourcedService 创建事件溯源服务模板。
 func NewEventSourcedService[T IEventSourcedAggregate[int64]](
 	repository IEventSourcedRepository[T, int64],
 	opts *EventSourcedServiceOptions[T],
@@ -33,7 +38,6 @@ func NewEventSourcedService[T IEventSourcedAggregate[int64]](
 		handlers:   make(map[reflect.Type]EventSourcedCommandHandler[T]),
 	}
 	if opts != nil {
-		service.eventBus = opts.EventBus
 		service.hooks = opts.CommandHooks
 		service.tracer = opts.ICommandTracer
 		service.logger = opts.Logger
@@ -44,7 +48,7 @@ func NewEventSourcedService[T IEventSourcedAggregate[int64]](
 	return service, nil
 }
 
-// RegisterCommandHandler 注册命令处理器
+// RegisterCommandHandler 注册命令处理器。
 func (s *EventSourcedService[T]) RegisterCommandHandler(prototype IEventSourcedCommand, handler EventSourcedCommandHandler[T]) error {
 	if prototype == nil {
 		return fmt.Errorf("command prototype cannot be nil")
@@ -60,7 +64,7 @@ func (s *EventSourcedService[T]) RegisterCommandHandler(prototype IEventSourcedC
 	return nil
 }
 
-// ExecuteCommand 执行命令
+// ExecuteCommand 执行命令。
 func (s *EventSourcedService[T]) ExecuteCommand(ctx context.Context, cmd IEventSourcedCommand) error {
 	if cmd == nil {
 		return fmt.Errorf("command cannot be nil")
@@ -93,9 +97,11 @@ func (s *EventSourcedService[T]) ExecuteCommand(ctx context.Context, cmd IEventS
 
 	for _, hook := range s.hooks {
 		if hookErr := hook.AfterExecute(ctx, cmd, aggregate, execErr); hookErr != nil {
-			s.logger.Warn(ctx, "after execute hook failed",
-				logging.Error(hookErr),
-				logging.String("command", cmdType.String()))
+            if s.logger != nil {
+			    s.logger.Warn(ctx, "after execute hook failed",
+				    logging.Error(hookErr),
+				    logging.String("command", cmdType.String()))
+            }
 		}
 	}
 
@@ -118,3 +124,4 @@ func (s *EventSourcedService[T]) trace(ctx context.Context, commandName string, 
 		s.tracer.Trace(ctx, commandName, elapsed, execErr)
 	}
 }
+

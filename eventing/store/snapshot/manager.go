@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"gochen/eventing"
 	"gochen/eventing/monitoring"
 	"gochen/eventing/store"
 	"gochen/logging"
@@ -147,55 +146,6 @@ func (sm *Manager) LoadSnapshot(ctx context.Context, aggregateID int64, target a
 	monitoring.GlobalMetrics().RecordSnapshotLoaded(time.Since(start), true)
 	snapshotLogger().Debug(ctx, "[SnapshotManager] 加载快照成功", logging.Int64("aggregate_id", aggregateID), logging.Any("version", snapshot.Version))
 	return snapshot, nil
-}
-
-// RestoreAggregate 从快照和事件恢复聚合
-func (sm *Manager) RestoreAggregate(ctx context.Context, aggregateID int64, target any) (uint64, error) {
-	var fromVersion uint64 = 0
-	snapshot, err := sm.LoadSnapshot(ctx, aggregateID, target)
-	if err == nil {
-		if restorer, ok := target.(interface {
-			RestoreSnapshotMeta(id int64, aggregateType string, version uint64)
-		}); ok {
-			restorer.RestoreSnapshotMeta(aggregateID, snapshot.AggregateType, snapshot.Version)
-		}
-		fromVersion = snapshot.Version
-		snapshotLogger().Info(ctx, "[SnapshotManager] 从快照恢复聚合", logging.Int64("aggregate_id", aggregateID), logging.Any("snapshot_version", fromVersion))
-	} else {
-		snapshotLogger().Info(ctx, "[SnapshotManager] 未找到快照，从头开始恢复", logging.Int64("aggregate_id", aggregateID))
-	}
-	aggregateType := ""
-	if typed, ok := target.(interface{ GetAggregateType() string }); ok {
-		aggregateType = typed.GetAggregateType()
-	}
-	var events []eventing.Event
-	if typedStore, ok := sm.eventStore.(store.ITypedEventStore); ok {
-		events, err = typedStore.LoadEventsByType(ctx, aggregateType, aggregateID, fromVersion)
-	} else {
-		events, err = sm.eventStore.LoadEvents(ctx, aggregateID, fromVersion)
-	}
-	if err != nil {
-		return fromVersion, fmt.Errorf("failed to get events: %w", err)
-	}
-	snapshotLogger().Debug(ctx, "[SnapshotManager] 应用事件", logging.Int64("aggregate_id", aggregateID), logging.Int("event_count", len(events)))
-	if len(events) > 0 {
-		type eventApplier interface {
-			MarkEventsAsCommitted()
-			When(eventing.Event) error
-		}
-		agg, ok := target.(eventApplier)
-		if !ok {
-			return fromVersion, fmt.Errorf("target aggregate does not implement event applier")
-		}
-		for _, evt := range events {
-			if err := agg.When(evt); err != nil {
-				return fromVersion, fmt.Errorf("failed to apply event: %w", err)
-			}
-		}
-		agg.MarkEventsAsCommitted()
-		return events[len(events)-1].Version, nil
-	}
-	return fromVersion, nil
 }
 
 // CleanupOldSnapshots 清理旧快照

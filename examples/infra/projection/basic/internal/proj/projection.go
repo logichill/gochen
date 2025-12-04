@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"gochen/domain/eventsourced"
+	"gochen/app/eventsourced"
 	"gochen/eventing"
 	"gochen/eventing/projection"
 )

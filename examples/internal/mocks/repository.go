@@ -56,7 +56,7 @@ func (r *GenericMockRepository[T]) Create(ctx context.Context, entity T) error {
 	return nil
 }
 
-func (r *GenericMockRepository[T]) GetByID(ctx context.Context, id int64) (T, error) {
+func (r *GenericMockRepository[T]) Get(ctx context.Context, id int64) (T, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 

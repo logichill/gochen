@@ -7,9 +7,11 @@ import (
 
 	_ "modernc.org/sqlite"
 
+	"gochen/app/eventsourced"
 	dbcore "gochen/data/db"
 	basicdb "gochen/data/db/basic"
-	"gochen/domain/eventsourced"
+	"gochen/domain"
+	deventsourced "gochen/domain/eventsourced"
 	"gochen/eventing"
 	ebus "gochen/eventing/bus"
 	"gochen/eventing/outbox"
@@ -23,18 +25,21 @@ import (
 type Opened struct{ Initial int }
 type Deposited struct{ Amount int }
 
+func (e *Opened) EventType() string   { return "Opened" }
+func (e *Deposited) EventType() string { return "Deposited" }
+
 // 聚合
 type Account struct {
-	*eventsourced.EventSourcedAggregate[int64]
+	*deventsourced.EventSourcedAggregate[int64]
 	Balance int
 }
 
 func NewAccount(id int64) *Account {
-	return &Account{EventSourcedAggregate: eventsourced.NewEventSourcedAggregate[int64](id, "Account")}
+	return &Account{EventSourcedAggregate: deventsourced.NewEventSourcedAggregate[int64](id, "Account")}
 }
 
-func (a *Account) ApplyEvent(evt eventing.IEvent) error {
-	switch p := evt.GetPayload().(type) {
+func (a *Account) ApplyEvent(evt domain.IDomainEvent) error {
+	switch p := evt.(type) {
 	case *Opened:
 		a.Balance = p.Initial
 	case *Deposited:
@@ -55,20 +60,24 @@ func main() {
 	es := sqlstore.NewSQLEventStore(db, "event_store")
 	ob := outbox.NewSimpleSQLOutboxRepository(db, es, nil)
 
-	// 3) 基础 ES 仓储 + Outbox 装饰器
-	base, err := eventsourced.NewEventSourcedRepository[*Account](eventsourced.EventSourcedRepositoryOptions[*Account]{
+	// 3) 基础 ES 仓储（含 Outbox 支持）
+	storeAdapter, err := eventsourced.NewDomainEventStore[*Account](eventsourced.DomainEventStoreOptions[*Account]{
 		AggregateType: "Account",
 		Factory:       NewAccount,
 		EventStore:    es,
+		OutboxRepo:    ob,
 	})
 	must(err)
-	repo, err := eventsourced.NewOutboxAwareRepository(base, ob)
+
+	base, err := deventsourced.NewEventSourcedRepository[*Account]("Account", NewAccount, storeAdapter)
+	must(err)
+	repo := base
 	must(err)
 
 	// 4) 产生并保存事件（原子写入事件与 Outbox）
 	acc := NewAccount(9001)
-	_ = acc.ApplyAndRecord(eventing.NewDomainEvent(acc.GetID(), acc.GetAggregateType(), "Opened", uint64(acc.GetVersion()+1), &Opened{Initial: 100}))
-	_ = acc.ApplyAndRecord(eventing.NewDomainEvent(acc.GetID(), acc.GetAggregateType(), "Deposited", uint64(acc.GetVersion()+1), &Deposited{Amount: 50}))
+	_ = acc.ApplyAndRecord(&Opened{Initial: 100})
+	_ = acc.ApplyAndRecord(&Deposited{Amount: 50})
 	must(repo.Save(ctx, acc))
 
 	// 5) 创建事件总线 + Publisher，一次性发布 Outbox 待处理记录

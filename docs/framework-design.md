@@ -53,44 +53,51 @@ gochen 采用 **DDD + Event Sourcing + CQRS + 消息驱动** 的组合模式，�
 当前根目录核心结构：
 
 ```text
-domain/                      # 领域层抽象
-  entity/                    # 实体 & 聚合根（含 EventSourcedAggregate）
-  eventsourced/              # 事件溯源服务/仓储模板
-  repository/                # 仓储接口（CRUD + Query + Batch 等）
-  service/                   # 领域服务基础抽象
+domain/                      # 领域层抽象（不依赖基础设施）
+  entity.go                  # 通用实体与领域事件接口（IEntity / IDomainEvent）
+  crud/                      # CRUD 场景抽象（IRepository / IService）
+  audited/                   # 审计场景抽象（IAuditedEntity / IAuditedService）
+  eventsourced/              # 事件溯源抽象（IEventSourcedAggregate / IEventSourcedRepository / EventSourcedService）
 
-eventing/                    # 事件系统
+eventing/                    # 事件基础设施层（不依赖 domain）
   event.go                   # 事件模型（IEvent / IStorableEvent / Event）
-  store/                     # 事件存储接口与扩展
-  projection/                # 投影接口与 ProjectionManager + Checkpoint
-  outbox/                    # Outbox 仓储与发布器
-  bus/                       # IEventBus（基于 messaging.MessageBus）
-  monitoring.go              # 监控辅助
+  store/                     # 事件存储接口与实现（IEventStore / MemoryStore / SQLStore）
+  projection/                # 投影管理器与 Checkpoint（ProjectionManager / ICheckpointStore）
+  outbox/                    # Outbox 模式（IOutboxRepository / Publisher / ParallelPublisher）
+  bus/                       # 事件总线（IEventBus，基于 messaging.MessageBus）
+  monitoring/                # 监控指标（Metrics / Health）
 
 messaging/                   # 消息总线与传输层
   message.go                 # IMessage / Message
   handler.go                 # IMessageHandler
   bus.go                     # MessageBus 实现 + 中间件
-  command/                   # 命令模型与命令总线适配
+  command/                   # 命令模型与命令总线（ICommand / CommandBus）
   transport/                 # 传输实现（memory / natsjetstream / redisstreams / sync）
+  bridge/                    # 远程桥接（HTTP / gRPC）
 
-saga/                        # Saga 编排
-  orchestrator.go            # SagaOrchestrator（发布 Saga 生命周期事件，见 docs/eventing-saga-events.md）
+app/                         # 应用服务层（依赖 domain + eventing + data）
+  application/               # CRUD 应用服务（Application 泛型服务 + 查询/分页）
+  api/                       # HTTP API 构建器（Builder / Router / 错误处理）
+  eventsourced/              # 事件溯源应用服务（EventSourcedRepository / OutboxRepository / History / Projection / Registry）
 
-data/db/            # 数据库抽象
-  basic/                     # 最小 DB 接口实现
-  dialect/                   # 方言抽象（DELETE LIMIT 等兼容）
-  sql/                       # ISql Builder（Select/Insert/Update/Delete/Upsert）
+data/                        # 数据访问层
+  db/                        # 数据库抽象（IDatabase / BasicDB）
+    dialect/                 # 方言抽象（DELETE LIMIT 等兼容）
+    sql/                     # SQL Builder（Select/Insert/Update/Delete/Upsert）
+  orm/                       # ORM 抽象（IQueryable / IRepository）
 
-app/                         # 应用服务层
-  application.go             # Application 泛型服务 + 查询/分页
-  api/                       # HTTP API 构建器（路由器、错误处理等）
+http/                        # HTTP 抽象（IHandler / IRouter / IMiddleware）
+  basic/                     # net/http 封装实现
 
-http/                       # HTTP 抽象
-di/                          # 依赖注入接口（IContainer + BasicContainer）
-logging/                     # 日志接口与基础实现
-saga/                        # Saga 编排
-patterns/retry/              # 重试模式
+logging/                     # 日志接口与实现（ILogger / StdLogger / ComponentLogger）
+di/                          # 依赖注入（IContainer / BasicContainer）
+validation/                  # 验证抽象（IValidator）
+server/                      # Server 抽象与生命周期管理
+
+patterns/                    # 通用模式
+  retry/                     # 重试模式
+  saga/                      # Saga 编排（SagaOrchestrator / SagaDefinition）
+  workflow/                  # 工作流模式
 ```
 
 ---
@@ -101,21 +108,22 @@ patterns/retry/              # 重试模式
 
 ### 2.1 实体与聚合根（`domain/entity`）
 
-实体接口和基类定义在 `domain/entity`：
+实体接口与基础聚合定义在 `domain/entity.go`，事件溯源聚合根在 `domain/eventsourced/entity.go`：
 
 - 基础接口：
   - `IEntity[ID]`：带 ID 与版本的实体；
-  - `IAggregate[ID]`：聚合根，额外提供 `GetAggregateType`、`GetDomainEvents` 等；
+  - `IDomainEvent`：领域事件接口（只关心事件语义，不关心传输信封），提供 `EventType()`；
   - `IEventSourcedAggregate[ID]`：事件溯源聚合根接口。
-- 事件溯源聚合根实现：`EventSourcedAggregate[T comparable]`（`domain/entity/aggregate_eventsourced.go`）：
+- 事件溯源聚合根实现：`EventSourcedAggregate[T comparable]`（`domain/eventsourced/entity.go`）：
 
 ```go
 type IEventSourcedAggregate[T comparable] interface {
-    IAggregate[T]
-    ApplyEvent(evt eventing.IEvent) error
-    GetUncommittedEvents() []eventing.IEvent
+    IEntity[T]
+    GetAggregateType() string
+    ApplyEvent(evt domain.IDomainEvent) error
+    GetUncommittedEvents() []domain.IDomainEvent
     MarkEventsAsCommitted()
-    LoadFromHistory(events []eventing.IEvent) error
+    LoadFromHistory(events []domain.IDomainEvent) error
 }
 
 type EventSourcedAggregate[T comparable] struct {
@@ -127,20 +135,20 @@ type EventSourcedAggregate[T comparable] struct {
 
 ```go
 type BankAccount struct {
-    *entity.EventSourcedAggregate[int64]
+    *eventsourced.EventSourcedAggregate[int64]
     Balance int
 }
 
 func NewBankAccount(id int64) *BankAccount {
     return &BankAccount{
-        EventSourcedAggregate: entity.NewEventSourcedAggregate[int64](id, "BankAccount"),
+        EventSourcedAggregate: eventsourced.NewEventSourcedAggregate[int64](id, "BankAccount"),
     }
 }
 
-func (a *BankAccount) ApplyEvent(evt eventing.IEvent) error {
-    switch evt.GetType() {
-    case "MoneyDeposited":
-        a.Balance += evt.GetPayload().(int)
+func (a *BankAccount) ApplyEvent(evt domain.IDomainEvent) error {
+    switch e := evt.(type) {
+    case *MoneyDeposited:
+        a.Balance += e.Amount
     }
     return a.EventSourcedAggregate.ApplyEvent(evt)
 }
@@ -176,24 +184,54 @@ type QueryOptions struct {
 }
 ```
 
-### 2.3 事件溯源服务（`domain/eventsourced`）
+### 2.3 事件溯源服务（`domain/eventsourced` + `app/eventsourced`）
 
-`domain/eventsourced` 提供基于 EventStore 的统一模板：
+事件溯源能力分为两层：
 
-- `EventSourcedRepository[T]`：使用 `eventing/store.IEventStore` 重建聚合并持久化事件；
-- `EventSourcedService[T]`：命令执行模板，封装“加载聚合 → 执行命令 → 保存事件 → 发布事件”的流程（`domain/eventsourced/service.go`）；
-- 与 `messaging/command.Command` 的适配器：`AsCommandMessageHandler` 用于将服务暴露为 `IMessageHandler`。
+**领域层（`domain/eventsourced`）**：定义接口与核心协议，不依赖基础设施
+- `IEventSourcedAggregate[ID]`：事件溯源聚合根接口（包含 ApplyEvent / GetUncommittedEvents 等方法）
+- `EventSourcedAggregate[T]`：通用聚合基类，实现版本控制与未提交事件管理
+- `IEventSourcedRepository[T, ID]`：仓储接口（Save / GetByID / Exists / GetAggregateVersion）
+- `EventSourcedService[T]`：命令执行模板，封装"加载聚合 → 执行命令 → 保存聚合"流程（仅依赖仓储接口与日志）
+- `IEventSourcedCommand`：命令接口，提供 `AggregateID()` 方法用于定位聚合
 
-示意：
+**应用层（`app/eventsourced`）**：提供具体实现与扩展能力，依赖 eventing 基础设施
+- `EventSourcedRepository[T]`：基于 `eventing/store.IEventStore` 的仓储实现
+  - 负责在领域事件（`domain.IDomainEvent`）与存储事件（`eventing.Event`）之间转换
+  - 支持快照（Snapshot）、事件发布（EventBus）等可选能力
+- `OutboxRepository[T]`：Outbox 模式装饰器，确保事件持久化与消息发布的一致性
+- `History`：事件历史查询（`GetEventHistory` / `GetEventHistoryPage` / `EventHistoryMapper`）
+- `Projection`：投影辅助工具
+- `Registry`：自动注册器（`EventSourcedAutoRegistrar`），简化事件处理器与投影注册
+- `CommandAdapter`：将 `EventSourcedService` 适配为 `messaging.IMessageHandler`
+
+示意代码：
 
 ```go
+// domain/eventsourced - 领域接口
 type IEventSourcedCommand interface{ AggregateID() int64 }
 
-type EventSourcedCommandHandler[T entity.IEventSourcedAggregate[int64]] func(
-    ctx context.Context,
-    cmd IEventSourcedCommand,
-    aggregate T,
+type EventSourcedCommandHandler[T IEventSourcedAggregate[int64]] func(
+    ctx context.Context, cmd IEventSourcedCommand, aggregate T,
 ) error
+
+// app/eventsourced - 应用实现：IEventStore 基于基础设施的实现
+storeAdapter, _ := appeventsourced.NewDomainEventStore[*Account](
+    appeventsourced.DomainEventStoreOptions[*Account]{
+        AggregateType: "account",
+        Factory:       NewAccount,
+        EventStore:    eventStore, // eventing/store.IEventStore
+        EventBus:      eventBus,   // eventing/bus.IEventBus（可选）
+        PublishEvents: true,
+    },
+)
+
+// domain/eventsourced - 默认仓储实现
+repo, _ := eventsourced.NewEventSourcedRepository[*Account](
+    "account",
+    NewAccount,
+    storeAdapter,
+)
 ```
 
 ---

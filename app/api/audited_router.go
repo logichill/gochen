@@ -173,7 +173,7 @@ func (rb *AuditedRouteBuilder[T]) handleGet(c core.IHttpContext) error {
 	if err != nil {
 		return errors.NewValidationError("无效的ID格式")
 	}
-	e, err := rb.service.GetByID(c.GetContext(), id)
+	e, err := rb.service.Get(c.GetContext(), id)
 	if err != nil {
 		return err
 	}
@@ -201,7 +201,7 @@ func (rb *AuditedRouteBuilder[T]) handleUpdate(c core.IHttpContext) error {
 	if err != nil {
 		return errors.NewValidationError("无效的ID格式")
 	}
-	e, err := rb.service.GetByID(c.GetContext(), id)
+	e, err := rb.service.Get(c.GetContext(), id)
 	if err != nil {
 		return err
 	}

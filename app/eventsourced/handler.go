@@ -11,13 +11,13 @@ import (
 	"gochen/messaging"
 )
 
-// RetryPolicy 重试策略
+// RetryPolicy 重试策略。
 type RetryPolicy struct {
 	MaxRetries int
 	Backoff    time.Duration
 }
 
-// EventSourcedHandlerOption 配置事件处理器
+// EventSourcedHandlerOption 配置事件处理器。
 type EventSourcedHandlerOption[T any] struct {
 	Name        string
 	EventType   string
@@ -27,7 +27,7 @@ type EventSourcedHandlerOption[T any] struct {
 	Logger      logging.ILogger
 }
 
-// EventSourcedTypedHandler 泛型事件处理模板
+// EventSourcedTypedHandler 泛型事件处理模板。
 type EventSourcedTypedHandler[T any] struct {
 	name      string
 	eventType string
@@ -37,7 +37,7 @@ type EventSourcedTypedHandler[T any] struct {
 	logger    logging.ILogger
 }
 
-// NewEventSourcedTypedHandler 创建泛型事件处理器
+// NewEventSourcedTypedHandler 创建泛型事件处理器。
 func NewEventSourcedTypedHandler[T any](opt EventSourcedHandlerOption[T]) (*EventSourcedTypedHandler[T], error) {
 	if opt.EventType == "" {
 		return nil, fmt.Errorf("event type cannot be empty")
@@ -69,13 +69,13 @@ func NewEventSourcedTypedHandler[T any](opt EventSourcedHandlerOption[T]) (*Even
 		handler.name = fmt.Sprintf("EventSourcedHandler<%s>", opt.EventType)
 	}
 	if handler.logger == nil {
-		handler.logger = logging.ComponentLogger("eventsourced.handler").
+		handler.logger = logging.ComponentLogger("app.eventsourced.handler").
 			WithField("handler", handler.name)
 	}
 	return handler, nil
 }
 
-// Handle 兼容消息总线接口
+// Handle 兼容消息总线接口。
 func (h *EventSourcedTypedHandler[T]) Handle(ctx context.Context, message messaging.IMessage) error {
 	evt, ok := message.(eventing.IEvent)
 	if !ok {
@@ -84,7 +84,7 @@ func (h *EventSourcedTypedHandler[T]) Handle(ctx context.Context, message messag
 	return h.HandleEvent(ctx, evt)
 }
 
-// HandleEvent 处理事件
+// HandleEvent 处理事件。
 func (h *EventSourcedTypedHandler[T]) HandleEvent(ctx context.Context, evt eventing.IEvent) error {
 	domainEvent, ok := evt.(*eventing.Event)
 	if !ok {
@@ -126,20 +126,21 @@ func (h *EventSourcedTypedHandler[T]) HandleEvent(ctx context.Context, evt event
 	return lastErr
 }
 
-// GetEventTypes 订阅的事件类型
+// GetEventTypes 订阅的事件类型。
 func (h *EventSourcedTypedHandler[T]) GetEventTypes() []string {
 	return []string{h.eventType}
 }
 
-// GetHandlerName 处理器名称
+// GetHandlerName 处理器名称。
 func (h *EventSourcedTypedHandler[T]) GetHandlerName() string {
 	return h.name
 }
 
-// Type 兼容消息接口
+// Type 兼容消息接口。
 func (h *EventSourcedTypedHandler[T]) Type() string {
 	return h.eventType
 }
 
-// Ensure interface compliance
+// Ensure interface compliance.
 var _ bus.IEventHandler = (*EventSourcedTypedHandler[any])(nil)
+

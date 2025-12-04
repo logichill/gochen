@@ -41,7 +41,7 @@ type ExtUserRepo struct {
 }
 
 func (r *ExtUserRepo) Activate(ctx context.Context, id int64) error {
-	u, err := r.GetByID(ctx, id)
+	u, err := r.Get(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -94,7 +94,7 @@ func main() {
 
 	// 4) 演示创建/查询/分页
 	_ = svc.Create(context.Background(), &User{Name: "张三", Email: "zhangsan@example.com"})
-	got, _ := svc.GetByID(context.Background(), 1)
+	got, _ := svc.Get(context.Background(), 1)
 	log.Printf("查询用户: %+v", got)
 	page, _ := svc.ListPage(context.Background(), &application.PaginationOptions{Page: 1, Size: 10})
 	log.Printf("分页: total=%d, items=%d", page.Total, len(page.Data))
