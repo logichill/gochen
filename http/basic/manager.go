@@ -8,7 +8,6 @@ import (
 	"syscall"
 	"time"
 
-	"gochen/di"
 	"gochen/logging"
 )
 
@@ -26,19 +25,17 @@ type Options struct {
 
 // Manager 统一管理多个 IServer 的生命周期（启动/关闭/优雅退出）
 type Manager struct {
-	Container *di.Container
-	logger    logging.ILogger
-	servers   []IServer
-	opts      Options
+	logger  logging.ILogger
+	servers []IServer
+	opts    Options
 }
 
 // NewManager 创建 Server 管理器
 func NewManager() *Manager {
 	return &Manager{
-		Container: di.New(),
-		logger:    logging.ComponentLogger("http.manager"),
-		servers:   make([]IServer, 0),
-		opts:      Options{ShutdownTimeout: 10 * time.Second},
+		logger:  logging.ComponentLogger("http.manager"),
+		servers: make([]IServer, 0),
+		opts:    Options{ShutdownTimeout: 10 * time.Second},
 	}
 }
 

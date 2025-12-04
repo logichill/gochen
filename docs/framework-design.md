@@ -126,7 +126,7 @@ type IEventSourcedAggregate[T comparable] interface {
 }
 
 type EventSourcedAggregate[T comparable] struct {
-    // 包含 ID、版本、未提交事件集合，并发通过 RWMutex 保护
+    // 包含 ID、版本、未提交事件集合；聚合本身不做内部加锁，由应用服务在命令处理层保证对单个聚合实例的串行访问
 }
 ```
 

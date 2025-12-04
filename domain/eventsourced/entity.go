@@ -1,8 +1,6 @@
 package eventsourced
 
 import (
-	"sync"
-
 	"gochen/domain"
 )
 
@@ -30,7 +28,6 @@ type EventSourcedAggregate[T comparable] struct {
 	version           uint64
 	uncommittedEvents []domain.IDomainEvent
 	aggregateType     string
-	mu                sync.RWMutex
 }
 
 // NewEventSourcedAggregate 创建事件溯源聚合根。
@@ -45,29 +42,21 @@ func NewEventSourcedAggregate[T comparable](id T, aggregateType string) *EventSo
 
 // GetID 实现 IObject 接口。
 func (a *EventSourcedAggregate[T]) GetID() T {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
 	return a.id
 }
 
 // GetVersion 实现 IEntity 接口。
 func (a *EventSourcedAggregate[T]) GetVersion() int64 {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
 	return int64(a.version)
 }
 
 // GetAggregateType 返回聚合类型。
 func (a *EventSourcedAggregate[T]) GetAggregateType() string {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
 	return a.aggregateType
 }
 
 // GetDomainEvents 返回未提交事件的副本。
 func (a *EventSourcedAggregate[T]) GetDomainEvents() []domain.IDomainEvent {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
 	events := make([]domain.IDomainEvent, len(a.uncommittedEvents))
 	copy(events, a.uncommittedEvents)
 	return events
@@ -75,15 +64,11 @@ func (a *EventSourcedAggregate[T]) GetDomainEvents() []domain.IDomainEvent {
 
 // ClearDomainEvents 清空未提交事件。
 func (a *EventSourcedAggregate[T]) ClearDomainEvents() {
-	a.mu.Lock()
-	defer a.mu.Unlock()
 	a.uncommittedEvents = nil
 }
 
 // AddDomainEvent 添加领域事件。
 func (a *EventSourcedAggregate[T]) AddDomainEvent(evt domain.IDomainEvent) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
 	if a.uncommittedEvents == nil {
 		a.uncommittedEvents = make([]domain.IDomainEvent, 0)
 	}
@@ -97,15 +82,11 @@ func (a *EventSourcedAggregate[T]) GetUncommittedEvents() []domain.IDomainEvent 
 
 // MarkEventsAsCommitted 实现 IEventSourcedAggregate。
 func (a *EventSourcedAggregate[T]) MarkEventsAsCommitted() {
-	a.mu.Lock()
-	defer a.mu.Unlock()
 	a.uncommittedEvents = nil
 }
 
 // ApplyEvent 默认实现：仅递增版本号，具体聚合应在外部重写并调用此方法。
 func (a *EventSourcedAggregate[T]) ApplyEvent(evt domain.IDomainEvent) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
 	a.version++
 	return nil
 }

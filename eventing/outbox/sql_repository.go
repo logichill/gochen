@@ -141,7 +141,9 @@ func (r *SimpleSQLOutboxRepository) GetPendingEntries(ctx context.Context, limit
 		Where("status = ?", OutboxStatusPending).
 		Or("status = ? AND (next_retry_at IS NULL OR next_retry_at <= ?)", OutboxStatusFailed, time.Now()).
 		OrderBy("created_at ASC").
-		Limit(limit)
+		Limit(limit).
+		ForUpdate().
+		SkipLocked()
 
 	rows, err := builder.Query(ctx)
 	if err != nil {

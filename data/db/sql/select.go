@@ -20,6 +20,7 @@ type selectBuilder struct {
 	orderBy string
 	limit   int
 	offset  int
+	locking string
 }
 
 func (b *selectBuilder) From(table string) ISelectBuilder {
@@ -76,6 +77,29 @@ func (b *selectBuilder) Offset(n int) ISelectBuilder {
 	return b
 }
 
+func (b *selectBuilder) ForUpdate() ISelectBuilder {
+	switch b.dialect.Name() {
+	case dialect.NameMySQL, dialect.NamePostgres:
+		b.locking = " FOR UPDATE"
+	default:
+		// 对于不支持 FOR UPDATE 的方言（如 SQLite），忽略该设置以保持兼容
+	}
+	return b
+}
+
+func (b *selectBuilder) SkipLocked() ISelectBuilder {
+	switch b.dialect.Name() {
+	case dialect.NameMySQL, dialect.NamePostgres:
+		if b.locking == "" {
+			b.locking = " FOR UPDATE"
+		}
+		b.locking += " SKIP LOCKED"
+	default:
+		// 方言不支持 SKIP LOCKED 时忽略
+	}
+	return b
+}
+
 func (b *selectBuilder) Build() (string, []any) {
 	var sb strings.Builder
 	sb.WriteString("SELECT ")
@@ -102,6 +126,9 @@ func (b *selectBuilder) Build() (string, []any) {
 	if b.offset > 0 {
 		sb.WriteString(" OFFSET ?")
 		b.args = append(b.args, b.offset)
+	}
+	if b.locking != "" {
+		sb.WriteString(b.locking)
 	}
 	return sb.String(), b.args
 }

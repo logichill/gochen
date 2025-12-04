@@ -31,6 +31,8 @@ type ISelectBuilder interface {
 	OrderBy(expr string) ISelectBuilder
 	Limit(n int) ISelectBuilder
 	Offset(n int) ISelectBuilder
+	ForUpdate() ISelectBuilder
+	SkipLocked() ISelectBuilder
 	Build() (query string, args []any)
 	Query(ctx context.Context) (core.IRows, error)
 	QueryRow(ctx context.Context) core.IRow
