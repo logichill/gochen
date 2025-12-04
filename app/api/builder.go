@@ -4,10 +4,10 @@ package api
 import (
 	"fmt"
 
-	application "gochen/app/application"
-	"gochen/domain/entity"
-	httpx "gochen/http"
-	validation "gochen/validation"
+	"gochen/app/application"
+	"gochen/domain"
+	"gochen/http"
+	"gochen/validation"
 )
 
 type configurableService interface {
@@ -30,7 +30,7 @@ func cloneServiceConfig(cfg *application.ServiceConfig) *application.ServiceConf
 }
 
 // IApiBuilder RESTful API 构建器接口
-type IApiBuilder[T entity.IEntity[int64]] interface {
+type IApiBuilder[T domain.IEntity[int64]] interface {
 	// 配置路由
 	Route(config func(*RouteConfig)) IApiBuilder[T]
 
@@ -38,23 +38,23 @@ type IApiBuilder[T entity.IEntity[int64]] interface {
 	Service(config func(*application.ServiceConfig)) IApiBuilder[T]
 
 	// 添加中间件
-	Middleware(middlewares ...httpx.Middleware) IApiBuilder[T]
+	Middleware(middlewares ...http.Middleware) IApiBuilder[T]
 
 	// 构建并注册
-	Build(group httpx.IRouteGroup) error
+	Build(group http.IRouteGroup) error
 }
 
 // ApiBuilder RESTful API 构建器实现
-type ApiBuilder[T entity.IEntity[int64]] struct {
+type ApiBuilder[T domain.IEntity[int64]] struct {
 	routeConfig   *RouteConfig
 	serviceConfig *application.ServiceConfig
-	middlewares   []httpx.Middleware
+	middlewares   []http.Middleware
 	service       application.IApplication[T]
 	validator     validation.IValidator
 }
 
 // NewApiBuilder 创建 RESTful 构建器
-func NewApiBuilder[T entity.IEntity[int64]](
+func NewApiBuilder[T domain.IEntity[int64]](
 	svc application.IApplication[T],
 	validator validation.IValidator,
 ) *ApiBuilder[T] {
@@ -99,13 +99,13 @@ func (rb *ApiBuilder[T]) Service(config func(*application.ServiceConfig)) IApiBu
 }
 
 // Middleware 添加中间件
-func (rb *ApiBuilder[T]) Middleware(middlewares ...httpx.Middleware) IApiBuilder[T] {
+func (rb *ApiBuilder[T]) Middleware(middlewares ...http.Middleware) IApiBuilder[T] {
 	rb.middlewares = append(rb.middlewares, middlewares...)
 	return rb
 }
 
 // Build 构建并注册
-func (rb *ApiBuilder[T]) Build(group httpx.IRouteGroup) error {
+func (rb *ApiBuilder[T]) Build(group http.IRouteGroup) error {
 	// 重新创建服务（如果配置有变化）
 	if rb.service == nil {
 		return fmt.Errorf("service cannot be nil")
@@ -137,8 +137,8 @@ func (rb *ApiBuilder[T]) Build(group httpx.IRouteGroup) error {
 }
 
 // 便捷函数
-func RegisterRESTfulAPI[T entity.IEntity[int64]](
-	group httpx.IRouteGroup,
+func RegisterRESTfulAPI[T domain.IEntity[int64]](
+	group http.IRouteGroup,
 	svc application.IApplication[T],
 	validator validation.IValidator,
 	options ...func(*ApiBuilder[T]),
@@ -154,7 +154,7 @@ func RegisterRESTfulAPI[T entity.IEntity[int64]](
 }
 
 // 预定义配置选项
-func WithBatchOperations[T entity.IEntity[int64]](maxSize int) func(*ApiBuilder[T]) {
+func WithBatchOperations[T domain.IEntity[int64]](maxSize int) func(*ApiBuilder[T]) {
 	return func(rb *ApiBuilder[T]) {
 		rb.Route(func(config *RouteConfig) {
 			config.EnableBatch = true
@@ -163,7 +163,7 @@ func WithBatchOperations[T entity.IEntity[int64]](maxSize int) func(*ApiBuilder[
 	}
 }
 
-func WithPagination[T entity.IEntity[int64]](defaultSize, maxSize int) func(*ApiBuilder[T]) {
+func WithPagination[T domain.IEntity[int64]](defaultSize, maxSize int) func(*ApiBuilder[T]) {
 	return func(rb *ApiBuilder[T]) {
 		rb.Route(func(config *RouteConfig) {
 			config.EnablePagination = true
@@ -173,7 +173,7 @@ func WithPagination[T entity.IEntity[int64]](defaultSize, maxSize int) func(*Api
 	}
 }
 
-func WithCustomValidator[T entity.IEntity[int64]](validator func(any) error) func(*ApiBuilder[T]) {
+func WithCustomValidator[T domain.IEntity[int64]](validator func(any) error) func(*ApiBuilder[T]) {
 	return func(rb *ApiBuilder[T]) {
 		rb.Route(func(config *RouteConfig) {
 			config.Validator = validator
@@ -181,7 +181,7 @@ func WithCustomValidator[T entity.IEntity[int64]](validator func(any) error) fun
 	}
 }
 
-func WithCORS[T entity.IEntity[int64]](origins []string) func(*ApiBuilder[T]) {
+func WithCORS[T domain.IEntity[int64]](origins []string) func(*ApiBuilder[T]) {
 	return func(rb *ApiBuilder[T]) {
 		rb.Route(func(config *RouteConfig) {
 			if config.CORS != nil {
@@ -191,13 +191,13 @@ func WithCORS[T entity.IEntity[int64]](origins []string) func(*ApiBuilder[T]) {
 	}
 }
 
-func WithAuth[T entity.IEntity[int64]](middleware httpx.Middleware) func(*ApiBuilder[T]) {
+func WithAuth[T domain.IEntity[int64]](middleware http.Middleware) func(*ApiBuilder[T]) {
 	return func(rb *ApiBuilder[T]) {
 		rb.Middleware(middleware)
 	}
 }
 
-func WithLogging[T entity.IEntity[int64]](middleware httpx.Middleware) func(*ApiBuilder[T]) {
+func WithLogging[T domain.IEntity[int64]](middleware http.Middleware) func(*ApiBuilder[T]) {
 	return func(rb *ApiBuilder[T]) {
 		rb.Middleware(middleware)
 	}

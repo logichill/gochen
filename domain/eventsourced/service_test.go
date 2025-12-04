@@ -9,7 +9,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"gochen/domain/entity"
 	"gochen/eventing"
 	"gochen/eventing/store"
 	"gochen/messaging"
@@ -17,13 +16,13 @@ import (
 
 // TestAggregate for testing
 type TestAgg struct {
-	*entity.EventSourcedAggregate[int64]
+	*EventSourcedAggregate[int64]
 	Value int
 }
 
 func NewTestAgg(id int64) *TestAgg {
 	return &TestAgg{
-		EventSourcedAggregate: entity.NewEventSourcedAggregate[int64](id, "TestAgg"),
+		EventSourcedAggregate: NewEventSourcedAggregate[int64](id, "TestAgg"),
 	}
 }
 

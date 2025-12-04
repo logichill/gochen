@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"gochen/app"
 	"gochen/di"
-	"gochen/domain"
 	httpx "gochen/http"
 )
 
@@ -70,7 +70,7 @@ func (g *noopRouteGroup) Use(_ ...httpx.Middleware) httpx.IRouteGroup { return g
 
 // TestServer_WithEngine_ConcurrentSafe 验证 Server 与 Engine 在并发场景下无竞态。
 func TestServer_WithEngine_ConcurrentSafe(t *testing.T) {
-	modules := []domain.IModule{} // 使用空模块集，避免引入额外依赖
+	modules := []app.IModule{} // 使用空模块集，避免引入额外依赖
 
 	httpServer := &minimalHTTPServer{}
 	container := di.NewBasic()

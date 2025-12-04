@@ -6,15 +6,14 @@ import (
 	"time"
 
 	"gochen/app/api"
-	sentity "gochen/domain/entity"
-	sservice "gochen/domain/service"
+	"gochen/domain/audited"
 	"gochen/examples/internal/mocks"
 	httpx "gochen/http"
 )
 
 // Article 带审计与软删除的实体
 type Article struct {
-	sentity.Entity
+	audited.Entity
 	Title       string     `json:"title"`
 	Content     string     `json:"content"`
 	Status      string     `json:"status"`
@@ -49,12 +48,13 @@ func (r *ArticleRepo) Publish(ctx context.Context, id int64, by string) error {
 
 // ArticleService 演示如何在通用审计服务之上扩展领域能力
 type ArticleService struct {
-	sservice.IAuditedService[*Article, int64]
+	audited.IAuditedService[*Article, int64]
 	repo *ArticleRepo
 }
 
 func NewArticleService(repo *ArticleRepo) *ArticleService {
-	base := sservice.NewAuditedService[*Article, int64](repo)
+	// 使用同一个 MockAuditedRepository 同时承载实体仓储与审计存储（示例用）
+	base := audited.NewAuditedService[*Article, int64](repo, repo)
 	return &ArticleService{IAuditedService: base, repo: repo}
 }
 

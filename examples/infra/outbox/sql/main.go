@@ -9,7 +9,6 @@ import (
 
 	dbcore "gochen/data/db"
 	basicdb "gochen/data/db/basic"
-	sentity "gochen/domain/entity"
 	"gochen/domain/eventsourced"
 	"gochen/eventing"
 	ebus "gochen/eventing/bus"
@@ -26,12 +25,12 @@ type Deposited struct{ Amount int }
 
 // 聚合
 type Account struct {
-	*sentity.EventSourcedAggregate[int64]
+	*eventsourced.EventSourcedAggregate[int64]
 	Balance int
 }
 
 func NewAccount(id int64) *Account {
-	return &Account{EventSourcedAggregate: sentity.NewEventSourcedAggregate[int64](id, "Account")}
+	return &Account{EventSourcedAggregate: eventsourced.NewEventSourcedAggregate[int64](id, "Account")}
 }
 
 func (a *Account) ApplyEvent(evt eventing.IEvent) error {

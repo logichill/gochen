@@ -32,7 +32,7 @@ func (s *SQLEventStore) AppendEvents(ctx context.Context, aggregateID int64, eve
 	return nil
 }
 
-func (s *SQLEventStore) AppendEventsWithDB(ctx context.Context, db database.IDatabase, aggregateID int64, events []eventing.IStorableEvent, expectedVersion uint64) error {
+func (s *SQLEventStore) AppendEventsWithDB(ctx context.Context, db db.IDatabase, aggregateID int64, events []eventing.IStorableEvent, expectedVersion uint64) error {
 	if len(events) == 0 {
 		return nil
 	}
@@ -104,7 +104,7 @@ func (s *SQLEventStore) AppendEventsWithDB(ctx context.Context, db database.IDat
 	return nil
 }
 
-func (s *SQLEventStore) getCurrentVersion(ctx context.Context, db database.IDatabase, aggregateID int64, aggregateType string) (uint64, error) {
+func (s *SQLEventStore) getCurrentVersion(ctx context.Context, db db.IDatabase, aggregateID int64, aggregateType string) (uint64, error) {
 	var current uint64
 	row := db.QueryRow(ctx, fmt.Sprintf("SELECT COALESCE(MAX(version), 0) FROM %s WHERE aggregate_id = ? AND aggregate_type = ?", s.tableName), aggregateID, aggregateType)
 	if err := row.Scan(&current); err != nil {
@@ -113,7 +113,7 @@ func (s *SQLEventStore) getCurrentVersion(ctx context.Context, db database.IData
 	return current, nil
 }
 
-func (s *SQLEventStore) isSameEvent(ctx context.Context, db database.IDatabase, eventID string, version uint64, aggregateID int64) bool {
+func (s *SQLEventStore) isSameEvent(ctx context.Context, db db.IDatabase, eventID string, version uint64, aggregateID int64) bool {
 	var existingVersion uint64
 	var existingAggregateID int64
 	row := db.QueryRow(ctx, fmt.Sprintf("SELECT aggregate_id, version FROM %s WHERE id = ?", s.tableName), eventID)

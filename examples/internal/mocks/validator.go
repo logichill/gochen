@@ -2,18 +2,18 @@
 package mocks
 
 import (
-	"gochen/domain/entity"
-	"gochen/domain/service"
-	validation "gochen/validation"
+	"gochen/domain"
+	"gochen/errors"
+	"gochen/validation"
 )
 
 // GenericValidator 通用验证器
-type GenericValidator[T entity.IEntity[int64]] struct {
+type GenericValidator[T domain.IEntity[int64]] struct {
 	validateFunc func(T) error
 }
 
 // NewGenericValidator 创建通用验证器
-func NewGenericValidator[T entity.IEntity[int64]](validateFunc func(T) error) *GenericValidator[T] {
+func NewGenericValidator[T domain.IEntity[int64]](validateFunc func(T) error) *GenericValidator[T] {
 	return &GenericValidator[T]{
 		validateFunc: validateFunc,
 	}
@@ -23,7 +23,7 @@ func (v *GenericValidator[T]) Validate(entity any) error {
 	if typedEntity, ok := entity.(T); ok {
 		return v.validateFunc(typedEntity)
 	}
-	return service.NewValidationError("实体类型不匹配")
+	return errors.NewValidationError("实体类型不匹配")
 }
 
 // SimpleEntityValidator 简单实体验证器

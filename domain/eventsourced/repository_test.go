@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"gochen/domain/entity"
 	"gochen/eventing"
 	"gochen/eventing/bus"
 	"gochen/messaging"
@@ -14,13 +13,13 @@ import (
 
 // TestAggregate 测试聚合
 type TestAggregate struct {
-	*entity.EventSourcedAggregate[int64]
+	*EventSourcedAggregate[int64]
 	Value int
 }
 
 func NewTestAggregate(id int64) *TestAggregate {
 	return &TestAggregate{
-		EventSourcedAggregate: entity.NewEventSourcedAggregate(id, "TestAggregate"),
+		EventSourcedAggregate: NewEventSourcedAggregate[int64](id, "TestAggregate"),
 		Value:                 0,
 	}
 }

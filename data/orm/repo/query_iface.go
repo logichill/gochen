@@ -5,12 +5,12 @@ import (
 	ers "errors"
 
 	"gochen/data/orm"
-	srepo "gochen/domain/repository"
+	"gochen/domain/crud"
 	"gochen/errors"
 )
 
-// Query 执行通用查询（兼容 shared/domain/repository.IQueryableRepository）
-func (r *Repo[T]) Query(ctx context.Context, opts srepo.QueryOptions) ([]T, error) {
+// Query 执行通用查询（兼容 CRUD IQueryableRepository）
+func (r *Repo[T]) Query(ctx context.Context, opts crud.QueryOptions) ([]T, error) {
 	var entities []T
 	q := r.query(ctx)
 	if !opts.IncludeDeleted {
@@ -34,8 +34,8 @@ func (r *Repo[T]) Query(ctx context.Context, opts srepo.QueryOptions) ([]T, erro
 	return entities, nil
 }
 
-// QueryOne 查询单条记录（兼容 shared/domain/repository.IQueryableRepository）
-func (r *Repo[T]) QueryOne(ctx context.Context, opts srepo.QueryOptions) (T, error) {
+// QueryOne 查询单条记录（兼容 CRUD IQueryableRepository）
+func (r *Repo[T]) QueryOne(ctx context.Context, opts crud.QueryOptions) (T, error) {
 	var entity T
 	q := r.query(ctx)
 	if !opts.IncludeDeleted {
@@ -58,8 +58,8 @@ func (r *Repo[T]) QueryOne(ctx context.Context, opts srepo.QueryOptions) (T, err
 	return entity, nil
 }
 
-// QueryCount 查询数量（兼容 shared/domain/repository.IQueryableRepository）
-func (r *Repo[T]) QueryCount(ctx context.Context, opts srepo.QueryOptions) (int64, error) {
+// QueryCount 查询数量（兼容 CRUD IQueryableRepository）
+func (r *Repo[T]) QueryCount(ctx context.Context, opts crud.QueryOptions) (int64, error) {
 	q := r.query(ctx)
 	if !opts.IncludeDeleted {
 		q = q.Where("deleted_at IS NULL")

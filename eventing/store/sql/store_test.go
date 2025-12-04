@@ -17,8 +17,8 @@ import (
 )
 
 // 测试辅助：创建内存数据库并初始化表
-func setupTestDB(t *testing.T) database.IDatabase {
-	db, err := basicdb.New(database.DBConfig{Driver: "sqlite", Database: ":memory:"})
+func setupTestDB(t *testing.T) db.IDatabase {
+	db, err := basicdb.New(db.DBConfig{Driver: "sqlite", Database: ":memory:"})
 	require.NoError(t, err)
 	ctx := context.Background()
 	_, err = db.Exec(ctx, `
@@ -610,7 +610,7 @@ func TestSQLEventStore_Stream_WithOptions(t *testing.T) {
 }
 
 func BenchmarkSQLEventStore_AppendEvents(b *testing.B) {
-	db, err := basicdb.New(database.DBConfig{Driver: "sqlite", Database: ":memory:"})
+	db, err := basicdb.New(db.DBConfig{Driver: "sqlite", Database: ":memory:"})
 	require.NoError(b, err)
 	ctx := context.Background()
 	_, err = db.Exec(ctx, `

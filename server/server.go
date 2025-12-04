@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
+	"gochen/app"
 	"gochen/di"
-	"gochen/domain"
 	"gochen/eventing/bus"
 	"gochen/eventing/projection"
 	httpx "gochen/http"
@@ -150,7 +150,7 @@ func WithServerHTTPServer(httpServer httpx.IHttpServer) ServerOption {
 //   - 路由构造器实现 RouteRegistrar 接口。
 type Server struct {
 	config    *ServerConfig
-	modules   []domain.IModule
+	modules   []app.IModule
 	container di.IContainer
 
 	httpServer httpx.IHttpServer
@@ -166,7 +166,7 @@ type Server struct {
 // modules 通常是若干实现了 domain.IModule 的领域模块，例如：
 //   - gochen-iam.NewModule()
 //   - gochen-llm.NewModule()
-func NewServer(modules []domain.IModule, opts ...ServerOption) *Server {
+func NewServer(modules []app.IModule, opts ...ServerOption) *Server {
 	cfg := DefaultServerConfig()
 	for _, opt := range opts {
 		opt(cfg)

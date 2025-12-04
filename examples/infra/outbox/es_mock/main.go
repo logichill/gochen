@@ -6,7 +6,6 @@ import (
 	"log"
 	"time"
 
-	sentity "gochen/domain/entity"
 	"gochen/domain/eventsourced"
 	"gochen/eventing"
 	"gochen/eventing/outbox"
@@ -18,12 +17,12 @@ type Deposited struct{ Amount int }
 
 // 聚合
 type Wallet struct {
-	*sentity.EventSourcedAggregate[int64]
+	*eventsourced.EventSourcedAggregate[int64]
 	Balance int
 }
 
 func NewWallet(id int64) *Wallet {
-	return &Wallet{EventSourcedAggregate: sentity.NewEventSourcedAggregate[int64](id, "Wallet")}
+	return &Wallet{EventSourcedAggregate: eventsourced.NewEventSourcedAggregate[int64](id, "Wallet")}
 }
 
 func (a *Wallet) ApplyEvent(evt eventing.IEvent) error {

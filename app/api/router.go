@@ -6,33 +6,33 @@ import (
 	"strconv"
 	"strings"
 
-	application "gochen/app/application"
-	"gochen/domain/entity"
+	"gochen/app/application"
+	"gochen/domain"
 	"gochen/errors"
-	core "gochen/http"
+	"gochen/http"
 )
 
 // IRouteBuilder 路由构建器接口
-type IRouteBuilder[T entity.IEntity[int64]] interface {
+type IRouteBuilder[T domain.IEntity[int64]] interface {
 	// 配置路由行为
 	WithConfig(config *RouteConfig) IRouteBuilder[T]
 
 	// 注册中间件
-	Use(middlewares ...core.Middleware) IRouteBuilder[T]
+	Use(middlewares ...http.Middleware) IRouteBuilder[T]
 
 	// 注册到路由组
-	Register(group core.IRouteGroup) error
+	Register(group http.IRouteGroup) error
 }
 
-// RouteBuilder 路由构���器实现
-type RouteBuilder[T entity.IEntity[int64]] struct {
+// RouteBuilder 路由构建器实现
+type RouteBuilder[T domain.IEntity[int64]] struct {
 	config      *RouteConfig
-	middlewares []core.Middleware
+	middlewares []http.Middleware
 	service     application.IApplication[T]
 }
 
 // NewRouteBuilder 创建路由构建器
-func NewRouteBuilder[T entity.IEntity[int64]](svc application.IApplication[T]) IRouteBuilder[T] {
+func NewRouteBuilder[T domain.IEntity[int64]](svc application.IApplication[T]) IRouteBuilder[T] {
 	return &RouteBuilder[T]{
 		config:  DefaultRouteConfig(),
 		service: svc,
@@ -48,13 +48,13 @@ func (rb *RouteBuilder[T]) WithConfig(config *RouteConfig) IRouteBuilder[T] {
 }
 
 // Use 注册中间件
-func (rb *RouteBuilder[T]) Use(middlewares ...core.Middleware) IRouteBuilder[T] {
+func (rb *RouteBuilder[T]) Use(middlewares ...http.Middleware) IRouteBuilder[T] {
 	rb.middlewares = append(rb.middlewares, middlewares...)
 	return rb
 }
 
 // Register 注册到路由组
-func (rb *RouteBuilder[T]) Register(group core.IRouteGroup) error {
+func (rb *RouteBuilder[T]) Register(group http.IRouteGroup) error {
 	if rb.service == nil {
 		return fmt.Errorf("service cannot be nil")
 	}
@@ -71,7 +71,7 @@ func (rb *RouteBuilder[T]) Register(group core.IRouteGroup) error {
 }
 
 // registerListRoutes 注册列表相关路由
-func (rb *RouteBuilder[T]) registerListRoutes(group core.IRouteGroup) {
+func (rb *RouteBuilder[T]) registerListRoutes(group http.IRouteGroup) {
 	basePath := rb.config.BasePath
 	if basePath == "" {
 		basePath = ""
@@ -82,7 +82,7 @@ func (rb *RouteBuilder[T]) registerListRoutes(group core.IRouteGroup) {
 }
 
 // registerEntityRoutes 注册实体相关路由
-func (rb *RouteBuilder[T]) registerEntityRoutes(group core.IRouteGroup) {
+func (rb *RouteBuilder[T]) registerEntityRoutes(group http.IRouteGroup) {
 	basePath := rb.config.BasePath
 	if basePath == "" {
 		basePath = ""
@@ -102,7 +102,7 @@ func (rb *RouteBuilder[T]) registerEntityRoutes(group core.IRouteGroup) {
 }
 
 // registerBatchRoutes 注册批量操作路由
-func (rb *RouteBuilder[T]) registerBatchRoutes(group core.IRouteGroup) {
+func (rb *RouteBuilder[T]) registerBatchRoutes(group http.IRouteGroup) {
 	basePath := rb.config.BasePath
 	if basePath == "" {
 		basePath = ""
@@ -119,9 +119,9 @@ func (rb *RouteBuilder[T]) registerBatchRoutes(group core.IRouteGroup) {
 }
 
 // wrapHandler 包装处理器，应用中间件和错误处理
-func (rb *RouteBuilder[T]) wrapHandler(handler func(core.IHttpContext) error) func(core.IHttpContext) error {
-	return func(c core.IHttpContext) error {
-		middlewares := make([]core.Middleware, 0, len(rb.middlewares))
+func (rb *RouteBuilder[T]) wrapHandler(handler func(http.IHttpContext) error) func(http.IHttpContext) error {
+	return func(c http.IHttpContext) error {
+		middlewares := make([]http.Middleware, 0, len(rb.middlewares))
 		middlewares = append(middlewares, rb.middlewares...)
 		if rb.config != nil && len(rb.config.Middlewares) > 0 {
 			middlewares = append(middlewares, rb.config.Middlewares...)
@@ -131,7 +131,7 @@ func (rb *RouteBuilder[T]) wrapHandler(handler func(core.IHttpContext) error) fu
 		for i := len(middlewares) - 1; i >= 0; i-- {
 			mw := middlewares[i]
 			next := executor
-			executor = func(ctx core.IHttpContext) error {
+			executor = func(ctx http.IHttpContext) error {
 				return mw(ctx, func() error {
 					return next(ctx)
 				})
@@ -139,7 +139,7 @@ func (rb *RouteBuilder[T]) wrapHandler(handler func(core.IHttpContext) error) fu
 		}
 
 		if err := executor(c); err != nil {
-			var errorHandler func(error) core.IResponse
+			var errorHandler func(error) http.IResponse
 			if rb.config != nil {
 				errorHandler = rb.config.ErrorHandler
 			}
@@ -158,7 +158,7 @@ func (rb *RouteBuilder[T]) wrapHandler(handler func(core.IHttpContext) error) fu
 }
 
 // 请求处理方法
-func (rb *RouteBuilder[T]) handleList(c core.IHttpContext) error {
+func (rb *RouteBuilder[T]) handleList(c http.IHttpContext) error {
 	if rb.config.EnablePagination {
 		return rb.handlePagedList(c)
 	}
@@ -173,7 +173,7 @@ func (rb *RouteBuilder[T]) handleList(c core.IHttpContext) error {
 	return c.JSON(200, wrappedData)
 }
 
-func (rb *RouteBuilder[T]) handlePagedList(c core.IHttpContext) error {
+func (rb *RouteBuilder[T]) handlePagedList(c http.IHttpContext) error {
 	options := rb.parsePaginationOptions(c)
 	result, err := rb.service.ListPage(c.GetContext(), options)
 	if err != nil {
@@ -184,7 +184,7 @@ func (rb *RouteBuilder[T]) handlePagedList(c core.IHttpContext) error {
 	return c.JSON(200, wrappedData)
 }
 
-func (rb *RouteBuilder[T]) handleGet(c core.IHttpContext) error {
+func (rb *RouteBuilder[T]) handleGet(c http.IHttpContext) error {
 	id, err := strconv.ParseInt(c.GetParam("id"), 10, 64)
 	if err != nil {
 		return errors.NewValidationError("无效的ID格式")
@@ -199,7 +199,7 @@ func (rb *RouteBuilder[T]) handleGet(c core.IHttpContext) error {
 	return c.JSON(200, wrappedData)
 }
 
-func (rb *RouteBuilder[T]) handleCreate(c core.IHttpContext) error {
+func (rb *RouteBuilder[T]) handleCreate(c http.IHttpContext) error {
 	var entity T
 	if err := c.BindJSON(&entity); err != nil {
 		return errors.NewValidationError("无效的请求数据")
@@ -224,7 +224,7 @@ func (rb *RouteBuilder[T]) handleCreate(c core.IHttpContext) error {
 	return c.JSON(200, wrappedData)
 }
 
-func (rb *RouteBuilder[T]) handleUpdate(c core.IHttpContext) error {
+func (rb *RouteBuilder[T]) handleUpdate(c http.IHttpContext) error {
 	id, err := strconv.ParseInt(c.GetParam("id"), 10, 64)
 	if err != nil {
 		return errors.NewValidationError("无效的ID格式")
@@ -256,7 +256,7 @@ func (rb *RouteBuilder[T]) handleUpdate(c core.IHttpContext) error {
 	return c.JSON(200, wrappedData)
 }
 
-func (rb *RouteBuilder[T]) handleDelete(c core.IHttpContext) error {
+func (rb *RouteBuilder[T]) handleDelete(c http.IHttpContext) error {
 	id, err := strconv.ParseInt(c.GetParam("id"), 10, 64)
 	if err != nil {
 		return errors.NewValidationError("无效的ID格式")
@@ -270,7 +270,7 @@ func (rb *RouteBuilder[T]) handleDelete(c core.IHttpContext) error {
 	return c.JSON(200, wrappedData)
 }
 
-func (rb *RouteBuilder[T]) handleCreateBatch(c core.IHttpContext) error {
+func (rb *RouteBuilder[T]) handleCreateBatch(c http.IHttpContext) error {
 	var entities []T
 	if err := c.BindJSON(&entities); err != nil {
 		return errors.NewValidationError("无效的请求数据")
@@ -285,7 +285,7 @@ func (rb *RouteBuilder[T]) handleCreateBatch(c core.IHttpContext) error {
 	return c.JSON(201, wrappedData)
 }
 
-func (rb *RouteBuilder[T]) handleUpdateBatch(c core.IHttpContext) error {
+func (rb *RouteBuilder[T]) handleUpdateBatch(c http.IHttpContext) error {
 	var entities []T
 	if err := c.BindJSON(&entities); err != nil {
 		return errors.NewValidationError("无效的请求数据")
@@ -300,7 +300,7 @@ func (rb *RouteBuilder[T]) handleUpdateBatch(c core.IHttpContext) error {
 	return c.JSON(200, wrappedData)
 }
 
-func (rb *RouteBuilder[T]) handleDeleteBatch(c core.IHttpContext) error {
+func (rb *RouteBuilder[T]) handleDeleteBatch(c http.IHttpContext) error {
 	var req struct {
 		IDs []int64 `json:"ids" binding:"required"`
 	}
@@ -319,7 +319,7 @@ func (rb *RouteBuilder[T]) handleDeleteBatch(c core.IHttpContext) error {
 }
 
 // 辅助方法
-func (rb *RouteBuilder[T]) parseQueryParams(c core.IHttpContext) *application.QueryParams {
+func (rb *RouteBuilder[T]) parseQueryParams(c http.IHttpContext) *application.QueryParams {
 	query := &application.QueryParams{
 		Filters: make(map[string]string),
 		Sorts:   make(map[string]string),
@@ -349,7 +349,7 @@ func (rb *RouteBuilder[T]) parseQueryParams(c core.IHttpContext) *application.Qu
 	return query
 }
 
-func (rb *RouteBuilder[T]) parsePaginationOptions(c core.IHttpContext) *application.PaginationOptions {
+func (rb *RouteBuilder[T]) parsePaginationOptions(c http.IHttpContext) *application.PaginationOptions {
 	options := &application.PaginationOptions{
 		Page:    1,
 		Size:    rb.config.DefaultPageSize,

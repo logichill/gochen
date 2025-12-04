@@ -1,4 +1,4 @@
-package domain
+package app
 
 import (
 	"context"
@@ -36,4 +36,3 @@ type IModule interface {
 	// 返回投影管理器和投影名称列表；若无投影，可返回 (nil, nil, nil)
 	RegisterProjections(container di.IContainer) (*projection.ProjectionManager, []string, error)
 }
-

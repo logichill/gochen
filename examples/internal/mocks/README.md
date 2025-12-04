@@ -114,8 +114,8 @@ import (
     "context"
     "log"
 
+    "gochen/domain/crud"
     "gochen/domain/entity"
-    "gochen/domain/service"
     "gochen/examples/internal/mocks"
     restful "gochen/app/restful"
 )
@@ -137,13 +137,13 @@ func main() {
     // 创建验证器
     validator := mocks.NewGenericValidator[*User](func(user *User) error {
         if user.Name == "" {
-            return service.NewValidationError("用户名不能为空")
+            return errors.NewValidationError("用户名不能为空")
         }
         return nil
     })
 
-    // 创建服务
-    userService := service.NewAppService[*User](repo, validator, nil)
+    // 创建服务（此处示例，实际请使用应用层 Application）
+    userService := crud.NewCRUDService[*User, int64](repo)
 
     // 创建路由器
     router := mocks.NewMockRouter()

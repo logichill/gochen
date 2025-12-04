@@ -9,18 +9,19 @@ import (
 	"testing"
 
 	application "gochen/app/application"
-	"gochen/domain/entity"
-	"gochen/domain/repository"
+	"gochen/domain/crud"
 	httpx "gochen/http"
 	hbasic "gochen/http/basic"
 	validation "gochen/validation"
 )
 
 type fakeEntity struct {
-	entity.Entity
+	ID      int64
+	Version int64
 }
 
-func (f *fakeEntity) Validate() error { return nil }
+func (f *fakeEntity) GetID() int64      { return f.ID }
+func (f *fakeEntity) GetVersion() int64 { return f.Version }
 
 type noopRepository struct{}
 
@@ -94,7 +95,7 @@ func (s *stubAppService) List(context.Context, int, int) ([]*fakeEntity, error) 
 	return []*fakeEntity{}, nil
 }
 func (s *stubAppService) Count(context.Context) (int64, error)                   { return 0, nil }
-func (s *stubAppService) Repository() repository.IRepository[*fakeEntity, int64] { return nil }
+func (s *stubAppService) Repository() crud.IRepository[*fakeEntity, int64]       { return nil }
 func (s *stubAppService) ListByQuery(context.Context, *application.QueryParams) ([]*fakeEntity, error) {
 	if s.order != nil {
 		*s.order = append(*s.order, "handler-list")

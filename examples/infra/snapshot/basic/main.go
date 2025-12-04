@@ -10,7 +10,6 @@ import (
 
 	dbcore "gochen/data/db"
 	basicdb "gochen/data/db/basic"
-	sentity "gochen/domain/entity"
 	"gochen/domain/eventsourced"
 	"gochen/eventing"
 	estore "gochen/eventing/store"
@@ -22,12 +21,12 @@ type ValueSet struct{ V int }
 
 // Counter 聚合
 type Counter struct {
-	*sentity.EventSourcedAggregate[int64]
+	*eventsourced.EventSourcedAggregate[int64]
 	Value int
 }
 
 func NewCounter(id int64) *Counter {
-	return &Counter{EventSourcedAggregate: sentity.NewEventSourcedAggregate[int64](id, "Counter")}
+	return &Counter{EventSourcedAggregate: eventsourced.NewEventSourcedAggregate[int64](id, "Counter")}
 }
 
 func (c *Counter) ApplyEvent(evt eventing.IEvent) error {

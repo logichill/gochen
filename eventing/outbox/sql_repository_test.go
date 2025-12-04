@@ -29,7 +29,7 @@ func (m *MockEventStoreWithDB) AppendEvents(ctx context.Context, aggregateID int
 	return nil
 }
 
-func (m *MockEventStoreWithDB) AppendEventsWithDB(ctx context.Context, db database.IDatabase, aggregateID int64, events []eventing.IStorableEvent, expectedVersion uint64) error {
+func (m *MockEventStoreWithDB) AppendEventsWithDB(ctx context.Context, db db.IDatabase, aggregateID int64, events []eventing.IStorableEvent, expectedVersion uint64) error {
 	m.append(events)
 	return nil
 }
@@ -81,8 +81,8 @@ func newTestEvent(aggregateID int64, version uint64, id string, payload map[stri
 }
 
 // 测试辅助函数：创建测试数据库
-func setupTestDB(t *testing.T) database.IDatabase {
-	db, err := basicdb.New(database.DBConfig{Driver: "sqlite", Database: ":memory:"})
+func setupTestDB(t *testing.T) db.IDatabase {
+	db, err := basicdb.New(db.DBConfig{Driver: "sqlite", Database: ":memory:"})
 	require.NoError(t, err)
 	ctx := context.Background()
 	// 创建表

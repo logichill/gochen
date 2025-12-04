@@ -6,7 +6,6 @@ import (
 	"log"
 	"time"
 
-	sentity "gochen/domain/entity"
 	"gochen/domain/eventsourced"
 	"gochen/eventing"
 	ebus "gochen/eventing/bus"
@@ -21,12 +20,12 @@ type ValueSet struct{ V int }
 
 // 聚合
 type Counter struct {
-	*sentity.EventSourcedAggregate[int64]
+	*eventsourced.EventSourcedAggregate[int64]
 	Value int
 }
 
 func NewCounter(id int64) *Counter {
-	return &Counter{EventSourcedAggregate: sentity.NewEventSourcedAggregate[int64](id, "Counter")}
+	return &Counter{EventSourcedAggregate: eventsourced.NewEventSourcedAggregate[int64](id, "Counter")}
 }
 
 func (a *Counter) ApplyEvent(evt eventing.IEvent) error {

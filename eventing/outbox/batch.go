@@ -36,11 +36,11 @@ type FailedEntry struct {
 //
 // 为 SQLOutboxRepository 提供批量操作能力。
 type BatchOperations struct {
-	db database.IDatabase
+	db db.IDatabase
 }
 
 // NewBatchOperations 创建批量操作实例
-func NewBatchOperations(db database.IDatabase) IBatchRepository {
+func NewBatchOperations(db db.IDatabase) IBatchRepository {
 	return &BatchOperations{db: db}
 }
 

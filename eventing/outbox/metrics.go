@@ -55,7 +55,7 @@ const (
 
 // MetricsCollector 指标采集器实现
 type MetricsCollector struct {
-	db database.IDatabase
+	db db.IDatabase
 
 	// 健康阈值配置
 	maxPendingCount int64         // 待处理记录数阈值
@@ -71,7 +71,7 @@ type MetricsCollector struct {
 //   - maxFailedCount: 1000
 //   - maxDLQCount: 100
 //   - maxPendingAge: 1 小时
-func NewMetricsCollector(db database.IDatabase) IMetricsCollector {
+func NewMetricsCollector(db db.IDatabase) IMetricsCollector {
 	return &MetricsCollector{
 		db:              db,
 		maxPendingCount: 10000,
@@ -83,7 +83,7 @@ func NewMetricsCollector(db database.IDatabase) IMetricsCollector {
 
 // NewMetricsCollectorWithThresholds 创建指标采集器（自定义阈值）
 func NewMetricsCollectorWithThresholds(
-	db database.IDatabase,
+	db db.IDatabase,
 	maxPendingCount, maxFailedCount, maxDLQCount int64,
 	maxPendingAge time.Duration,
 ) IMetricsCollector {

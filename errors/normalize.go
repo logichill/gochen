@@ -3,8 +3,7 @@ package errors
 import (
 	stdErrors "errors"
 
-	"gochen/domain/entity"
-	"gochen/domain/repository"
+	"gochen/domain"
 	"gochen/eventing"
 	"gochen/messaging/command"
 )
@@ -40,11 +39,11 @@ func Normalize(err error) error {
 	}
 
 	// 领域实体/仓储错误
-	if stdErrors.Is(err, entity.ErrAggregateNotFound) || stdErrors.Is(err, repository.ErrEntityNotFound) {
+	if stdErrors.Is(err, eventing.ErrAggregateNotFound) || stdErrors.Is(err, domain.ErrEntityNotFound) {
 		return WrapError(err, ErrCodeNotFound, "entity not found")
 	}
 
-	if stdErrors.Is(err, repository.ErrVersionConflict) {
+	if stdErrors.Is(err, domain.ErrVersionConflict) {
 		return WrapError(err, ErrCodeConcurrency, "repository version conflict")
 	}
 

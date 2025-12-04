@@ -69,7 +69,7 @@ type IDLQRepository interface {
 
 // SQLDLQRepository DLQ 的 SQL 实现
 type SQLDLQRepository struct {
-	db          database.IDatabase
+	db          db.IDatabase
 	outboxRepo  IOutboxRepository
 	maxRetries  int
 	autoCleanup bool
@@ -80,7 +80,7 @@ type SQLDLQRepository struct {
 // maxRetries 指定 Outbox 记录重试多少次后移到 DLQ。
 // autoCleanup 指定是否在移到 DLQ 后自动删除 Outbox 记录。
 func NewSQLDLQRepository(
-	db database.IDatabase,
+	db db.IDatabase,
 	outboxRepo IOutboxRepository,
 	maxRetries int,
 	autoCleanup bool,

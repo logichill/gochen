@@ -4,94 +4,50 @@ package mocks
 import (
 	"context"
 	"fmt"
-	"time"
+	"strconv"
 
-	"gochen/domain/entity"
-	srepo "gochen/domain/repository"
+	"gochen/domain/audited"
 )
 
-// MockAuditedRepository 基于内存的审计型仓储实现
-// - 复用 GenericMockRepository 提供的基础 CRUD 行为
-// - 实现审计相关方法（审计轨迹、软删/恢复/物理删）
-type MockAuditedRepository[T entity.IAuditedEntity[int64]] struct {
+// MockAuditedRepository 基于内存的审计型仓储实现。
+// - 复用 GenericMockRepository 提供的基础 CRUD 行为；
+// - 实现 audited.IAuditStore，用于保存与查询审计记录。
+type MockAuditedRepository[T audited.IAuditedEntity[int64]] struct {
 	*GenericMockRepository[T]
-	audits map[int64][]srepo.AuditRecord
+	audits map[int64][]audited.AuditRecord
 }
 
 // NewMockAuditedRepository 创建审计型内存仓储
-func NewMockAuditedRepository[T entity.IAuditedEntity[int64]]() *MockAuditedRepository[T] {
+func NewMockAuditedRepository[T audited.IAuditedEntity[int64]]() *MockAuditedRepository[T] {
 	return &MockAuditedRepository[T]{
 		GenericMockRepository: NewGenericMockRepository[T](),
-		audits:                map[int64][]srepo.AuditRecord{},
+		audits:                map[int64][]audited.AuditRecord{},
 	}
 }
 
-func (r *MockAuditedRepository[T]) record(id int64, op, by string, changes map[string]any) {
-	rec := srepo.AuditRecord{
-		ID:        time.Now().UnixNano(),
-		EntityID:  fmt.Sprintf("%d", id),
-		Operation: op,
-		Operator:  by,
-		Timestamp: time.Now(),
-		Changes:   changes,
+// SaveAuditRecord 保存审计记录，实现 audited.IAuditStore。
+func (r *MockAuditedRepository[T]) SaveAuditRecord(ctx context.Context, rec audited.AuditRecord) error {
+	id, err := strconv.ParseInt(rec.EntityID, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid entity id for audit record: %s", rec.EntityID)
 	}
 	r.audits[id] = append(r.audits[id], rec)
+	return nil
 }
 
-// GetAuditTrail 获取审计轨迹
-func (r *MockAuditedRepository[T]) GetAuditTrail(ctx context.Context, id int64) ([]srepo.AuditRecord, error) {
-	return r.audits[id], nil
-}
-
-// ListDeleted 查询已软删除实体
-func (r *MockAuditedRepository[T]) ListDeleted(ctx context.Context, offset, limit int) ([]T, error) {
-	all, _ := r.List(ctx, 0, 1<<30)
-	res := make([]T, 0)
-	for _, v := range all {
-		if v.IsDeleted() {
-			res = append(res, v)
-		}
+// ListAuditRecordsByEntity 按实体 ID 查询审计记录，实现 audited.IAuditStore。
+func (r *MockAuditedRepository[T]) ListAuditRecordsByEntity(ctx context.Context, entityID string, offset, limit int) ([]audited.AuditRecord, error) {
+	id, err := strconv.ParseInt(entityID, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("invalid entity id for audit query: %s", entityID)
 	}
-	// 简化分页（示例用）
-	if offset >= len(res) {
-		return []T{}, nil
+	recs := r.audits[id]
+	if offset >= len(recs) {
+		return []audited.AuditRecord{}, nil
 	}
 	end := offset + limit
-	if end > len(res) {
-		end = len(res)
+	if end > len(recs) {
+		end = len(recs)
 	}
-	return res[offset:end], nil
-}
-
-// Restore 恢复已软删除实体
-func (r *MockAuditedRepository[T]) Restore(ctx context.Context, id int64, by string) error {
-	e, err := r.GetByID(ctx, id)
-	if err != nil {
-		return err
-	}
-	if err := e.Restore(); err != nil {
-		return err
-	}
-	e.SetUpdatedInfo(by, time.Now())
-	r.record(id, "RESTORE", by, nil)
-	return r.Update(ctx, e)
-}
-
-// SoftDelete 执行软删除
-func (r *MockAuditedRepository[T]) SoftDelete(ctx context.Context, id int64, by string) error {
-	e, err := r.GetByID(ctx, id)
-	if err != nil {
-		return err
-	}
-	if err := e.SoftDelete(by, time.Now()); err != nil {
-		return err
-	}
-	r.record(id, "DELETE", by, nil)
-	return r.Update(ctx, e)
-}
-
-// PermanentDelete 物理删除
-func (r *MockAuditedRepository[T]) PermanentDelete(ctx context.Context, id int64) error {
-	r.record(id, "DELETE_HARD", "admin", nil)
-	return r.Delete(ctx, id)
+	return recs[offset:end], nil
 }

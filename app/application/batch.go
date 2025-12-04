@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	repo "gochen/domain/repository"
-	"gochen/domain/service"
+	"gochen/domain/crud"
+	"gochen/errors"
 )
 
 // BatchOperationResult 批量操作结果
@@ -25,7 +25,7 @@ func (s *Application[T]) CreateBatch(ctx context.Context, entities []T) (*BatchO
 	}
 
 	if len(entities) > s.config.MaxBatchSize {
-		return nil, service.NewValidationError("batch size exceeds maximum limit of %d", s.config.MaxBatchSize)
+		return nil, errors.NewValidationError(fmt.Sprintf("batch size exceeds maximum limit of %d", s.config.MaxBatchSize))
 	}
 
 	result := &BatchOperationResult{
@@ -35,7 +35,7 @@ func (s *Application[T]) CreateBatch(ctx context.Context, entities []T) (*BatchO
 		Errors:     make([]string, 0),
 	}
 
-	if batchRepo, ok := s.Repository().(repo.IBatchOperations[T, int64]); ok {
+	if batchRepo, ok := s.Repository().(crud.IBatchOperations[T, int64]); ok {
 		pending := make([]T, 0, len(entities))
 		for _, entity := range entities {
 			if err := s.BeforeCreate(ctx, entity); err != nil {
@@ -91,7 +91,7 @@ func (s *Application[T]) UpdateBatch(ctx context.Context, entities []T) (*BatchO
 	}
 
 	if len(entities) > s.config.MaxBatchSize {
-		return nil, service.NewValidationError("batch size exceeds maximum limit of %d", s.config.MaxBatchSize)
+		return nil, errors.NewValidationError(fmt.Sprintf("batch size exceeds maximum limit of %d", s.config.MaxBatchSize))
 	}
 
 	result := &BatchOperationResult{
@@ -101,7 +101,7 @@ func (s *Application[T]) UpdateBatch(ctx context.Context, entities []T) (*BatchO
 		Errors:     make([]string, 0),
 	}
 
-	if batchRepo, ok := s.Repository().(repo.IBatchOperations[T, int64]); ok {
+	if batchRepo, ok := s.Repository().(crud.IBatchOperations[T, int64]); ok {
 		pending := make([]T, 0, len(entities))
 		for _, entity := range entities {
 			if err := s.BeforeUpdate(ctx, entity); err != nil {
@@ -157,7 +157,7 @@ func (s *Application[T]) DeleteBatch(ctx context.Context, ids []int64) (*BatchOp
 	}
 
 	if len(ids) > s.config.MaxBatchSize {
-		return nil, service.NewValidationError("batch size exceeds maximum limit of %d", s.config.MaxBatchSize)
+		return nil, errors.NewValidationError(fmt.Sprintf("batch size exceeds maximum limit of %d", s.config.MaxBatchSize))
 	}
 
 	result := &BatchOperationResult{
@@ -167,7 +167,7 @@ func (s *Application[T]) DeleteBatch(ctx context.Context, ids []int64) (*BatchOp
 		Errors:     make([]string, 0),
 	}
 
-	if batchRepo, ok := s.Repository().(repo.IBatchOperations[T, int64]); ok {
+	if batchRepo, ok := s.Repository().(crud.IBatchOperations[T, int64]); ok {
 		pending := make([]int64, 0, len(ids))
 		for _, id := range ids {
 			if err := s.BeforeDelete(ctx, id); err != nil {

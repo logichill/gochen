@@ -4,16 +4,15 @@ package application
 import (
 	"context"
 
-	"gochen/domain/entity"
-	repo "gochen/domain/repository"
-	"gochen/domain/service"
+	"gochen/domain"
+	"gochen/domain/crud"
 	validation "gochen/validation"
 )
 
 // IApplication 应用服务接口
 // 扩展基础 CRUD 服务，提供业务逻辑封装和生命周期管理
-type IApplication[T entity.IEntity[int64]] interface {
-	service.IService[T, int64]
+type IApplication[T domain.IEntity[int64]] interface {
+	crud.IService[T, int64]
 
 	// 查询扩展
 	ListByQuery(ctx context.Context, query *QueryParams) ([]T, error)
@@ -92,15 +91,15 @@ func DefaultServiceConfig() *ServiceConfig {
 }
 
 // Application 应用服务实现
-type Application[T entity.IEntity[int64]] struct {
-	*service.CRUDService[T, int64]
+type Application[T domain.IEntity[int64]] struct {
+	*crud.CRUDService[T, int64]
 	validator validation.IValidator
 	config    *ServiceConfig
 }
 
 // NewApplication 创建应用服务
-func NewApplication[T entity.IEntity[int64]](
-	repository repo.IRepository[T, int64],
+func NewApplication[T domain.IEntity[int64]](
+	repository crud.IRepository[T, int64],
 	validator validation.IValidator,
 	config *ServiceConfig,
 ) IApplication[T] {
@@ -109,7 +108,7 @@ func NewApplication[T entity.IEntity[int64]](
 	}
 
 	return &Application[T]{
-		CRUDService: service.NewCRUDService[T, int64](repository),
+		CRUDService: crud.NewCRUDService[T, int64](repository),
 		validator:   validator,
 		config:      config,
 	}

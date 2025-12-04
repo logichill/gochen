@@ -4,14 +4,14 @@ import (
 	"context"
 
 	"gochen/data/orm"
-	sentity "gochen/domain/entity"
+	"gochen/domain"
 )
 
 // Repo 基于 gochen/data/orm 的通用仓储实现。
 // 约束：实体需实现 IObject[int64] 与 IValidatable。
 type Repo[T interface {
-	sentity.IObject[int64]
-	sentity.IValidatable
+	domain.IObject[int64]
+	domain.IValidatable
 }] struct {
 	orm   orm.IOrm
 	model orm.IModel
@@ -19,8 +19,8 @@ type Repo[T interface {
 
 // NewRepo 创建基础仓储实例。
 func NewRepo[T interface {
-	sentity.IObject[int64]
-	sentity.IValidatable
+	domain.IObject[int64]
+	domain.IValidatable
 }](ormEngine orm.IOrm, tableName string) *Repo[T] {
 	meta := &orm.ModelMeta{
 		Model: new(T),

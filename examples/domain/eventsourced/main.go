@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 
-	sentity "gochen/domain/entity"
 	"gochen/domain/eventsourced"
 	"gochen/eventing"
 	ebus "gochen/eventing/bus"
@@ -21,12 +20,12 @@ type Withdrawn struct{ Amount int }
 
 // 聚合
 type Account struct {
-	*sentity.EventSourcedAggregate[int64]
+	*eventsourced.EventSourcedAggregate[int64]
 	Balance int
 }
 
 func NewAccount(id int64) *Account {
-	return &Account{EventSourcedAggregate: sentity.NewEventSourcedAggregate[int64](id, "account")}
+	return &Account{EventSourcedAggregate: eventsourced.NewEventSourcedAggregate[int64](id, "account")}
 }
 
 func (a *Account) Open(initial int) error {

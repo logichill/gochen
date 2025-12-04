@@ -21,7 +21,7 @@ type IOrm interface {
 	// BeginTx 开启带选项的事务会话。
 	BeginTx(ctx context.Context, opts *sql.TxOptions) (IOrmSession, error)
 	// Database 返回适配器绑定的通用数据库（可选，可为 nil）。
-	Database() database.IDatabase
+	Database() db.IDatabase
 	// Raw 返回底层 ORM 引擎实例（例如 *gorm.DB），便于特殊场景透传。
 	Raw() any
 }

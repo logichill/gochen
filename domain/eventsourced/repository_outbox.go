@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"gochen/domain/entity"
 	"gochen/eventing"
 	"gochen/eventing/outbox"
 	"gochen/logging"
@@ -21,14 +20,14 @@ import (
 // 注意：
 // - outboxRepo 通常应基于 SQL 实现并与底层事件存储共享事务（例如 SimpleSQLOutboxRepository）
 // - 若 outboxRepo 为 nil，则退化为基础仓储 Save 行为
-type OutboxAwareRepository[T entity.IEventSourcedAggregate[int64]] struct {
+type OutboxAwareRepository[T IEventSourcedAggregate[int64]] struct {
 	base   *EventSourcedRepository[T]
 	outbox outbox.IOutboxRepository
 	logger logging.ILogger
 }
 
 // NewOutboxAwareRepository 创建 Outbox 装饰器
-func NewOutboxAwareRepository[T entity.IEventSourcedAggregate[int64]](base *EventSourcedRepository[T], outboxRepo outbox.IOutboxRepository) (*OutboxAwareRepository[T], error) {
+func NewOutboxAwareRepository[T IEventSourcedAggregate[int64]](base *EventSourcedRepository[T], outboxRepo outbox.IOutboxRepository) (*OutboxAwareRepository[T], error) {
 	if base == nil {
 		return nil, fmt.Errorf("base repository cannot be nil")
 	}

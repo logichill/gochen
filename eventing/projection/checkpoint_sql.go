@@ -22,7 +22,7 @@ import (
 //   - UPSERT 语义（幂等）
 //   - 线程安全
 type SQLCheckpointStore struct {
-	db        database.IDatabase
+	db        db.IDatabase
 	tableName string
 	dialect   dialect.Dialect
 }
@@ -35,7 +35,7 @@ type SQLCheckpointStore struct {
 //
 // 返回：
 //   - *SQLCheckpointStore: 存储实例
-func NewSQLCheckpointStore(db database.IDatabase, tableName string) *SQLCheckpointStore {
+func NewSQLCheckpointStore(db db.IDatabase, tableName string) *SQLCheckpointStore {
 	if tableName == "" {
 		tableName = "projection_checkpoints"
 	}

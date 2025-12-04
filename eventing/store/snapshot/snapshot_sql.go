@@ -11,21 +11,21 @@ import (
 	"gochen/logging"
 )
 
-// SQLStore 基于通用 database.IDatabase 的快照存储实现
+// SQLStore 基于通用 db.IDatabase 的快照存储实现
 //
 // 语义说明：
 // - 仅作为聚合重建的性能优化层，不改变事件存储的“真相”角色；
 // - 每个 (aggregate_type, aggregate_id) 只保留一条最新快照；
 // - SaveSnapshot 采用“UPDATE 若无则 INSERT”的幂等写入策略，兼容 MySQL/SQLite。
 type SQLStore struct {
-	db        database.IDatabase
+	db        db.IDatabase
 	tableName string
 }
 
 // NewSQLStore 创建 SQL 快照存储
 //
 // tableName 为空时默认使用 "event_snapshots"。
-func NewSQLStore(db database.IDatabase, tableName string) *SQLStore {
+func NewSQLStore(db db.IDatabase, tableName string) *SQLStore {
 	if tableName == "" {
 		tableName = "event_snapshots"
 	}

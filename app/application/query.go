@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"gochen/domain/entity"
-	repo "gochen/domain/repository"
+	"gochen/domain"
+	"gochen/domain/crud"
 )
 
 // QueryParams 查询参数
@@ -43,7 +43,7 @@ func (p *PaginationOptions) Validate(maxSize int) error {
 }
 
 // PagedResult 分页结果
-type PagedResult[T entity.IEntity[int64]] struct {
+type PagedResult[T domain.IEntity[int64]] struct {
 	Data       []T   `json:"data"`
 	Total      int64 `json:"total"`
 	Page       int   `json:"page"`
@@ -63,7 +63,7 @@ func (s *Application[T]) ListByQuery(ctx context.Context, query *QueryParams) ([
 	}
 
 	// 构建查询选项
-	options := &repo.QueryOptions{
+	options := &crud.QueryOptions{
 		Filters: make(map[string]any),
 	}
 
@@ -82,7 +82,7 @@ func (s *Application[T]) ListByQuery(ctx context.Context, query *QueryParams) ([
 	}
 
 	// 执行查询
-	if queryableRepo, ok := s.Repository().(repo.IQueryableRepository[T, int64]); ok {
+	if queryableRepo, ok := s.Repository().(crud.IQueryableRepository[T, int64]); ok {
 		return queryableRepo.Query(ctx, *options)
 	}
 
@@ -112,7 +112,7 @@ func (s *Application[T]) ListPage(ctx context.Context, options *PaginationOption
 	}
 
 	// 构建查询选项
-	queryOpts := &repo.QueryOptions{
+	queryOpts := &crud.QueryOptions{
 		Offset:  (options.Page - 1) * options.Size,
 		Limit:   options.Size,
 		Filters: make(map[string]any),
@@ -137,7 +137,7 @@ func (s *Application[T]) ListPage(ctx context.Context, options *PaginationOption
 	var err error
 
 	// 尝试使用可查询仓储
-	if queryableRepo, ok := s.Repository().(repo.IQueryableRepository[T, int64]); ok {
+	if queryableRepo, ok := s.Repository().(crud.IQueryableRepository[T, int64]); ok {
 		data, err = queryableRepo.Query(ctx, *queryOpts)
 		if err != nil {
 			return nil, err
@@ -188,7 +188,7 @@ func (s *Application[T]) CountByQuery(ctx context.Context, query *QueryParams) (
 	}
 
 	// 构建查询选项
-	options := &repo.QueryOptions{
+	options := &crud.QueryOptions{
 		Filters: make(map[string]any),
 	}
 
@@ -198,7 +198,7 @@ func (s *Application[T]) CountByQuery(ctx context.Context, query *QueryParams) (
 	}
 
 	// 尝试使用可查询仓储
-	if queryableRepo, ok := s.Repository().(repo.IQueryableRepository[T, int64]); ok {
+	if queryableRepo, ok := s.Repository().(crud.IQueryableRepository[T, int64]); ok {
 		return queryableRepo.QueryCount(ctx, *options)
 	}
 

@@ -6,12 +6,11 @@ import (
 	"sync"
 	"time"
 
-	"gochen/domain/entity"
-	"gochen/domain/service"
+	"gochen/domain"
 )
 
 // GenericMockRepository 通用模拟仓储实现
-type GenericMockRepository[T entity.IEntity[int64]] struct {
+type GenericMockRepository[T domain.IEntity[int64]] struct {
 	entities map[int64]T
 	nextID   int64
 	mu       sync.RWMutex
@@ -19,7 +18,7 @@ type GenericMockRepository[T entity.IEntity[int64]] struct {
 }
 
 // NewGenericMockRepository 创建通用模拟仓储
-func NewGenericMockRepository[T entity.IEntity[int64]]() *GenericMockRepository[T] {
+func NewGenericMockRepository[T domain.IEntity[int64]]() *GenericMockRepository[T] {
 	return &GenericMockRepository[T]{
 		entities: make(map[int64]T),
 		nextID:   1,
@@ -64,7 +63,7 @@ func (r *GenericMockRepository[T]) GetByID(ctx context.Context, id int64) (T, er
 	entity, exists := r.entities[id]
 	if !exists {
 		var zero T
-		return zero, service.NewNotFoundError("实体不存在: ID=%d", id)
+		return zero, domain.NewNotFoundError("实体不存在: ID=%d", id)
 	}
 	return entity, nil
 }
@@ -74,7 +73,7 @@ func (r *GenericMockRepository[T]) Update(ctx context.Context, entity T) error {
 	defer r.mu.Unlock()
 
 	if _, exists := r.entities[entity.GetID()]; !exists {
-		return service.NewNotFoundError("实体不存在: ID=%d", entity.GetID())
+		return domain.NewNotFoundError("实体不存在: ID=%d", entity.GetID())
 	}
 
 	// 更新时间戳
@@ -94,7 +93,7 @@ func (r *GenericMockRepository[T]) Delete(ctx context.Context, id int64) error {
 	defer r.mu.Unlock()
 
 	if _, exists := r.entities[id]; !exists {
-		return service.NewNotFoundError("实体不存在: ID=%d", id)
+		return domain.NewNotFoundError("实体不存在: ID=%d", id)
 	}
 	delete(r.entities, id)
 	return nil
@@ -171,7 +170,7 @@ func (r *GenericMockRepository[T]) UpdateBatch(ctx context.Context, entities []T
 	now := r.clock()
 	for i := range entities {
 		if _, exists := r.entities[entities[i].GetID()]; !exists {
-			return service.NewNotFoundError("实体不存在: ID=%d", entities[i].GetID())
+			return domain.NewNotFoundError("实体不存在: ID=%d", entities[i].GetID())
 		}
 
 		// 更新时间戳
@@ -193,7 +192,7 @@ func (r *GenericMockRepository[T]) DeleteBatch(ctx context.Context, ids []int64)
 
 	for _, id := range ids {
 		if _, exists := r.entities[id]; !exists {
-			return service.NewNotFoundError("实体不存在: ID=%d", id)
+			return domain.NewNotFoundError("实体不存在: ID=%d", id)
 		}
 		delete(r.entities, id)
 	}

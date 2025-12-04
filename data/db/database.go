@@ -5,7 +5,7 @@
 // 2. 提供统一的数据库操作接口
 // 3. 支持事务操作
 // 4. 便于单元测试（Mock）
-package database
+package db
 
 import (
 	"context"
