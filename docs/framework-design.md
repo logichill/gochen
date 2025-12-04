@@ -123,7 +123,6 @@ type IEventSourcedAggregate[T comparable] interface {
     ApplyEvent(evt domain.IDomainEvent) error
     GetUncommittedEvents() []domain.IDomainEvent
     MarkEventsAsCommitted()
-    LoadFromHistory(events []domain.IDomainEvent) error
 }
 
 type EventSourcedAggregate[T comparable] struct {

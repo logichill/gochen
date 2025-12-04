@@ -22,9 +22,6 @@ type IEventSourcedAggregate[T comparable] interface {
 
 	// MarkEventsAsCommitted 标记事件为已提交。
 	MarkEventsAsCommitted()
-
-	// LoadFromHistory 从事件历史重建状态。
-	LoadFromHistory(events []domain.IDomainEvent) error
 }
 
 // EventSourcedAggregate 事件溯源聚合根（泛型实现）。
@@ -110,16 +107,6 @@ func (a *EventSourcedAggregate[T]) ApplyEvent(evt domain.IDomainEvent) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.version++
-	return nil
-}
-
-// LoadFromHistory 实现 IEventSourcedAggregate。
-func (a *EventSourcedAggregate[T]) LoadFromHistory(events []domain.IDomainEvent) error {
-	for _, evt := range events {
-		if err := a.ApplyEvent(evt); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
