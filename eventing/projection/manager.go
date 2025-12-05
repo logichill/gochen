@@ -553,7 +553,7 @@ func (pm *ProjectionManager) StartProjection(name string) error {
 	status.Status = "running"
 	status.UpdatedAt = time.Now()
 
-	pm.logger.Info(context.Background(), "projection started", logging.String("projection", name))
+	pm.logger.Info(context.TODO(), "projection started", logging.String("projection", name))
 	return nil
 }
 
@@ -574,7 +574,7 @@ func (pm *ProjectionManager) StopProjection(name string) error {
 	status.Status = "stopped"
 	status.UpdatedAt = time.Now()
 
-	pm.logger.Info(context.Background(), "projection stopped", logging.String("projection", name))
+	pm.logger.Info(context.TODO(), "projection stopped", logging.String("projection", name))
 	return nil
 }
 

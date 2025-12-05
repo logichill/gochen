@@ -325,9 +325,22 @@ func (rb *RouteBuilder[T]) parseQueryParams(c http.IHttpContext) *application.Qu
 		Sorts:   make(map[string]string),
 	}
 
+	allowedFilterKeys := map[string]struct{}{}
+	if rb.config != nil && rb.config.AllowedMethods != nil {
+		// 复用 AllowedMethods 配置空间不合适，这里仅做占位，具体白名单由调用方通过 QueryParams 约定扩展。
+	}
+
 	// 解析过滤条件
 	for k, values := range c.GetQueryParams() {
-		if len(values) > 0 && !rb.isReservedParam(k) {
+		if len(values) == 0 || rb.isReservedParam(k) {
+			continue
+		}
+		// 若未配置白名单，则允许所有字段作为过滤条件；否则仅保留白名单字段。
+		if len(allowedFilterKeys) == 0 {
+			query.Filters[k] = values[0]
+			continue
+		}
+		if _, ok := allowedFilterKeys[k]; ok {
 			query.Filters[k] = values[0]
 		}
 	}

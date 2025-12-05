@@ -32,6 +32,10 @@ const (
 //
 // 记录 Saga 的执行状态，用于持久化和恢复。
 //
+// 并发语义：
+//   - SagaState 不是并发安全的，设计假定同一 Saga 仅由 SagaOrchestrator 单 goroutine 修改；
+//   - 若业务需要跨 goroutine 并发访问，应在更高层添加锁或复制状态，而不是在 SagaState 内部加锁。
+//
 // 特性：
 //   - 记录当前步骤
 //   - 记录已完成的步骤

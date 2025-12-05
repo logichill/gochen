@@ -93,10 +93,18 @@ func (c *Container) RegisterAs(serviceType any, service any) error {
 		return fmt.Errorf("service cannot be nil")
 	}
 
+	if serviceType == nil {
+		return fmt.Errorf("serviceType cannot be nil")
+	}
+
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	t := reflect.TypeOf(serviceType).Elem()
+	t := reflect.TypeOf(serviceType)
+	if t.Kind() != reflect.Ptr {
+		return fmt.Errorf("serviceType must be a pointer to interface, got %s", t.String())
+	}
+	t = t.Elem()
 	c.services[t] = service
 
 	return nil
@@ -104,13 +112,21 @@ func (c *Container) RegisterAs(serviceType any, service any) error {
 
 // Resolve 解析服务
 func (c *Container) Resolve(serviceType any) (any, error) {
-	c.mutex.RLock()
-	defer c.mutex.RUnlock()
+	if serviceType == nil {
+		return nil, fmt.Errorf("serviceType cannot be nil")
+	}
 
-	t := reflect.TypeOf(serviceType).Elem()
-	service, exists := c.services[t]
+	t := reflect.TypeOf(serviceType)
+	if t.Kind() != reflect.Ptr {
+		return nil, fmt.Errorf("serviceType must be a pointer to interface, got %s", t.String())
+	}
+	elem := t.Elem()
+
+	c.mutex.RLock()
+	service, exists := c.services[elem]
+	c.mutex.RUnlock()
 	if !exists {
-		return nil, fmt.Errorf("service not found: %v", t)
+		return nil, fmt.Errorf("service not found: %v", elem)
 	}
 
 	return service, nil
@@ -127,11 +143,19 @@ func (c *Container) MustResolve(serviceType any) any {
 
 // Has 检查服务是否存在
 func (c *Container) Has(serviceType any) bool {
-	c.mutex.RLock()
-	defer c.mutex.RUnlock()
+	if serviceType == nil {
+		return false
+	}
 
-	t := reflect.TypeOf(serviceType).Elem()
-	_, exists := c.services[t]
+	t := reflect.TypeOf(serviceType)
+	if t.Kind() != reflect.Ptr {
+		return false
+	}
+	elem := t.Elem()
+
+	c.mutex.RLock()
+	_, exists := c.services[elem]
+	c.mutex.RUnlock()
 	return exists
 }
 
@@ -218,27 +242,26 @@ func (c *BasicContainer) RegisterInstance(name string, instance any) error {
 }
 
 func (c *BasicContainer) Resolve(name string) (any, error) {
+	// 先在读锁下获取工厂和已存在实例，避免在释放锁后再次访问 map 产生 TOCTOU 问题。
 	c.mutex.RLock()
-	_, exists := c.services[name]
-	c.mutex.RUnlock()
+	factory, exists := c.services[name]
 	if !exists {
+		c.mutex.RUnlock()
 		return nil, errors.NewError(errors.ErrCodeNotFound, fmt.Sprintf("service %s not registered", name))
 	}
-	c.mutex.RLock()
 	if inst, ok := c.instances[name]; ok {
 		c.mutex.RUnlock()
 		return inst, nil
 	}
 	c.mutex.RUnlock()
 
-	c.mutex.Lock()
-	factory := c.services[name]
-	c.mutex.Unlock()
-
+	// 在无锁状态下创建实例，避免阻塞其他读写。
 	inst, err := c.createInstance(factory)
 	if err != nil {
 		return nil, errors.WrapError(err, errors.ErrCodeInternal, fmt.Sprintf("failed to create service %s", name))
 	}
+
+	// 写锁下检查并缓存实例，确保只创建一次。
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	if existing, ok := c.instances[name]; ok {

@@ -62,6 +62,10 @@ func (m *Message) GetPayload() any {
 }
 
 // GetMetadata 获取元数据
+//
+// 说明：
+//   - 若内部 Metadata 为空，该方法会在首次访问时初始化一个 map 并返回引用；
+//   - 调用方可以通过修改返回的 map 注入附加上下文（例如追踪信息、命令元数据等）。
 func (m *Message) GetMetadata() map[string]any {
 	if m.Metadata == nil {
 		m.Metadata = make(map[string]any)

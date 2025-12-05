@@ -82,6 +82,9 @@ func NewApiBuilder[T domain.IEntity[int64]](
 
 // Route 配置路由
 func (rb *ApiBuilder[T]) Route(config func(*RouteConfig)) IApiBuilder[T] {
+	if config == nil {
+		return rb
+	}
 	config(rb.routeConfig)
 	return rb
 }

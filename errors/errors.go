@@ -138,10 +138,8 @@ func (e *AppError) Cause() error {
 
 // Details 获取错误详情
 func (e *AppError) Details() map[string]any {
-	if e.details == nil {
-		e.details = make(map[string]any)
-	}
-	return e.details
+	// 返回详情的拷贝，避免调用方通过返回 map 修改内部状态
+	return copyMap(e.details)
 }
 
 // Stack 获取堆栈信息

@@ -111,14 +111,12 @@ func (p *ParallelPublisher) Stop() error {
 		p.mu.Unlock()
 		return nil
 	}
+	// 提前标记为未启动，避免并发 Stop 造成重复关闭 stopCh
+	p.started = false
 	p.mu.Unlock()
 
 	close(p.stopCh)
 	p.wg.Wait()
-
-	p.mu.Lock()
-	p.started = false
-	p.mu.Unlock()
 
 	return nil
 }

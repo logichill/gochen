@@ -11,14 +11,14 @@ type RequestContext struct{ context.Context }
 
 func NewRequestContext(ctx context.Context) httpx.IRequestContext {
 	if ctx == nil {
-		ctx = context.Background()
+		ctx = context.TODO()
 	}
 	return &RequestContext{Context: ctx}
 }
 
 func NewRequestContextWithValues(ctx context.Context, values map[string]any) httpx.IRequestContext {
 	if ctx == nil {
-		ctx = context.Background()
+		ctx = context.TODO()
 	}
 	for k, v := range values {
 		ctx = context.WithValue(ctx, k, v)
@@ -76,6 +76,8 @@ func (r *RequestContext) WithDeadline(deadline time.Time) (httpx.IRequestContext
 	ctx, cancel := context.WithDeadline(r.Context, deadline)
 	return &RequestContext{Context: ctx}, cancel
 }
+// Clone 创建基于同一底层 context 的新 RequestContext。
+// 注意：Clone 不复制 context 中的值或取消状态，语义等价于对原始 context 的浅包装。
 func (r *RequestContext) Clone() httpx.IRequestContext { return &RequestContext{Context: r.Context} }
 
 func WithTraceID(ctx httpx.IRequestContext, traceID string) httpx.IRequestContext {

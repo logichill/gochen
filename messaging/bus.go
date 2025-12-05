@@ -201,7 +201,8 @@ func (bus *MessageBus) PublishAll(ctx context.Context, messages []IMessage) erro
 // executeMiddlewares 构建并执行中间件链
 func (bus *MessageBus) executeMiddlewares(ctx context.Context, message IMessage, finalHandler HandlerFunc) error {
 	bus.mutex.RLock()
-	middlewares := bus.middlewares
+	// 拷贝一份中间件切片，避免在执行链过程中受到后续 Use 调用的影响。
+	middlewares := append([]IMiddleware(nil), bus.middlewares...)
 	bus.mutex.RUnlock()
 
 	if len(middlewares) == 0 {

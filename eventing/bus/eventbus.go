@@ -49,6 +49,10 @@ type IEventBus interface {
 }
 
 // EventBus 是消息总线的类型安全包装器
+//
+// 并发语义：
+//   - EventBus 本身不维护内部状态，所有并发安全由底层 IMessageBus 实现保证；
+//   - 调用方可以在多 goroutine 中安全复用同一个 EventBus 实例，只要底层 IMessageBus 是并发安全的。
 type EventBus struct {
 	messaging.IMessageBus
 }

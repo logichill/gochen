@@ -67,7 +67,7 @@ func (m *Manager) WithShutdownTimeout(d time.Duration) *Manager {
 // Run 启动所有 Server，监听系统信号并优雅退出
 func (m *Manager) Run(ctx context.Context) error {
 	if ctx == nil {
-		ctx = context.Background()
+		ctx = context.TODO()
 	}
 	ctx, cancel := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
@@ -103,8 +103,8 @@ func (m *Manager) Run(ctx context.Context) error {
 		cancel()
 	}
 
-	// 关闭：后启动先关闭
-	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), m.opts.ShutdownTimeout)
+	// 关闭：后启动先关闭；使用新的根 Context 但避免 Background
+	shutdownCtx, cancelShutdown := context.WithTimeout(context.TODO(), m.opts.ShutdownTimeout)
 	defer cancelShutdown()
 
 	closeErrors := make([]error, 0)

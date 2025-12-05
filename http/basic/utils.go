@@ -48,6 +48,8 @@ func (u *HttpUtils) ParsePagination(ctx httpx.IHttpContext) (*httpx.ListRequest,
 		sortDir := ctx.GetQuery("sort_dir")
 		if sortDir == "" {
 			sortDir = "asc"
+		} else if sortDir != "asc" && sortDir != "desc" {
+			return nil, errors.NewError(errors.ErrCodeInvalidInput, "sort_dir must be 'asc' or 'desc'")
 		}
 		req.SetSort(sortBy, sortDir)
 	}

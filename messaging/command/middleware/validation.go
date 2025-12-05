@@ -33,7 +33,8 @@ type ValidationMiddleware struct {
 // NewValidationMiddleware 创建验证中间件
 //
 // 参数：
-//   - validator: 验证器实例（实现 IValidator 接口）
+//   - validator: 验证器实例（实现 IValidator 接口），允许为 nil
+//     - 为 nil 时表示关闭命令 payload 验证，Handle 会直接透传
 //
 // 返回：
 //   - *ValidationMiddleware: 中间件实例
@@ -52,6 +53,11 @@ func NewValidationMiddleware(validator IValidator) *ValidationMiddleware {
 //  4. 验证通过则调用 next 继续执行链
 //  5. 验证失败则返回错误，中断执行链
 func (m *ValidationMiddleware) Handle(ctx context.Context, message messaging.IMessage, next messaging.HandlerFunc) error {
+	// 未配置验证器时直接透传，避免空指针
+	if m == nil || m.validator == nil {
+		return next(ctx, message)
+	}
+
 	// 只处理命令消息
 	if message.GetType() != messaging.MessageTypeCommand {
 		return next(ctx, message)

@@ -22,6 +22,9 @@ type MetricsEventStore struct {
 }
 
 func NewMetricsEventStore(inner estore.IEventStore, mr IMetricsRecorder) *MetricsEventStore {
+	if inner == nil {
+		panic("NewMetricsEventStore: inner IEventStore cannot be nil")
+	}
 	return &MetricsEventStore{inner: inner, mr: mr}
 }
 

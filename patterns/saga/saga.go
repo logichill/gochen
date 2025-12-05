@@ -58,6 +58,7 @@ type ISaga interface {
 //   - 使用函数而非接口（灵活）
 //   - 补偿命令是可选的
 //   - 支持成功/失败回调
+//   - Name 在同一个 Saga 内应保持唯一，用于标识步骤与记录执行状态
 type SagaStep struct {
 	// Name 步骤名称（唯一标识）
 	Name string
@@ -111,7 +112,7 @@ type StepCallback func(ctx context.Context, stepName string, err error) error
 //
 // 示例：
 //
-//	type MyS aga struct {
+//	type MySaga struct {
 //	    saga.BaseSaga
 //	    id string
 //	}

@@ -7,6 +7,7 @@ import (
 
 	"gochen/domain"
 	deventsourced "gochen/domain/eventsourced"
+	appErrors "gochen/errors"
 	"gochen/eventing"
 	"gochen/eventing/bus"
 	"gochen/eventing/outbox"
@@ -130,9 +131,8 @@ func (a *DomainEventStore[T]) AppendEvents(ctx context.Context, aggregateID int6
 	// 可选事件发布（仅在非 Outbox 模式下直接发布）。
 	if a.publishEvents && a.eventBus != nil && a.outboxRepo == nil {
 		if err := a.eventBus.PublishEvents(ctx, publishedEvents); err != nil {
-			a.logger.Warn(ctx, "failed to publish events",
-				logging.Error(err),
-				logging.Int64("aggregate_id", aggregateID))
+			// 发布失败视为可观测的业务失败，向上游返回错误并保留持久化结果
+			return appErrors.WrapError(err, appErrors.ErrCodeDependency, "failed to publish domain events")
 		}
 	}
 

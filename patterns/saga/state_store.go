@@ -38,8 +38,8 @@ type ISagaStateStore interface {
 	//   - error: 保存失败错误
 	//
 	// 注意：
-	//   - 应该是幂等操作
-	//   - 建议使用 UPSERT
+	//   - 应该是幂等操作：相同 SagaID 的重复 Save 不应改变既有状态
+	//   - 建议使用 UPSERT：不存在则插入，已存在则保持不变或按业务规则更新
 	Save(ctx context.Context, state *SagaState) error
 
 	// Update 更新 Saga 状态
@@ -50,6 +50,10 @@ type ISagaStateStore interface {
 	//
 	// 返回：
 	//   - error: 更新失败错误
+	//
+	// 语义约定：
+	//   - Update 仅用于已存在的 Saga 状态，通常在执行步骤或补偿步骤后调用
+	//   - 与 Save 不同，Update 失败通常应视为严重错误（需要中止 Saga 或告警）
 	Update(ctx context.Context, state *SagaState) error
 
 	// Delete 删除 Saga 状态

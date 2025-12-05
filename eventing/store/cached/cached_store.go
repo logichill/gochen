@@ -17,6 +17,10 @@ type CachedEventStore struct {
 	store store.IEventStore // 底层事件存储
 	cache *EventCache       // 缓存层
 	stats *CacheStats       // 缓存统计
+
+	stopCh chan struct{}
+	// 关闭标识用于避免重复关闭
+	stopOnce sync.Once
 }
 
 // EventCache 事件缓存
@@ -77,9 +81,10 @@ func NewCachedEventStore(store store.IEventStore, config *Config) *CachedEventSt
 	}
 
 	cached := &CachedEventStore{
-		store: store,
-		cache: cache,
-		stats: &CacheStats{},
+		store:  store,
+		cache:  cache,
+		stats:  &CacheStats{},
+		stopCh: make(chan struct{}),
 	}
 
 	// 启动定期清理过期缓存
@@ -192,35 +197,32 @@ func (s *CachedEventStore) GetEventStreamWithCursor(ctx context.Context, opts *s
 // getCachedEvents 从缓存获取事件
 func (s *CachedEventStore) getCachedEvents(key string, fromVersion uint64) []eventing.Event {
 	s.cache.mutex.RLock()
-	defer s.cache.mutex.RUnlock()
-
 	cached, exists := s.cache.aggregateCache[key]
-	if !exists {
+	if !exists || s.isExpired(cached) {
+		s.cache.mutex.RUnlock()
 		return nil
 	}
 
-	// 检查是否过期
-	if s.isExpired(cached) {
-		return nil
-	}
-
-	// 更新访问时间
-	cached.LastAccess = time.Now()
-
-	// 如果 fromVersion 为 0，返回全部事件
-	if fromVersion == 0 {
-		result := make([]eventing.Event, len(cached.Events))
-		copy(result, cached.Events)
-		return result
-	}
-
-	// 过滤版本大于 fromVersion 的事件
+	// 在读锁下复制事件数据，避免与写操作竞争
 	var result []eventing.Event
-	for _, evt := range cached.Events {
-		if evt.Version > fromVersion {
-			result = append(result, evt)
+	if fromVersion == 0 {
+		result = make([]eventing.Event, len(cached.Events))
+		copy(result, cached.Events)
+	} else {
+		for _, evt := range cached.Events {
+			if evt.Version > fromVersion {
+				result = append(result, evt)
+			}
 		}
 	}
+	s.cache.mutex.RUnlock()
+
+	// 单独获取写锁更新 LastAccess，避免在读锁下写入
+	s.cache.mutex.Lock()
+	if cachedLatest, ok := s.cache.aggregateCache[key]; ok {
+		cachedLatest.LastAccess = time.Now()
+	}
+	s.cache.mutex.Unlock()
 
 	return result
 }
@@ -295,8 +297,13 @@ func (s *CachedEventStore) startCleanupWorker(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		s.cleanupExpiredCache()
+	for {
+		select {
+		case <-ticker.C:
+			s.cleanupExpiredCache()
+		case <-s.stopCh:
+			return
+		}
 	}
 }
 
@@ -409,6 +416,25 @@ func (s *CachedEventStore) GetHitRate() float64 {
 	}
 
 	return float64(s.stats.Hits) / float64(totalRequests)
+}
+
+// Close 释放缓存存储相关资源（停止后台清理协程）
+func (s *CachedEventStore) Close() error {
+	if s == nil {
+		return nil
+	}
+
+	s.stopOnce.Do(func() {
+		if s.stopCh != nil {
+			close(s.stopCh)
+		}
+	})
+
+	if closer, ok := s.store.(interface{ Close() error }); ok {
+		return closer.Close()
+	}
+
+	return nil
 }
 
 // 接口断言

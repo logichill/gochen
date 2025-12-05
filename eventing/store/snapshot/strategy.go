@@ -2,6 +2,7 @@ package snapshot
 
 import (
 	"context"
+	"sync"
 	"time"
 )
 
@@ -55,6 +56,7 @@ type TimeDurationStrategy struct {
 	Duration          time.Duration
 	lastSnapshotTimes map[string]time.Time // 聚合键 -> 上次快照时间
 	snapshotStore     ISnapshotStore
+	mutex             sync.RWMutex
 }
 
 // NewTimeDurationStrategy 创建时间间隔策略
@@ -76,12 +78,14 @@ func (s *TimeDurationStrategy) ShouldCreateSnapshot(ctx context.Context, aggrega
 	key := snapshotKey(aggregateType, aggregateID)
 
 	// 尝试从快照存储获取最后快照时间
+	s.mutex.Lock()
 	if snapshot, err := s.snapshotStore.GetSnapshot(ctx, aggregateType, aggregateID); err == nil {
 		s.lastSnapshotTimes[key] = snapshot.Timestamp
 	}
 
 	// 检查是否有记录
 	lastTime, exists := s.lastSnapshotTimes[key]
+	s.mutex.Unlock()
 	if !exists {
 		// 没有快照记录，应该创建
 		return true, nil
@@ -98,8 +102,10 @@ func (s *TimeDurationStrategy) GetName() string {
 
 // UpdateLastSnapshotTime 更新最后快照时间
 func (s *TimeDurationStrategy) UpdateLastSnapshotTime(aggregateType string, aggregateID int64, timestamp time.Time) {
+	s.mutex.Lock()
 	key := snapshotKey(aggregateType, aggregateID)
 	s.lastSnapshotTimes[key] = timestamp
+	s.mutex.Unlock()
 }
 
 // AggregateSizeStrategy 基于聚合大小的快照策略

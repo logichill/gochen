@@ -10,6 +10,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"fmt"
 )
 
 // IDatabase 通用数据库接口
@@ -101,6 +102,12 @@ type DBConfig struct {
 	Charset   string
 	ParseTime bool
 	Location  string
+}
+
+// String 返回脱敏后的配置字符串，避免在日志中泄露密码等敏感信息。
+func (c DBConfig) String() string {
+	return fmt.Sprintf("DBConfig{Driver=%s, Host=%s, Port=%d, Database=%s, Username=%s}",
+		c.Driver, c.Host, c.Port, c.Database, c.Username)
 }
 
 // NewDatabase 工厂方法（由具体实现提供）

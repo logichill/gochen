@@ -3,6 +3,7 @@ package sync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -49,7 +50,8 @@ func (t *SyncTransport) Publish(ctx context.Context, message messaging.IMessage)
 	}
 
 	if len(errs) > 0 {
-		return fmt.Errorf("message handling completed with %d errors", len(errs))
+		joined := errors.Join(errs...)
+		return fmt.Errorf("message handling completed with %d errors: %w", len(errs), joined)
 	}
 	return nil
 }

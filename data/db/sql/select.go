@@ -107,6 +107,10 @@ func (b *selectBuilder) Build() (string, []any) {
 	sb.WriteString(" FROM ")
 	sb.WriteString(b.table)
 
+	// 使用局部 args 副本，避免在多次 Build 调用之间污染 builder 状态。
+	args := make([]any, 0, len(b.args)+2)
+	args = append(args, b.args...)
+
 	if len(b.where) > 0 {
 		sb.WriteString(" WHERE ")
 		sb.WriteString(strings.Join(b.where, " AND "))
@@ -121,16 +125,16 @@ func (b *selectBuilder) Build() (string, []any) {
 	}
 	if b.limit > 0 {
 		sb.WriteString(" LIMIT ?")
-		b.args = append(b.args, b.limit)
+		args = append(args, b.limit)
 	}
 	if b.offset > 0 {
 		sb.WriteString(" OFFSET ?")
-		b.args = append(b.args, b.offset)
+		args = append(args, b.offset)
 	}
 	if b.locking != "" {
 		sb.WriteString(b.locking)
 	}
-	return sb.String(), b.args
+	return sb.String(), args
 }
 
 func (b *selectBuilder) Query(ctx context.Context) (core.IRows, error) {

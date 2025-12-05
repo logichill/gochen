@@ -11,7 +11,7 @@ import (
 // messageWithRaw 封装消息体并保留反序列化的原始字段，便于上层做二次映射（如还原 eventing.Event 的聚合字段）。
 type messageWithRaw struct {
 	messaging.Message
-	raw map[string]any `json:"-"`
+	raw map[string]any
 }
 
 // RawData 返回原始字段映射

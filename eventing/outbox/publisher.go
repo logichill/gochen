@@ -2,6 +2,7 @@ package outbox
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"gochen/eventing/bus"
@@ -20,6 +21,8 @@ type Publisher struct {
 
 	stopCh chan struct{}
 	doneCh chan struct{}
+
+	stopOnce sync.Once
 }
 
 func NewPublisher(repo IOutboxRepository, bus bus.IEventBus, cfg OutboxConfig, logger logging.ILogger) *Publisher {
@@ -40,9 +43,16 @@ func (p *Publisher) Start(ctx context.Context) error {
 }
 
 func (p *Publisher) Stop() error {
-	close(p.stopCh)
+	p.stopOnce.Do(func() {
+		close(p.stopCh)
+	})
 	<-p.doneCh
 	return nil
+}
+
+// Close 实现关闭语义，便于作为资源统一管理
+func (p *Publisher) Close() error {
+	return p.Stop()
 }
 
 func (p *Publisher) PublishPending(ctx context.Context) error {

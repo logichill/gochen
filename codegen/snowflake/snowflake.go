@@ -4,6 +4,7 @@ package snowflake
 import (
 	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -107,22 +108,31 @@ func Parse(id int64) map[string]int64 {
 	}
 }
 
-// 全局默认生成器
-var defaultGenerator *Generator
+// 全局默认生成器（通过原子指针保证并发安全）
+var defaultGenerator atomic.Pointer[Generator]
 
 func init() {
 	// 默认使用 datacenterID=1, workerID=1
-	defaultGenerator, _ = NewGenerator(1, 1)
+	gen, _ := NewGenerator(1, 1)
+	defaultGenerator.Store(gen)
 }
 
 // NextID 使用默认生成器生成ID
 func NextID() (int64, error) {
-	return defaultGenerator.NextID()
+	gen := defaultGenerator.Load()
+	if gen == nil {
+		return 0, errors.New("default generator is not initialized")
+	}
+	return gen.NextID()
 }
 
 // Generate 使用默认生成器生成ID
 func Generate() int64 {
-	return defaultGenerator.Generate()
+	gen := defaultGenerator.Load()
+	if gen == nil {
+		return 0
+	}
+	return gen.Generate()
 }
 
 // SetDefaultGenerator 设置默认生成器
@@ -131,7 +141,7 @@ func SetDefaultGenerator(datacenterID, workerID int64) error {
 	if err != nil {
 		return err
 	}
-	defaultGenerator = gen
+	defaultGenerator.Store(gen)
 	return nil
 }
 

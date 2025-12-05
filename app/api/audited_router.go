@@ -224,19 +224,23 @@ func (rb *AuditedRouteBuilder[T]) handleDelete(c core.IHttpContext) error {
 	if err != nil {
 		return errors.NewValidationError("无效的ID格式")
 	}
+	// 简单的操作人校验：若要求硬删，则必须显式提供 X-Operator
+	operator := c.GetHeader("X-Operator")
 	// 支持硬删：?hard=true
 	hard := c.GetQuery("hard") == "true"
 	if hard {
+		if operator == "" {
+			return errors.NewValidationError("硬删除操作需要显式操作人")
+		}
 		if err := rb.service.PermanentDelete(c.GetContext(), id); err != nil {
 			return err
 		}
 	} else {
 		// 操作人从请求上下文扩展，缺省为 system
-		by := c.GetHeader("X-Operator")
-		if by == "" {
-			by = "system"
+		if operator == "" {
+			operator = "system"
 		}
-		if err := rb.service.SoftDelete(c.GetContext(), id, by); err != nil {
+		if err := rb.service.SoftDelete(c.GetContext(), id, operator); err != nil {
 			return err
 		}
 	}

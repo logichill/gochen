@@ -83,6 +83,9 @@ type sqlImpl struct {
 
 // New 创建 ISql 实例。
 func New(db core.IDatabase) ISql {
+	if db == nil {
+		panic("sql.New: database cannot be nil")
+	}
 	return &sqlImpl{
 		db:      db,
 		dialect: dialect.FromDatabase(db),

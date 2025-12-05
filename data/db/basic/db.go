@@ -21,34 +21,8 @@ type DB struct {
 // - 调用方必须确保所配置的 Driver 已通过空导入注册（例如在上层显式 `_ "modernc.org/sqlite"`）
 // - sqlite 场景下建议在应用或测试层自行 import 驱动，basic 层只负责最小抽象
 func New(config core.DBConfig) (core.IDatabase, error) {
-	var (
-		driver = config.Driver
-		dsn    = config.Database
-	)
-	if driver == "" {
-		driver = "sqlite"
-	}
-
-	db, err := sql.Open(driver, dsn)
-	if err != nil {
-		return nil, err
-	}
-
-	// 连接池配置（可选）
-	if config.MaxOpenConns > 0 {
-		db.SetMaxOpenConns(config.MaxOpenConns)
-	}
-	if config.MaxIdleConns > 0 {
-		db.SetMaxIdleConns(config.MaxIdleConns)
-	}
-	if config.ConnMaxLifetime > 0 {
-		db.SetConnMaxLifetime(time.Duration(config.ConnMaxLifetime) * time.Second)
-	}
-	if config.ConnMaxIdleTime > 0 {
-		db.SetConnMaxIdleTime(time.Duration(config.ConnMaxIdleTime) * time.Second)
-	}
-
-	return NewWithContext(context.Background(), config)
+	// 使用库层兜底 Context，避免重复创建底层 *sql.DB 连接。
+	return NewWithContext(context.TODO(), config)
 }
 
 // NewWithContext 根据 core.DBConfig 创建基础数据库实例，并允许调用方提供初始化上下文。

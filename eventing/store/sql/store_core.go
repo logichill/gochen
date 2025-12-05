@@ -13,6 +13,9 @@ type SQLEventStore struct {
 }
 
 func NewSQLEventStore(db db.IDatabase, tableName string) *SQLEventStore {
+	if db == nil {
+		panic("NewSQLEventStore: db cannot be nil")
+	}
 	if tableName == "" {
 		tableName = "event_store"
 	}

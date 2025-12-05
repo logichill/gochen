@@ -111,6 +111,13 @@ func (r *SQLDLQRepository) MoveToDLQ(ctx context.Context, entry OutboxEntry) err
 		MovedAt:         time.Now(),
 	}
 
+	// 使用事务保证 DLQ 与 Outbox 操作的原子性
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin transaction for move to dlq: %w", err)
+	}
+	defer tx.Rollback()
+
 	// 插入到 DLQ 表
 	query := `
 		INSERT INTO event_outbox_dlq (
@@ -119,7 +126,7 @@ func (r *SQLDLQRepository) MoveToDLQ(ctx context.Context, entry OutboxEntry) err
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
-	_, err := r.db.Exec(ctx, query,
+	_, err = tx.Exec(ctx, query,
 		dlqEntry.OriginalEntryID,
 		dlqEntry.AggregateID,
 		dlqEntry.AggregateType,
@@ -137,9 +144,13 @@ func (r *SQLDLQRepository) MoveToDLQ(ctx context.Context, entry OutboxEntry) err
 	// 自动清理：删除原始 Outbox 记录
 	if r.autoCleanup {
 		deleteQuery := `DELETE FROM event_outbox WHERE id = ?`
-		if _, err := r.db.Exec(ctx, deleteQuery, entry.ID); err != nil {
+		if _, err := tx.Exec(ctx, deleteQuery, entry.ID); err != nil {
 			return fmt.Errorf("delete outbox entry: %w", err)
 		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit move to dlq transaction: %w", err)
 	}
 
 	return nil
@@ -195,6 +206,13 @@ func (r *SQLDLQRepository) GetDLQEntries(ctx context.Context, limit int) ([]DLQE
 
 // RetryFromDLQ 从 DLQ 重试记录
 func (r *SQLDLQRepository) RetryFromDLQ(ctx context.Context, entryID int64) error {
+	// 使用事务保证 Outbox 插入与 DLQ 删除的原子性
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin transaction for retry from dlq: %w", err)
+	}
+	defer tx.Rollback()
+
 	// 1. 查询 DLQ 记录
 	query := `
 		SELECT id, original_entry_id, aggregate_id, aggregate_type, event_id, event_type,
@@ -204,7 +222,7 @@ func (r *SQLDLQRepository) RetryFromDLQ(ctx context.Context, entryID int64) erro
 	`
 
 	var dlqEntry DLQEntry
-	err := r.db.QueryRow(ctx, query, entryID).Scan(
+	err = tx.QueryRow(ctx, query, entryID).Scan(
 		&dlqEntry.ID,
 		&dlqEntry.OriginalEntryID,
 		&dlqEntry.AggregateID,
@@ -231,7 +249,7 @@ func (r *SQLDLQRepository) RetryFromDLQ(ctx context.Context, entryID int64) erro
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
-	_, err = r.db.Exec(ctx, insertQuery,
+	_, err = tx.Exec(ctx, insertQuery,
 		dlqEntry.AggregateID,
 		dlqEntry.AggregateType,
 		dlqEntry.EventID,
@@ -247,8 +265,12 @@ func (r *SQLDLQRepository) RetryFromDLQ(ctx context.Context, entryID int64) erro
 
 	// 3. 删除 DLQ 记录
 	deleteQuery := `DELETE FROM event_outbox_dlq WHERE id = ?`
-	if _, err := r.db.Exec(ctx, deleteQuery, entryID); err != nil {
+	if _, err := tx.Exec(ctx, deleteQuery, entryID); err != nil {
 		return fmt.Errorf("delete dlq entry: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit retry from dlq transaction: %w", err)
 	}
 
 	return nil

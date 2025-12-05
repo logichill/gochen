@@ -133,6 +133,10 @@ func (s *SQLCheckpointStore) Delete(ctx context.Context, projectionName string) 
 //   - 使用 IF NOT EXISTS 确保幂等性
 //   - 表结构与 Checkpoint 结构体对应
 func (s *SQLCheckpointStore) CreateTable(ctx context.Context) error {
+	if err := validateCheckpointTableName(s.tableName); err != nil {
+		return fmt.Errorf("invalid checkpoint table name %q: %w", s.tableName, err)
+	}
+
 	var query string
 
 	switch s.dialect.Name() {
@@ -193,6 +197,10 @@ func (s *SQLCheckpointStore) CreateTable(ctx context.Context) error {
 //   - []*Checkpoint: 检查点列表
 //   - error: 查询失败错误
 func (s *SQLCheckpointStore) List(ctx context.Context) ([]*Checkpoint, error) {
+	if err := validateCheckpointTableName(s.tableName); err != nil {
+		return nil, fmt.Errorf("invalid checkpoint table name %q: %w", s.tableName, err)
+	}
+
 	builder := sqlbuilder.New(s.db).Select(
 		"projection_name", "position", "last_event_id", "last_event_time", "updated_at",
 	).From(s.tableName).
@@ -249,6 +257,10 @@ func (s *SQLCheckpointStore) SaveBatch(ctx context.Context, checkpoints []*Check
 		return nil
 	}
 
+	if err := validateCheckpointTableName(s.tableName); err != nil {
+		return fmt.Errorf("invalid checkpoint table name %q: %w", s.tableName, err)
+	}
+
 	// 开启事务，复用 Save 的 UPSERT 语义
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -282,6 +294,24 @@ func (s *SQLCheckpointStore) SaveBatch(ctx context.Context, checkpoints []*Check
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
+	return nil
+}
+
+// validateCheckpointTableName 校验检查点表名，防止通过配置注入恶意 SQL 片段。
+// 约束：只允许字母、数字、下划线和点号（兼容 schema.table 写法）。
+func validateCheckpointTableName(name string) error {
+	if name == "" {
+		return fmt.Errorf("table name cannot be empty")
+	}
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') ||
+			(r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') ||
+			r == '_' || r == '.' {
+			continue
+		}
+		return fmt.Errorf("invalid character %q in table name", r)
+	}
 	return nil
 }
 

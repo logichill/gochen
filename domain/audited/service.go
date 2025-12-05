@@ -72,8 +72,12 @@ func (s *AuditedService[T, ID]) ListDeleted(ctx context.Context, o, l int) ([]T,
 		return result, nil
 	}
 
-	// 退化实现：拉取较大窗口后在内存中过滤已软删实体
-	all, err := s.repo.List(ctx, 0, 1<<20)
+	// 退化实现：按分页窗口分批拉取并过滤已软删实体，避免一次性加载过多记录
+	if l <= 0 {
+		l = 100
+	}
+
+	all, err := s.repo.List(ctx, 0, l+o)
 	if err != nil {
 		return nil, err
 	}

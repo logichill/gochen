@@ -28,9 +28,7 @@ func (m *MemoryEventStore) AppendEvents(ctx context.Context, aggregateID int64, 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	aggregateType := ""
-	if len(events) > 0 {
-		aggregateType = events[0].GetAggregateType()
-	}
+	aggregateType = events[0].GetAggregateType()
 	key := eventAggregateKey(aggregateType, aggregateID)
 	currentVersion, err := m.getAggregateVersionUnsafe(key)
 	if err != nil {

@@ -70,9 +70,10 @@ func DefaultRouteConfig() *RouteConfig {
 		ErrorHandler:     DefaultErrorHandler,
 		ResponseWrapper:  DefaultResponseWrapper,
 		CORS: &CORSConfig{
-			AllowOrigins:     []string{"*"},
+			// 默认仅允许同源与常见跨域场景，调用方可在组合根显式放宽
+			AllowOrigins:     []string{""},
 			AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"},
-			AllowHeaders:     []string{"*"},
+			AllowHeaders:     []string{"Content-Type", "Authorization"},
 			AllowCredentials: false,
 			MaxAge:           86400,
 		},

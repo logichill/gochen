@@ -13,6 +13,10 @@ type IEventSourcedAggregate[T comparable] interface {
 	GetAggregateType() string
 
 	// ApplyEvent 应用事件到聚合根（修改状态），应为幂等。
+	//
+	// 约定：
+	//   - 具体聚合实现应在重写 ApplyEvent 时先根据事件类型更新自身状态，再调用匿名嵌入的 EventSourcedAggregate.ApplyEvent 递增版本；
+	//   - 该方法用于重建与持久化版本推进，新的领域事件通常通过 ApplyAndRecord 触发。
 	ApplyEvent(evt domain.IDomainEvent) error
 
 	// GetUncommittedEvents 获取未提交的事件。
@@ -56,6 +60,9 @@ func (a *EventSourcedAggregate[T]) GetAggregateType() string {
 }
 
 // GetDomainEvents 返回未提交事件的副本。
+//
+// 注意：
+//   - 为兼容已有代码，GetDomainEvents 与 GetUncommittedEvents 语义相同，返回的都是“当前未提交事件”的快照。
 func (a *EventSourcedAggregate[T]) GetDomainEvents() []domain.IDomainEvent {
 	events := make([]domain.IDomainEvent, len(a.uncommittedEvents))
 	copy(events, a.uncommittedEvents)

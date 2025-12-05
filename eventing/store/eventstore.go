@@ -28,7 +28,10 @@ type IEventStore interface {
 	//   - ctx: 上下文，用于超时控制和取消
 	//   - aggregateID: 聚合根ID
 	//   - events: 待追加的事件列表
-	//   - expectedVersion: 期望的当前版本，用于乐观锁控制（0表示新聚合）
+	//   - expectedVersion:
+	//       - 表示当前持久化事件流的“上一次已提交版本号”
+	//       - 0 表示新聚合（尚无任何事件被持久化）
+	//       - 实现应将其与存储中的当前版本做精确比较，用于乐观锁控制
 	//
 	// 返回：
 	//   - error: 版本冲突返回 ConcurrencyError，其他错误返回 EventStoreError

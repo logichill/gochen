@@ -227,6 +227,12 @@ func (s *CleanupService) archiveOldRecords(ctx context.Context, olderThan time.T
 	var totalArchived int64
 
 	for {
+		// 使用事务保证单批次归档与删除的一致性
+		tx, err := s.db.BeginTx(ctx, nil)
+		if err != nil {
+			return totalArchived, fmt.Errorf("begin archive transaction: %w", err)
+		}
+
 		// 1. 将记录复制到归档表（INSERT ... SELECT ... LIMIT 属于通用 SQL，方言均支持）
 		insertQuery := fmt.Sprintf(`
 			INSERT INTO %s (
@@ -241,21 +247,27 @@ func (s *CleanupService) archiveOldRecords(ctx context.Context, olderThan time.T
 			LIMIT ?
 		`, s.policy.ArchiveTable)
 
-		result, err := s.db.Exec(ctx, insertQuery,
+		result, err := tx.Exec(ctx, insertQuery,
 			OutboxStatusPublished,
 			olderThan,
 			s.policy.BatchSize,
 		)
 		if err != nil {
+			_ = tx.Rollback()
 			return totalArchived, fmt.Errorf("archive records: %w", err)
 		}
 
 		affected, err := result.RowsAffected()
 		if err != nil {
+			_ = tx.Rollback()
 			return totalArchived, fmt.Errorf("get rows affected: %w", err)
 		}
 
 		if affected == 0 {
+			// 没有需要归档的数据，结束事务并退出
+			if err := tx.Commit(); err != nil {
+				return totalArchived, fmt.Errorf("commit empty archive transaction: %w", err)
+			}
 			break
 		}
 
@@ -283,9 +295,14 @@ func (s *CleanupService) archiveOldRecords(ctx context.Context, olderThan time.T
 			deleteArgs = []any{OutboxStatusPublished, olderThan, affected}
 		}
 
-		_, err = s.db.Exec(ctx, deleteQuery, deleteArgs...)
+		_, err = tx.Exec(ctx, deleteQuery, deleteArgs...)
 		if err != nil {
+			_ = tx.Rollback()
 			return totalArchived, fmt.Errorf("delete archived records: %w", err)
+		}
+
+		if err := tx.Commit(); err != nil {
+			return totalArchived, fmt.Errorf("commit archive transaction: %w", err)
 		}
 
 		totalArchived += affected

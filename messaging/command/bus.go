@@ -42,8 +42,10 @@ type CommandBus struct {
 
 // commandRoutingHandler 根据命令类型进行路由的适配器
 //
-// 它订阅在统一的消息类型（messaging.MessageTypeCommand）上，
-// 根据 Command.Metadata["command_type"] 与 commandType 的匹配结果决定是否处理。
+// 行为说明：
+//   - 始终订阅在统一的消息类型（messaging.MessageTypeCommand）上；
+//   - 仅当消息为 *Command 且 Command.CommandType 与配置的 commandType 精确匹配时才调用内部 handler；
+//   - 其他类型或不匹配的命令将被静默忽略（返回 nil），以便多个 handler 复用同一底层订阅。
 type commandRoutingHandler struct {
 	commandType string
 	inner       messaging.IMessageHandler
@@ -174,11 +176,12 @@ func (bus *CommandBus) RegisterHandlerWithContext(ctx context.Context, commandTy
 		inner:       baseHandler,
 	}
 
+	// 为避免竞态，整个“替换 handler + 更新注册表”的过程在互斥锁保护下完成
+	bus.mutex.Lock()
+	defer bus.mutex.Unlock()
+
 	// 若已存在同类型处理器，先移除旧订阅，避免重复消费
-	bus.mutex.RLock()
-	existing := bus.handlers[commandType]
-	bus.mutex.RUnlock()
-	if existing != nil {
+	if existing, ok := bus.handlers[commandType]; ok && existing != nil {
 		if err := bus.messageBus.Unsubscribe(ctx, messaging.MessageTypeCommand, existing); err != nil {
 			return fmt.Errorf("failed to replace existing handler for %s: %w", commandType, err)
 		}
@@ -189,7 +192,7 @@ func (bus *CommandBus) RegisterHandlerWithContext(ctx context.Context, commandTy
 		return fmt.Errorf("failed to subscribe command handler: %w", err)
 	}
 
-	// 记录处理器
+	// 记录处理器（在同一锁区间内保证 handlers 与订阅状态一致）
 	bus.mutex.Lock()
 	bus.handlers[commandType] = routingHandler
 	bus.mutex.Unlock()

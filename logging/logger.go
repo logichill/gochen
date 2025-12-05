@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 )
 
@@ -209,15 +210,22 @@ func (l *NoopLogger) WithFields(fields ...Field) ILogger                     { r
 func (l *NoopLogger) WithField(key string, value any) ILogger                { return l }
 
 // 全局Logger
-var globalLogger ILogger = NewStdLogger("")
+var (
+	globalLogger   ILogger = NewStdLogger("")
+	globalLoggerMu sync.RWMutex
+)
 
 // SetLogger 设置全局Logger
 func SetLogger(logger ILogger) {
+	globalLoggerMu.Lock()
+	defer globalLoggerMu.Unlock()
 	globalLogger = logger
 }
 
 // GetLogger 获取全局Logger
 func GetLogger() ILogger {
+	globalLoggerMu.RLock()
+	defer globalLoggerMu.RUnlock()
 	return globalLogger
 }
 

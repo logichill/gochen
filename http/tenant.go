@@ -54,6 +54,9 @@ func GetTenantID(ctx context.Context) string {
 //	tenantID := httpx.ExtractTenantIDFromRequest(r)
 //	ctx := httpx.WithTenantID(r.Context(), tenantID)
 func ExtractTenantIDFromRequest(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
 	// 1. 从 Header 提取
 	if tenantID := r.Header.Get(HeaderTenantID); tenantID != "" {
 		return tenantID

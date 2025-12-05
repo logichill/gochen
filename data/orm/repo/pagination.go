@@ -35,7 +35,11 @@ func (r *Repo[T]) ListPage(ctx context.Context, options *QueryOptions) (*PagedRe
 		return nil, errors.WrapError(err, errors.ErrCodeDatabase, "failed to execute paginated query")
 	}
 
-	totalPages := int(math.Ceil(float64(total) / float64(options.Size)))
+	size := options.Size
+	if size <= 0 {
+		size = 1
+	}
+	totalPages := int(math.Ceil(float64(total) / float64(size)))
 	result := make([]*T, len(entities))
 	for i := range entities {
 		result[i] = &entities[i]
@@ -45,7 +49,7 @@ func (r *Repo[T]) ListPage(ctx context.Context, options *QueryOptions) (*PagedRe
 		Data:       result,
 		Total:      total,
 		Page:       options.Page,
-		Size:       options.Size,
+		Size:       size,
 		TotalPages: totalPages,
 	}, nil
 }

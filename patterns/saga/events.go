@@ -7,7 +7,7 @@ const (
 	EventSagaStepFailed             = "SagaStepFailed"
 	EventSagaCompensationStarted    = "SagaCompensationStarted"
 	EventSagaCompensationStepFailed = "SagaCompensationStepFailed"
-	EventSagaCompensationCompleted  = "SagaCompensated"
+	EventSagaCompensationCompleted  = "SagaCompensationCompleted"
 	EventSagaCompleted              = "SagaCompleted"
 	EventSagaFailed                 = "SagaFailed"
 )
