@@ -16,15 +16,69 @@ type SelectBuilder struct {
 	offset int
 }
 
+// isSafeIdentifier 判断简单标识符是否合法。
+//
+// 允许形式：
+//   - 单一标识符：foo, bar_1
+//   - 带点限定名：table.column
+//
+// 规则（按段）：
+//   - 每段不能为空；
+//   - 首字符必须是字母或下划线 [A-Za-z_]；
+//   - 后续字符必须是字母、数字或下划线 [A-Za-z0-9_]。
+func isSafeIdentifier(name string) bool {
+	if name == "" {
+		return false
+	}
+	parts := strings.Split(name, ".")
+	for _, part := range parts {
+		if part == "" {
+			return false
+		}
+		for i := 0; i < len(part); i++ {
+			ch := part[i]
+			if i == 0 {
+				if !((ch >= 'a' && ch <= 'z') ||
+					(ch >= 'A' && ch <= 'Z') ||
+					ch == '_') {
+					return false
+				}
+			} else {
+				if !((ch >= 'a' && ch <= 'z') ||
+					(ch >= 'A' && ch <= 'Z') ||
+					(ch >= '0' && ch <= '9') ||
+					ch == '_') {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
 func NewSelect() *SelectBuilder { return &SelectBuilder{cols: []string{"*"}} }
 
 func (b *SelectBuilder) Select(columns ...string) *SelectBuilder {
 	if len(columns) > 0 {
-		b.cols = columns
+		safe := make([]string, 0, len(columns))
+		for _, c := range columns {
+			if c == "*" || isSafeIdentifier(c) {
+				safe = append(safe, c)
+			} else {
+				panic("SelectBuilder: unsafe column name " + c)
+			}
+		}
+		b.cols = safe
 	}
 	return b
 }
-func (b *SelectBuilder) From(table string) *SelectBuilder { b.table = table; return b }
+func (b *SelectBuilder) From(table string) *SelectBuilder {
+	if !isSafeIdentifier(table) {
+		panic("SelectBuilder: unsafe table name " + table)
+	}
+	b.table = table
+	return b
+}
 func (b *SelectBuilder) Where(cond string, args ...any) *SelectBuilder {
 	if cond != "" {
 		b.where = append(b.where, cond)
@@ -34,6 +88,9 @@ func (b *SelectBuilder) Where(cond string, args ...any) *SelectBuilder {
 }
 func (b *SelectBuilder) OrderBy(col string, desc bool) *SelectBuilder {
 	if col != "" {
+		if !isSafeIdentifier(col) {
+			panic("SelectBuilder: unsafe order column " + col)
+		}
 		b.order = col
 		if desc {
 			b.order += " DESC"

@@ -43,9 +43,19 @@ func (b *insertBuilder) Build() (string, []any) {
 	args := make([]any, 0, len(b.rows)*len(b.columns))
 
 	sb.WriteString("INSERT INTO ")
-	sb.WriteString(b.table)
+	if !isSafeIdentifier(b.table) {
+		panic("insertBuilder: unsafe table name " + b.table)
+	}
+	sb.WriteString(b.dialect.QuoteIdentifier(b.table))
 	sb.WriteString(" (")
-	sb.WriteString(strings.Join(b.columns, ", "))
+	quotedCols := make([]string, len(b.columns))
+	for i, col := range b.columns {
+		if !isSafeIdentifier(col) {
+			panic("insertBuilder: unsafe column name " + col)
+		}
+		quotedCols[i] = b.dialect.QuoteIdentifier(col)
+	}
+	sb.WriteString(strings.Join(quotedCols, ", "))
 	sb.WriteString(") VALUES ")
 
 	rowPlaceholder := "(" + strings.TrimRight(strings.Repeat("?, ", len(b.columns)), ", ") + ")"

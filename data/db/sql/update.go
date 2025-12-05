@@ -66,7 +66,10 @@ func (b *updateBuilder) Build() (string, []any) {
 	args := make([]any, 0, len(b.setArgs)+len(b.exprArgs)+len(b.whereArgs))
 
 	sb.WriteString("UPDATE ")
-	sb.WriteString(b.table)
+	if !isSafeIdentifier(b.table) {
+		panic("updateBuilder: unsafe table name " + b.table)
+	}
+	sb.WriteString(b.dialect.QuoteIdentifier(b.table))
 	sb.WriteString(" SET ")
 
 	first := true
@@ -75,7 +78,10 @@ func (b *updateBuilder) Build() (string, []any) {
 			sb.WriteString(", ")
 		}
 		first = false
-		sb.WriteString(col)
+		if !isSafeIdentifier(col) {
+			panic("updateBuilder: unsafe column name " + col)
+		}
+		sb.WriteString(b.dialect.QuoteIdentifier(col))
 		sb.WriteString(" = ?")
 		args = append(args, b.setArgs[i])
 	}

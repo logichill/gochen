@@ -118,31 +118,58 @@ func (q *queryBuilder) withFilters(filters map[string]string) *queryBuilder {
 		switch {
 		case strings.HasSuffix(key, "_like"):
 			field := strings.TrimSuffix(key, "_like")
+			if !q.isAllowedField(field) {
+				continue
+			}
 			q = q.Where(field+" LIKE ?", "%"+value+"%")
 		case strings.HasSuffix(key, "_gt"):
 			field := strings.TrimSuffix(key, "_gt")
+			if !q.isAllowedField(field) {
+				continue
+			}
 			q = q.Where(field+" > ?", value)
 		case strings.HasSuffix(key, "_gte"):
 			field := strings.TrimSuffix(key, "_gte")
+			if !q.isAllowedField(field) {
+				continue
+			}
 			q = q.Where(field+" >= ?", value)
 		case strings.HasSuffix(key, "_lt"):
 			field := strings.TrimSuffix(key, "_lt")
+			if !q.isAllowedField(field) {
+				continue
+			}
 			q = q.Where(field+" < ?", value)
 		case strings.HasSuffix(key, "_lte"):
 			field := strings.TrimSuffix(key, "_lte")
+			if !q.isAllowedField(field) {
+				continue
+			}
 			q = q.Where(field+" <= ?", value)
 		case strings.HasSuffix(key, "_ne"):
 			field := strings.TrimSuffix(key, "_ne")
+			if !q.isAllowedField(field) {
+				continue
+			}
 			q = q.Where(field+" != ?", value)
 		case strings.HasSuffix(key, "_in"):
 			field := strings.TrimSuffix(key, "_in")
+			if !q.isAllowedField(field) {
+				continue
+			}
 			parts := strings.Split(value, ",")
 			q = q.Where(field+" IN ?", parts)
 		case strings.HasSuffix(key, "_not_in"):
 			field := strings.TrimSuffix(key, "_not_in")
+			if !q.isAllowedField(field) {
+				continue
+			}
 			parts := strings.Split(value, ",")
 			q = q.Where(field+" NOT IN ?", parts)
 		default:
+			if !q.isAllowedField(key) {
+				continue
+			}
 			q = q.Where(key+" = ?", value)
 		}
 	}

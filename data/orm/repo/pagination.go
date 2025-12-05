@@ -26,7 +26,15 @@ func (r *Repo[T]) ListPage(ctx context.Context, options *QueryOptions) (*PagedRe
 
 	q = r.applySorting(q, options)
 	if len(options.Fields) > 0 {
-		q = q.Select(options.Fields...)
+		safeFields := make([]string, 0, len(options.Fields))
+		for _, f := range options.Fields {
+			if q.isAllowedField(f) {
+				safeFields = append(safeFields, f)
+			}
+		}
+		if len(safeFields) > 0 {
+			q = q.Select(safeFields...)
+		}
 	}
 	offset := (options.Page - 1) * options.Size
 	q = q.Offset(offset).Limit(options.Size)

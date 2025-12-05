@@ -38,7 +38,10 @@ func (b *deleteBuilder) Build() (string, []any) {
 	copy(args, b.args)
 
 	sb.WriteString("DELETE FROM ")
-	sb.WriteString(b.table)
+	if !isSafeIdentifier(b.table) {
+		panic("deleteBuilder: unsafe table name " + b.table)
+	}
+	sb.WriteString(b.dialect.QuoteIdentifier(b.table))
 
 	if len(b.where) > 0 {
 		sb.WriteString(" WHERE ")

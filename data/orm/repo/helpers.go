@@ -10,7 +10,7 @@ func (r *Repo[T]) applyAdvancedFilters(q *queryBuilder, advanced map[string]any)
 		switch key {
 		case "or":
 			if conditions, ok := value.([]map[string]string); ok {
-				expr, args := buildOrCondition(conditions)
+				expr, args := buildOrCondition(conditions, q.isAllowedField)
 				if expr != "" {
 					q = q.Where(expr, args...)
 				}
@@ -25,15 +25,9 @@ func (r *Repo[T]) applyAdvancedFilters(q *queryBuilder, advanced map[string]any)
 				}
 			}
 		case "custom_where":
-			if customWhere, ok := value.(map[string]any); ok {
-				if query, exists := customWhere["query"]; exists {
-					if args, exists := customWhere["args"]; exists {
-						q = q.Where(fmt.Sprint(query), args)
-					} else {
-						q = q.Where(fmt.Sprint(query))
-					}
-				}
-			}
+			// 出于 SQL 注入风险考虑，禁用从 Advanced 透传任意 SQL 片段。
+			// 如需自定义复杂条件，请在业务层直接使用 orm.QueryOption/WithWhere。
+			continue
 		}
 	}
 	return q
@@ -43,13 +37,19 @@ func (r *Repo[T]) applySorting(q *queryBuilder, options *QueryOptions) *queryBui
 	if len(options.Sorts) > 0 {
 		for field, direction := range options.Sorts {
 			if direction.IsValid() {
+				if !q.isAllowedField(field) {
+					continue
+				}
 				q = q.Order(field, strings.EqualFold(string(direction), "desc"))
 			}
 		}
 		return q
 	}
 	if options.Order != "" {
-		q = q.Order(resolveOrderField(options), strings.EqualFold(options.Order, "desc"))
+		baseField := resolveOrderField(options)
+		if q.isAllowedField(baseField) {
+			q = q.Order(baseField, strings.EqualFold(options.Order, "desc"))
+		}
 	}
 	return q
 }
@@ -61,7 +61,7 @@ func resolveOrderField(options *QueryOptions) string {
 	return "id"
 }
 
-func buildOrCondition(conditions []map[string]string) (string, []any) {
+func buildOrCondition(conditions []map[string]string, isAllowedField func(string) bool) (string, []any) {
 	var exprs []string
 	var args []any
 	for _, condition := range conditions {
@@ -71,6 +71,9 @@ func buildOrCondition(conditions []map[string]string) (string, []any) {
 		var inner []string
 		var innerArgs []any
 		for key, value := range condition {
+			if isAllowedField != nil && !isAllowedField(key) {
+				continue
+			}
 			inner = append(inner, fmt.Sprintf("%s = ?", key))
 			innerArgs = append(innerArgs, value)
 		}

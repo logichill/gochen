@@ -58,6 +58,34 @@ func (d Dialect) Name() Name {
 	return d.name
 }
 
+// QuoteIdentifier 根据方言对标识符进行转义（如表名/列名）。
+//
+// 约定：
+//   - 支持 schema.table、table.column 等带点形式，会对每一段分别加引号；
+//   - MySQL 使用反引号 `name`，Postgres/SQLite 使用双引号 "name"；
+//   - Unknown 方言返回原始字符串，不做修改。
+//   - 该方法不负责校验标识符语法，仅负责按方言加引号。
+func (d Dialect) QuoteIdentifier(name string) string {
+	if name == "" {
+		return ""
+	}
+	parts := strings.Split(name, ".")
+	for i, p := range parts {
+		if p == "" {
+			continue
+		}
+		switch d.name {
+		case NameMySQL:
+			parts[i] = "`" + p + "`"
+		case NameSQLite, NamePostgres:
+			parts[i] = `"` + p + `"`
+		default:
+			// 未知方言：保持原样
+		}
+	}
+	return strings.Join(parts, ".")
+}
+
 // Rebind 将通用占位符 ? 转换为方言特定形式。
 //
 // 目前仅对 Postgres 做替换，将 ? 依次替换为 $1、$2...；

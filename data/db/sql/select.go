@@ -103,9 +103,9 @@ func (b *selectBuilder) SkipLocked() ISelectBuilder {
 func (b *selectBuilder) Build() (string, []any) {
 	var sb strings.Builder
 	sb.WriteString("SELECT ")
-	sb.WriteString(strings.Join(b.cols, ", "))
+	sb.WriteString(b.buildSelectColumns())
 	sb.WriteString(" FROM ")
-	sb.WriteString(b.table)
+	sb.WriteString(b.buildTableName())
 
 	// 使用局部 args 副本，避免在多次 Build 调用之间污染 builder 状态。
 	args := make([]any, 0, len(b.args)+2)
@@ -117,7 +117,7 @@ func (b *selectBuilder) Build() (string, []any) {
 	}
 	if len(b.groupBy) > 0 {
 		sb.WriteString(" GROUP BY ")
-		sb.WriteString(strings.Join(b.groupBy, ", "))
+		sb.WriteString(b.buildGroupBy())
 	}
 	if b.orderBy != "" {
 		sb.WriteString(" ORDER BY ")
@@ -145,4 +145,45 @@ func (b *selectBuilder) Query(ctx context.Context) (core.IRows, error) {
 func (b *selectBuilder) QueryRow(ctx context.Context) core.IRow {
 	q, args := b.Build()
 	return b.db.QueryRow(ctx, q, args...)
+}
+
+// buildTableName 构建 FROM 子句中的表名，必要时按方言加引号。
+func (b *selectBuilder) buildTableName() string {
+	if isSafeIdentifier(b.table) {
+		return b.dialect.QuoteIdentifier(b.table)
+	}
+	// 非“纯标识符”场景（如子查询/表达式）保持原样，由调用方负责安全性。
+	return b.table
+}
+
+// buildSelectColumns 构建 SELECT 列表，对“看起来像标识符”的列名按方言加引号。
+// 特殊值 "*" 不加引号。
+func (b *selectBuilder) buildSelectColumns() string {
+	cols := make([]string, len(b.cols))
+	for i, col := range b.cols {
+		if col == "*" {
+			cols[i] = col
+			continue
+		}
+		if isSafeIdentifier(col) {
+			cols[i] = b.dialect.QuoteIdentifier(col)
+		} else {
+			// 表达式类列名（如 COUNT(1)）保持原样。
+			cols[i] = col
+		}
+	}
+	return strings.Join(cols, ", ")
+}
+
+// buildGroupBy 构建 GROUP BY 列表，对安全标识符按方言加引号。
+func (b *selectBuilder) buildGroupBy() string {
+	group := make([]string, len(b.groupBy))
+	for i, col := range b.groupBy {
+		if isSafeIdentifier(col) {
+			group[i] = b.dialect.QuoteIdentifier(col)
+		} else {
+			group[i] = col
+		}
+	}
+	return strings.Join(group, ", ")
 }
