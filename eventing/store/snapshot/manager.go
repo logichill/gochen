@@ -15,7 +15,6 @@ import (
 // Manager 快照管理器
 type Manager struct {
 	snapshotStore ISnapshotStore
-	eventStore    store.IEventStore
 	config        *Config
 	strategy      ISnapshotStrategy // 快照策略
 	mutex         sync.RWMutex
@@ -40,7 +39,7 @@ func NewManager(snapshotStore ISnapshotStore, eventStore store.IEventStore, conf
 		config = DefaultConfig()
 	}
 	defaultStrategy := NewEventCountStrategy(config.Frequency)
-	return &Manager{snapshotStore: snapshotStore, eventStore: eventStore, config: config, strategy: defaultStrategy}
+	return &Manager{snapshotStore: snapshotStore, config: config, strategy: defaultStrategy}
 }
 
 // SetStrategy 设置快照策略

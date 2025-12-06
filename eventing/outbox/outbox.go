@@ -141,11 +141,16 @@ func (entry *OutboxEntry) ShouldRetry(maxRetries int) bool {
 
 // CalculateNextRetryTime 计算下次重试时间（指数退避）
 func (entry *OutboxEntry) CalculateNextRetryTime(baseInterval time.Duration) time.Time {
-	// 指数退避：baseInterval * 2^retryCount
-	backoffMultiplier := 1 << entry.RetryCount // 2^retryCount
-	if backoffMultiplier > 32 {                // 最大 32 倍
-		backoffMultiplier = 32
+	// 指数退避：baseInterval * 2^retryCount，避免移位溢出
+	retryCount := entry.RetryCount
+	if retryCount < 0 {
+		retryCount = 0
 	}
+	// 上限 5 次指数放大（2^5 = 32），避免 1<<retryCount 溢出导致负数或超大等待时间
+	if retryCount > 5 {
+		retryCount = 5
+	}
+	backoffMultiplier := 1 << retryCount // 2^retryCount，范围 [1,32]
 
 	delay := baseInterval * time.Duration(backoffMultiplier)
 	return time.Now().Add(delay)

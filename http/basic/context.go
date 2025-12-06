@@ -14,8 +14,6 @@ type HttpContext struct {
 	request *http.Request
 	writer  http.ResponseWriter
 	params  map[string]string
-	query   map[string]string
-	headers map[string]string
 	reqCtx  httpx.IRequestContext
 	status  int
 	aborted bool
@@ -27,8 +25,6 @@ func NewBaseHttpContext(w http.ResponseWriter, r *http.Request) *HttpContext {
 		request: r,
 		writer:  w,
 		params:  make(map[string]string),
-		query:   make(map[string]string),
-		headers: make(map[string]string),
 		reqCtx:  NewRequestContext(r.Context()),
 		status:  http.StatusOK,
 		values:  make(map[string]any),
