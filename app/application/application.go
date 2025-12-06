@@ -69,7 +69,11 @@ type ServiceConfig struct {
 	// 乐观锁
 	OptimisticLock bool
 
-	// 事务管理
+	// 事务管理开关
+	//
+	// 命名说明：
+	//   - 字段名 ITransactional 源自早期接口命名，已经在外部配置中使用，为保持向后兼容暂不更名；
+	//   - 新代码中如需判断是否启用事务，建议通过显式配置项或封装方法，而不是依赖字段名前缀含义。
 	ITransactional bool
 }
 

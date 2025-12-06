@@ -32,6 +32,10 @@ func (e *ConcurrencyError) Error() string {
 		e.AggregateID, e.ExpectedVersion, e.ActualVersion)
 }
 
+// 说明：
+//   - ConcurrencyError 本身就是业务错误的最终形态，不再包裹下层错误，因此不实现 Unwrap；
+//   - 调用方应通过 errors.As(err, *ConcurrencyError) 或类型断言来识别并发冲突，而不是依赖 Unwrap 链。
+
 func NewConcurrencyError(aggregateID int64, expected, actual uint64) *ConcurrencyError {
 	return &ConcurrencyError{AggregateID: aggregateID, ExpectedVersion: expected, ActualVersion: actual}
 }

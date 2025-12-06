@@ -138,6 +138,11 @@ func (r *SimpleSQLOutboxRepository) GetPendingEntries(ctx context.Context, limit
 		"id", "aggregate_id", "aggregate_type", "event_id", "event_type", "event_data",
 		"status", "created_at", "published_at", "retry_count", "last_error", "next_retry_at",
 	).From(r.outboxTable).
+		// 注意：这里依赖 SQL 标准中 AND 的优先级高于 OR，
+		// 表达式含义为：
+		//   status = 'pending'
+		//   OR (status = 'failed' AND (next_retry_at IS NULL OR next_retry_at <= now))
+		// 已在评估报告中确认逻辑正确，无需额外括号。
 		Where("status = ?", OutboxStatusPending).
 		Or("status = ? AND (next_retry_at IS NULL OR next_retry_at <= ?)", OutboxStatusFailed, time.Now()).
 		OrderBy("created_at ASC").

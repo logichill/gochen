@@ -67,9 +67,13 @@ func (p *Publisher) loop(ctx context.Context) {
 		case <-p.stopCh:
 			return
 		case <-ticker.C:
-			_ = p.processOnce(ctx)
+			if err := p.processOnce(ctx); err != nil {
+				p.log.Error(ctx, "outbox processOnce failed in loop", logging.Error(err))
+			}
 			// 定期清理已发布
-			_ = p.repo.DeletePublished(ctx, time.Now().Add(-p.cfg.RetentionPeriod))
+			if err := p.repo.DeletePublished(ctx, time.Now().Add(-p.cfg.RetentionPeriod)); err != nil {
+				p.log.Error(ctx, "outbox delete published failed", logging.Error(err))
+			}
 		case <-ctx.Done():
 			return
 		}
@@ -77,6 +81,8 @@ func (p *Publisher) loop(ctx context.Context) {
 }
 
 func (p *Publisher) processOnce(ctx context.Context) error {
+	var firstErr error
+
 	entries, err := p.repo.GetPendingEntries(ctx, p.cfg.BatchSize)
 	if err != nil {
 		return err
@@ -90,31 +96,53 @@ func (p *Publisher) processOnce(ctx context.Context) error {
 		if err != nil {
 			// 无法反序列化，直接标记失败并设置下次重试
 			next := e.CalculateNextRetryTime(p.cfg.RetryInterval)
-			_ = p.repo.MarkAsFailed(ctx, e.ID, err.Error(), next)
+			if markErr := p.repo.MarkAsFailed(ctx, e.ID, err.Error(), next); markErr != nil {
+				p.log.Error(ctx, "outbox mark deserialize failed entry as failed", logging.Int64("entry", e.ID), logging.Error(markErr))
+				if firstErr == nil {
+					firstErr = markErr
+				}
+			}
 			p.log.Warn(ctx, "outbox deserialize failed", logging.Int64("entry", e.ID), logging.Error(err))
 			// 超过最大重试次数则移入 DLQ（若已配置）
 			if p.dlq != nil && e.RetryCount+1 >= p.cfg.MaxRetries {
 				// 复制一份并更新重试次数，以反映最新状态
 				ee := e
 				ee.RetryCount = e.RetryCount + 1
-				_ = p.dlq.MoveToDLQ(ctx, ee)
+				if dlqErr := p.dlq.MoveToDLQ(ctx, ee); dlqErr != nil {
+					p.log.Error(ctx, "outbox move to DLQ failed after deserialize error", logging.Int64("entry", e.ID), logging.Error(dlqErr))
+					if firstErr == nil {
+						firstErr = dlqErr
+					}
+				}
 			}
 			continue
 		}
 		if err := p.bus.PublishEvent(ctx, &evt); err != nil {
 			next := e.CalculateNextRetryTime(p.cfg.RetryInterval)
-			_ = p.repo.MarkAsFailed(ctx, e.ID, err.Error(), next)
+			if markErr := p.repo.MarkAsFailed(ctx, e.ID, err.Error(), next); markErr != nil {
+				p.log.Error(ctx, "outbox mark publish failed entry as failed", logging.Int64("entry", e.ID), logging.Error(markErr))
+				if firstErr == nil {
+					firstErr = markErr
+				}
+			}
 			p.log.Warn(ctx, "outbox publish failed", logging.Int64("entry", e.ID), logging.Error(err))
 			if p.dlq != nil && e.RetryCount+1 >= p.cfg.MaxRetries {
 				ee := e
 				ee.RetryCount = e.RetryCount + 1
-				_ = p.dlq.MoveToDLQ(ctx, ee)
+				if dlqErr := p.dlq.MoveToDLQ(ctx, ee); dlqErr != nil {
+					p.log.Error(ctx, "outbox move to DLQ failed after publish error", logging.Int64("entry", e.ID), logging.Error(dlqErr))
+					if firstErr == nil {
+						firstErr = dlqErr
+					}
+				}
 			}
 			continue
 		}
 		if err := p.repo.MarkAsPublished(ctx, e.ID); err != nil {
-			p.log.Warn(ctx, "outbox mark published failed", logging.Int64("entry", e.ID), logging.Error(err))
+			// 标记已发布失败不会影响事件已经成功发送到总线，但可能导致后续重复处理，
+			// 因此仅记录错误日志，不作为本次批处理的致命错误返回。
+			p.log.Error(ctx, "outbox mark published failed", logging.Int64("entry", e.ID), logging.Error(err))
 		}
 	}
-	return nil
+	return firstErr
 }

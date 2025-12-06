@@ -187,6 +187,10 @@ func (c *MetricsCollector) collectRetryStats(ctx context.Context, metrics *Outbo
 func (c *MetricsCollector) collectTimeStats(ctx context.Context, metrics *OutboxMetrics) error {
 	// 最老待处理记录的年龄
 	var oldestCreatedAt *time.Time
+	// 说明：当前实现基于 MySQL 语法（包括 TIMESTAMPDIFF 等函数），
+	// 主要用于默认 Outbox SQL 仓储的监控场景；若使用其他数据库方言，
+	// 建议在业务侧提供自定义 MetricsCollector 实现或调整查询语句。
+
 	query := `
 		SELECT MIN(created_at)
 		FROM event_outbox

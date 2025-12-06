@@ -68,6 +68,8 @@ func (e *Entity) SetCreatedInfo(by string, at time.Time) {
 func (e *Entity) SetUpdatedInfo(by string, at time.Time) {
 	e.UpdatedBy = by
 	e.UpdatedAt = at
+	// 所有“修改类”操作都会推动版本号递增，便于审计与乐观锁控制；
+	// 软删/恢复等方法也会递增版本，保持语义一致。
 	e.Version++
 }
 

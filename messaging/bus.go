@@ -153,7 +153,13 @@ func (bus *MessageBus) removeWrappedHandler(messageType string, handler IMessage
 }
 
 // handlerKey 构造用于 wrappedHandlers 映射的 key
-// 组合 messageType、handler.Type() 与 handler 的动态类型字符串，尽量保证唯一且稳定。
+// 组合 messageType 与 handler 实例指针及其 Type() 字符串，尽量保证唯一且稳定。
+//
+// 说明：
+//   - 这里使用 %p 格式化的 handler 指针作为“近似 identity”，配合 handler.Type() 便于调试；
+//   - 指针在对象存活期间是稳定的，而 wrappedHandlers 仅在订阅存活期间持有引用，
+//     因此不会出现“GC 后同一 key 映射到不同 handler 实例”的问题；
+//   - 如需更强身份语义，可在未来引入显式的 handler ID 注册表，这里暂保持轻量实现。
 func (bus *MessageBus) handlerKey(messageType string, handler IMessageHandler) string {
 	if handler == nil {
 		return messageType + "|<nil>|"

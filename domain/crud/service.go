@@ -27,6 +27,9 @@ type CRUDService[T domain.IEntity[ID], ID comparable] struct {
 
 // NewCRUDService 创建基于 CRUD 仓储的通用服务实现
 func NewCRUDService[T domain.IEntity[ID], ID comparable](r IRepository[T, ID]) *CRUDService[T, ID] {
+	if r == nil {
+		panic("NewCRUDService: repository cannot be nil")
+	}
 	return &CRUDService[T, ID]{repository: r}
 }
 

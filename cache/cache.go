@@ -112,6 +112,9 @@ func New[K comparable, V any](config Config) *Cache[K, V] {
 //   - value: 缓存的值
 //   - found: 是否找到且未过期
 func (c *Cache[K, V]) Get(key K) (value V, found bool) {
+	// 这里使用写锁而不是读锁，是因为 Get 需要更新访问时间、LRU 链表位置以及统计信息，
+	// 都会修改内部状态；为了保证 LRU 与统计的一致性，选择在单一写锁下完成读取与更新。
+	// 若业务有极端读多写少的高并发场景，可在上层增加只读缓存或副本缓存来分担压力。
 	c.mu.Lock()
 	defer c.mu.Unlock()
 

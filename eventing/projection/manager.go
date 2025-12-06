@@ -2,6 +2,7 @@ package projection
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -412,14 +413,20 @@ func (pm *ProjectionManager) ResumeAllFromCheckpoint(ctx context.Context) error 
 	}
 	pm.mutex.RUnlock()
 
+	var errs []error
+
 	for _, name := range names {
 		if err := pm.ResumeFromCheckpoint(ctx, name); err != nil {
 			pm.logger.Error(ctx, "failed to resume projection", logging.Error(err),
 				logging.String("projection", name))
-			// continue resuming other projections
+			errs = append(errs, fmt.Errorf("projection %s: %w", name, err))
+			// 继续尝试恢复其他投影
 		}
 	}
 
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
 	return nil
 }
 

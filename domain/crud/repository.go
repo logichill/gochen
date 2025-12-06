@@ -93,6 +93,11 @@ type IBatchOperations[T domain.IEntity[ID], ID comparable] interface {
 //
 // 提供事务管理能力，用于保证跨多个操作的数据一致性。
 // 适用于需要原子性操作的复杂业务场景。
+//
+// 设计说明与注意事项：
+//   - 接口通过 context 在调用方与仓储实现之间传递事务边界，容易因 ctx 误用导致“事务泄漏”或嵌套事务语义不清晰；
+//   - 推荐在基础设施层直接使用 data/db 的事务抽象（ITransaction）或在应用服务层显式管理事务，
+//     仅在确有需要时才在领域仓储接口上暴露 ITransactional，并配合清晰的使用约定与文档。
 type ITransactional interface {
 	// BeginTx 开始一个新事务
 	BeginTx(ctx context.Context) (context.Context, error)

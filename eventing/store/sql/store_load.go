@@ -112,13 +112,19 @@ func (s *SQLEventStore) scanEvents(rows rowScanner) ([]eventing.Event, error) {
 		if err := rows.Scan(&id, &typ, &aggID, &aggType, &ver, &schema, &ts, &payloadJSON, &metadataJSON); err != nil {
 			return nil, err
 		}
+
 		var payload map[string]any
 		if payloadJSON != "" {
-			_ = json.Unmarshal([]byte(payloadJSON), &payload)
+			if err := json.Unmarshal([]byte(payloadJSON), &payload); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal event payload for id=%s, type=%s: %w", id, typ, err)
+			}
 		}
+
 		var metadata map[string]any
 		if metadataJSON != "" {
-			_ = json.Unmarshal([]byte(metadataJSON), &metadata)
+			if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal event metadata for id=%s, type=%s: %w", id, typ, err)
+			}
 		}
 		events = append(events, eventing.Event{
 			Message: messaging.Message{
