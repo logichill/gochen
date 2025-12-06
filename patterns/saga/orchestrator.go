@@ -25,7 +25,38 @@ import (
 //
 // 注意：
 //   - Saga 依赖 CommandBus.Dispatch 的返回值来判断步骤是否成功；要获得可靠的错误语义，CommandBus 应该基于同步 Transport
-//     （例如 messaging/transport/sync），否则在异步 Transport 下，Dispatch 的 error 仅能反映“消息是否进入传输层”，而不能保证 handler 的业务错误被感知。
+//     （例如 messaging/transport/sync），否则在异步 Transport 下，Dispatch 的 error 仅能反映"消息是否进入传输层"，而不能保证 handler 的业务错误被感知。
+//
+// # 并发模型与线程安全
+//
+// ⚠️ 同一个 Saga 实例在并发场景下不是 goroutine 安全的：
+//   - 对同一 sagaID 并发调用 Execute() 会导致状态竞争；
+//   - Orchestrator 内部没有加锁，默认假设“同一 Saga 实例在单线程中顺序执行”。
+//
+// 安全的使用方式：
+//   - ✅ 不同 sagaID 的 Saga 可以并发执行；
+//   - ✅ 同一 sagaID 的 Execute() 调用必须串行；
+//   - ❌ 不要对同一 sagaID 并发调用 Execute()。
+//
+// 在生产环境中，如果需要同一 Saga ID 在多实例或多线程下并发调度：
+//   - 建议在 Orchestrator 外部实现分布式锁（例如 Redis 锁、数据库 advisory lock 等）；
+//   - 或者通过工作队列将同一 sagaID 的请求串行化。
+//
+// # 可选增强：分布式锁提供者接口
+//
+// 如果希望在框架层内置锁能力，可以考虑引入如下接口：
+//
+//	type ILockProvider interface {
+//	    // Acquire 尝试为给定 sagaID 获取锁，返回释放函数与错误信息
+//	    Acquire(ctx context.Context, sagaID string) (release func(), err error)
+//	}
+//
+// 可能的实现方式：
+//   - 基于 Redis 的 SET NX + 过期时间；
+//   - 基于数据库的 advisory lock 或 SELECT FOR UPDATE；
+//   - 基于 Etcd/Consul 的原生锁原语。
+//
+// 集成点：在 Execute() 入口处先通过 ILockProvider 获取锁，执行完成后释放。
 type SagaOrchestrator struct {
 	commandBus *command.CommandBus
 	eventBus   bus.IEventBus
@@ -83,11 +114,12 @@ func (o *SagaOrchestrator) Execute(ctx context.Context, saga ISaga) error {
 	state := NewSagaState(sagaID, fmt.Sprintf("%T", saga))
 	state.Status = SagaStatusRunning
 
-	// 保存初始状态
+	// Save initial state
 	if o.stateStore != nil {
 		if err := o.stateStore.Save(ctx, state); err != nil {
-			o.logger.Warn(ctx, "failed to save saga state", logging.Error(err))
-			// continue execution
+			// State persistence failure is a serious issue that may prevent saga recovery
+			o.logger.Error(ctx, "failed to save saga state", logging.Error(err))
+			// continue execution - saga will still proceed but won't be recoverable on crash
 		}
 	}
 

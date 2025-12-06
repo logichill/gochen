@@ -36,6 +36,9 @@ type IdempotencyMiddleware struct {
 
 	// stopCleanup 停止清理的信号
 	stopCleanup chan struct{}
+
+	// stopOnce 确保 Stop() 只执行一次，避免重复关闭 channel
+	stopOnce sync.Once
 }
 
 // IdempotencyConfig 幂等性配置
@@ -210,8 +213,13 @@ func (m *IdempotencyMiddleware) cleanup() {
 }
 
 // Stop 停止清理 worker（用于测试和优雅关闭）
+//
+// 使用 sync.Once 确保 channel 只被关闭一次，避免多次调用 Stop() 时 panic。
+// 这在测试清理或应用优雅关闭时特别重要。
 func (m *IdempotencyMiddleware) Stop() {
-	close(m.stopCleanup)
+	m.stopOnce.Do(func() {
+		close(m.stopCleanup)
+	})
 }
 
 // Clear 清空所有记录（用于测试）

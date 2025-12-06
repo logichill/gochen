@@ -238,12 +238,16 @@ func (g *RouteGroup) Use(mw ...httpx.Middleware) httpx.IRouteGroup {
 
 func (g *RouteGroup) add(method, path string, h httpx.HttpHandler) httpx.IRouteGroup {
 	full := g.prefix + path
+	// 在注册时捕获中间件快照，避免闭包变量问题
+	snapshot := append([]httpx.Middleware{}, g.middlewares...)
 	g.server.mu.Lock()
 	defer g.server.mu.Unlock()
-	g.server.routes[method+" "+full] = &route{method: method, pattern: full, handler: g.wrap(h), middlewares: nil}
+	g.server.routes[method+" "+full] = &route{method: method, pattern: full, handler: g.wrapWithMiddlewares(h, snapshot), middlewares: nil}
 	return g
 }
 
-func (g *RouteGroup) wrap(h httpx.HttpHandler) httpx.HttpHandler {
-	return func(ctx httpx.IHttpContext) error { return g.server.executeMiddlewareChain(ctx, g.middlewares, h) }
+func (g *RouteGroup) wrapWithMiddlewares(h httpx.HttpHandler, middlewares []httpx.Middleware) httpx.HttpHandler {
+	return func(ctx httpx.IHttpContext) error {
+		return g.server.executeMiddlewareChain(ctx, middlewares, h)
+	}
 }

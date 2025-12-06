@@ -72,6 +72,16 @@ func NewDomainEventStore[T deventsourced.IEventSourcedAggregate[int64]](
 		adapter.logger = logging.ComponentLogger("app.eventsourced.domain_event_store").
 			WithField("aggregate_type", opts.AggregateType)
 	}
+
+	// 警告：未启用 Outbox 时的事件发布存在原子性风险。
+	// 若事件持久化成功而发布失败，可能导致事件丢失或重复处理。
+	if opts.PublishEvents && opts.EventBus != nil && opts.OutboxRepo == nil {
+		adapter.logger.Warn(context.Background(),
+			"Event publishing configured with atomicity risk: PublishEvents=true but OutboxRepo is nil. "+
+				"Event persistence and publishing are non-atomic operations. Publishing failures may cause event loss. "+
+				"Outbox pattern is strongly recommended for production to ensure eventual consistency.")
+	}
+
 	return adapter, nil
 }
 
@@ -85,9 +95,23 @@ func NewEventStoreAdapter[T deventsourced.IEventSourcedAggregate[int64]](
 }
 
 // AppendEvents 将领域事件追加到事件存储中。
+//
 // 支持两种模式：
-//   - OutboxRepo 不为空时：通过 Outbox 仓储同事务写入事件与 Outbox；
-//   - 否则：直接调用 EventStore.AppendEvents。
+//   - 配置 OutboxRepo 时：在同一数据库事务中同时写入事件与 Outbox 记录，保证原子性；
+//   - 未配置 OutboxRepo 时：先直接调用 EventStore.AppendEvents 持久化事件，再尝试通过 EventBus 发布事件。
+//
+// ⚠️ 注意：未启用 Outbox 的模式存在原子性风险
+//
+// 当 PublishEvents=true 且 OutboxRepo=nil 时，事件持久化与发布是两个独立步骤：
+//  1. EventStore.AppendEvents(ctx, ...)  // 事件写入成功
+//  2. EventBus.Publish(ctx, ...)         // 发布可能失败
+//
+// 如果第 1 步成功而第 2 步失败：
+//   - 事件已经持久化，但消息总线未收到通知；
+//   - 下游系统不会感知到这批事件；
+//   - 需要额外补偿机制或通过重放/扫描来补发事件。
+//
+// 在生产环境强烈建议使用 Outbox 模式，以保证“最终一致”的语义。
 func (a *DomainEventStore[T]) AppendEvents(ctx context.Context, aggregateID int64, events []domain.IDomainEvent, expectedVersion uint64) error {
 	if len(events) == 0 {
 		return nil

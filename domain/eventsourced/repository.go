@@ -82,18 +82,62 @@ func NewEventSourcedRepository[T IEventSourcedAggregate[int64]](
 	}, nil
 }
 
-// Save 保存聚合的未提交事件。
+// Save 持久化聚合上的未提交事件。
+//
+// # expectedVersion 计算逻辑与隐式约定
+//
+// 本方法通过“当前聚合版本号”推导出事件存储中的 expectedVersion，从而实现乐观锁控制。
+// 计算公式为：
+//
+//	expectedVersion = currentVersion - len(uncommittedEvents)
+//
+// 该公式依赖一个对所有事件溯源聚合都成立的隐式约定：
+//
+// ✅ 必须满足的约定：
+//  1. 每次应用事件时，聚合的 ApplyEvent() 必须让版本号自增 1；
+//  2. 聚合初始版本为 0（尚未应用任何事件）；
+//  3. 任意时刻的版本号必须准确等于“已应用事件总数”。
+//
+// 示例：
+//
+//	初始状态：aggregate.version = 5（已持久化 5 条事件）
+//	本次业务操作：生成 3 条新事件
+//	ApplyEvent 调用：每条事件调用一次，内部 version++，最终版本 = 8
+//	Save 计算：expectedVersion = 8 - 3 = 5
+//	含义：期望事件存储当前版本为 5，即将追加第 6、7、8 条事件
+//
+// 如果事件存储中的版本不是 5（例如被其他事务改为 6），AppendEvents 将因并发冲突失败，
+// 需要调用方重新加载聚合并重试操作。
+//
+// ⚠️ 常见错误：
+//   - 在 ApplyEvent 中忘记递增版本：导致 expectedVersion 计算错误；
+//   - 手工修改版本号而不走 ApplyEvent：破坏版本与事件数量的一致性；
+//   - 不同事件类型对版本处理不一致：导致并发控制逻辑失效。
+//
+// 📝 建议：
+//   - 将版本号递增逻辑统一实现到聚合基类中，具体聚合只负责状态变更；
+//   - 在接口与文档中显式强调上述约定；
+//   - 为聚合编写单元测试，验证 ApplyEvent 后版本号是否按预期递增。
 func (r *EventSourcedRepository[T]) Save(ctx context.Context, aggregate T) error {
 	events := aggregate.GetUncommittedEvents()
 	if len(events) == 0 {
 		return nil
 	}
 
+	// 防御性检查：在计算 expectedVersion 之前验证版本与事件数量的关系。
 	currentVersion := uint64(aggregate.GetVersion())
-	var expectedVersion uint64
-	if currentVersion >= uint64(len(events)) {
-		expectedVersion = currentVersion - uint64(len(events))
+	eventCount := uint64(len(events))
+
+	// 断言：currentVersion 必须大于等于 eventCount。
+	// 若不满足，通常说明聚合的 ApplyEvent 实现没有正确递增版本号。
+	if currentVersion < eventCount {
+		return fmt.Errorf(
+			"version calculation error: currentVersion(%d) < eventCount(%d). This usually indicates that the ApplyEvent implementation of aggregate type %s does not correctly increment the version. Please check the implementation and ensure that each ApplyEvent call executes version++",
+			currentVersion, eventCount, r.aggregateType,
+		)
 	}
+
+	expectedVersion := currentVersion - eventCount
 
 	if err := r.store.AppendEvents(ctx, aggregate.GetID(), events, expectedVersion); err != nil {
 		return err

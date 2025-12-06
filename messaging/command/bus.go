@@ -176,7 +176,7 @@ func (bus *CommandBus) RegisterHandlerWithContext(ctx context.Context, commandTy
 		inner:       baseHandler,
 	}
 
-	// 为避免竞态，整个“替换 handler + 更新注册表”的过程在互斥锁保护下完成
+	// 为避免竞态，整个"替换 handler + 更新注册表"的过程在互斥锁保护下完成
 	bus.mutex.Lock()
 	defer bus.mutex.Unlock()
 
@@ -192,10 +192,8 @@ func (bus *CommandBus) RegisterHandlerWithContext(ctx context.Context, commandTy
 		return fmt.Errorf("failed to subscribe command handler: %w", err)
 	}
 
-	// 记录处理器（在同一锁区间内保证 handlers 与订阅状态一致）
-	bus.mutex.Lock()
+	// 记录处理器（已在锁保护范围内，无需重复加锁）
 	bus.handlers[commandType] = routingHandler
-	bus.mutex.Unlock()
 
 	return nil
 }
