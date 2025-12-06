@@ -372,9 +372,11 @@ func (s *Server) ensureHTTPServer() error {
 		Host:         s.config.Host,
 		Port:         s.config.Port,
 		Mode:         "debug",
-		ReadTimeout:  0,
-		WriteTimeout: 0,
-		IdleTimeout:  0,
+		// 若调用方未显式配置 WebConfig，则使用框架提供的安全默认超时：
+		// 读/写超时 15s，空闲连接 60s。
+		ReadTimeout:  httpx.DefaultReadTimeout,
+		WriteTimeout: httpx.DefaultWriteTimeout,
+		IdleTimeout:  httpx.DefaultIdleTimeout,
 	}
 	s.httpServer = hbasic.NewHTTPServer(cfg)
 	return nil

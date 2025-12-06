@@ -17,11 +17,11 @@ import (
 
 type fakeEntity struct {
 	ID      int64
-	Version int64
+	Version uint64
 }
 
-func (f *fakeEntity) GetID() int64      { return f.ID }
-func (f *fakeEntity) GetVersion() int64 { return f.Version }
+func (f *fakeEntity) GetID() int64       { return f.ID }
+func (f *fakeEntity) GetVersion() uint64 { return f.Version }
 
 type noopRepository struct{}
 
@@ -95,6 +95,7 @@ func (s *stubAppService) List(context.Context, int, int) ([]*fakeEntity, error) 
 	return []*fakeEntity{}, nil
 }
 func (s *stubAppService) Count(context.Context) (int64, error)             { return 0, nil }
+func (s *stubAppService) Exists(context.Context, int64) (bool, error)     { return true, nil }
 func (s *stubAppService) Repository() crud.IRepository[*fakeEntity, int64] { return nil }
 func (s *stubAppService) ListByQuery(context.Context, *application.QueryParams) ([]*fakeEntity, error) {
 	if s.order != nil {

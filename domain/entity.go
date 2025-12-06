@@ -12,8 +12,9 @@ type IEntity[T comparable] interface {
 	IObject[T]
 
 	// GetVersion 返回实体的乐观锁版本号
-	// 每次修改都应该递增版本号，用于并发冲突检测
-	GetVersion() int64
+	// 每次修改都应该递增版本号，用于并发冲突检测。
+	// 约定：版本号从 0 开始，自增且不为负。
+	GetVersion() uint64
 }
 
 // IValidatable 可验证接口。

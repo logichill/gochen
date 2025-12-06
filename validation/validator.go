@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"gochen/errors"
 )
@@ -33,7 +34,8 @@ func NewValidationError(message string) error {
 
 // ValidateStringLength 验证字符串长度
 func ValidateStringLength(value, fieldName string, min, max int) error {
-	length := len(value)
+	// 按 Unicode 字符数而非字节数计算长度，避免多字节字符（如中文/emoji）导致结果不符合直觉。
+	length := utf8.RuneCountInString(value)
 	if length < min {
 		return errors.NewError(errors.ErrCodeValidation,
 			fmt.Sprintf("%s length must be at least %d characters (current %d)", fieldName, min, length))

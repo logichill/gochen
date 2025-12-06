@@ -98,8 +98,34 @@ func (b *SelectBuilder) OrderBy(col string, desc bool) *SelectBuilder {
 	}
 	return b
 }
-func (b *SelectBuilder) Limit(n int) *SelectBuilder  { b.limit = n; return b }
-func (b *SelectBuilder) Offset(n int) *SelectBuilder { b.offset = n; return b }
+
+// Limit 设置结果集最大行数。
+//
+// 约定：
+//   - n > 0：生成 `LIMIT n` 子句；
+//   - n == 0：不生成 LIMIT 子句（等价于“不限制”）；
+//   - n < 0：视为编程错误，直接 panic 以便尽早暴露问题。
+func (b *SelectBuilder) Limit(n int) *SelectBuilder {
+	if n < 0 {
+		panic("SelectBuilder: limit cannot be negative")
+	}
+	b.limit = n
+	return b
+}
+
+// Offset 设置结果集偏移量。
+//
+// 约定：
+//   - n > 0：生成 `OFFSET n` 子句；
+//   - n == 0：不生成 OFFSET 子句（从第 0 行开始）；
+//   - n < 0：视为编程错误，直接 panic。
+func (b *SelectBuilder) Offset(n int) *SelectBuilder {
+	if n < 0 {
+		panic("SelectBuilder: offset cannot be negative")
+	}
+	b.offset = n
+	return b
+}
 
 func (b *SelectBuilder) Build() (string, []any) {
 	var sb strings.Builder

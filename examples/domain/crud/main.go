@@ -16,14 +16,14 @@ type User struct {
 	ID      int64  `json:"id"`
 	Name    string `json:"name"`
 	Email   string `json:"email"`
-	Version int64  `json:"version"`
+	Version uint64 `json:"version"`
 	Active  bool   `json:"active"`
 	// 扩展示例字段
 	ActivatedAt *time.Time `json:"activated_at,omitempty"`
 }
 
 func (u *User) GetID() int64          { return u.ID }
-func (u *User) GetVersion() int64     { return u.Version }
+func (u *User) GetVersion() uint64    { return u.Version }
 func (u *User) GetCreatedAt() int64   { return 0 }
 func (u *User) GetUpdatedAt() int64   { return 0 }
 func (u *User) SetUpdatedAt(_ int64)  {}

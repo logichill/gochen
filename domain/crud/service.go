@@ -16,6 +16,7 @@ type IService[T domain.IEntity[ID], ID comparable] interface {
 	Get(ctx context.Context, id ID) (T, error)
 	List(ctx context.Context, offset, limit int) ([]T, error)
 	Count(ctx context.Context) (int64, error)
+	Exists(ctx context.Context, id ID) (bool, error)
 
 	Repository() IRepository[T, ID]
 }

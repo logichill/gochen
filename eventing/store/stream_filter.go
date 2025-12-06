@@ -50,6 +50,7 @@ func FilterEventsWithOptions(events []eventing.Event, opts *StreamOptions) *Stre
 		Events: make([]eventing.Event, 0, limit),
 	}
 
+	matched := 0
 	for _, evt := range events {
 		// 时间窗口
 		if !opts.FromTime.IsZero() && evt.GetTimestamp().Before(opts.FromTime) {
@@ -87,12 +88,15 @@ func FilterEventsWithOptions(events []eventing.Event, opts *StreamOptions) *Stre
 				continue
 			}
 		}
-
-		result.Events = append(result.Events, evt)
-		if len(result.Events) == limit {
+		// 通过所有过滤条件后才计入匹配数量
+		if matched < limit {
+			result.Events = append(result.Events, evt)
+		} else {
+			// 已经返回了 limit 条，再发现一条满足条件的事件，则说明还有更多数据
 			result.HasMore = true
 			break
 		}
+		matched++
 	}
 
 	if n := len(result.Events); n > 0 {

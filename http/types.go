@@ -74,3 +74,12 @@ type WebConfig struct {
 	CORSAllowMethods []string `json:"cors_allow_methods" yaml:"cors_allow_methods"`
 	CORSAllowHeaders []string `json:"cors_allow_headers" yaml:"cors_allow_headers"`
 }
+
+// 默认超时配置（适用于未显式配置的开发/简单场景）：
+// - 读/写超时：15 秒
+// - 空闲连接超时：60 秒
+const (
+	DefaultReadTimeout  = 15 * time.Second
+	DefaultWriteTimeout = 15 * time.Second
+	DefaultIdleTimeout  = 60 * time.Second
+)

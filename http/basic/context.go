@@ -3,8 +3,10 @@ package basic
 import (
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"gochen/errors"
 	httpx "gochen/http"
@@ -121,7 +123,33 @@ func (c *HttpContext) AbortWithStatusJSON(code int, jsonObj any) {
 func (c *HttpContext) IsAborted() bool                             { return c.aborted }
 func (c *HttpContext) SaveUploadedFile(file any, dst string) error { return nil }
 func (c *HttpContext) FormFile(name string) (any, error)           { return nil, nil }
-func (c *HttpContext) ClientIP() string                            { return c.request.RemoteAddr }
+func (c *HttpContext) ClientIP() string {
+	// 优先解析代理头，便于在常见反向代理场景下获取真实客户端 IP。
+	// 注意：只有在部署于可信代理之后时，这些头才值得信任。
+	if xff := c.request.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		for _, p := range parts {
+			ip := strings.TrimSpace(p)
+			if ip == "" {
+				continue
+			}
+			if net.ParseIP(ip) != nil {
+				return ip
+			}
+		}
+	}
+	if xrip := strings.TrimSpace(c.request.Header.Get("X-Real-IP")); xrip != "" {
+		if net.ParseIP(xrip) != nil {
+			return xrip
+		}
+	}
+
+	// 回退到 RemoteAddr（host:port）
+	if host, _, err := net.SplitHostPort(c.request.RemoteAddr); err == nil {
+		return host
+	}
+	return c.request.RemoteAddr
+}
 func (c *HttpContext) UserAgent() string                           { return c.request.UserAgent() }
 func (c *HttpContext) GetRequest() *http.Request                   { return c.request }
 func (c *HttpContext) GetRaw() any {

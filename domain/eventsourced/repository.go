@@ -125,7 +125,7 @@ func (r *EventSourcedRepository[T]) Save(ctx context.Context, aggregate T) error
 	}
 
 	// 防御性检查：在计算 expectedVersion 之前验证版本与事件数量的关系。
-	currentVersion := uint64(aggregate.GetVersion())
+	currentVersion := aggregate.GetVersion()
 	eventCount := uint64(len(events))
 
 	// 断言：currentVersion 必须大于等于 eventCount。

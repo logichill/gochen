@@ -58,7 +58,7 @@ func TestEventSourcedRepository_SaveAndLoad(t *testing.T) {
 	loaded, err := repo.GetByID(ctx, 1)
 	require.NoError(t, err)
 	require.Equal(t, 42, loaded.Value)
-	require.Equal(t, int64(1), loaded.GetVersion())
+	require.Equal(t, uint64(1), loaded.GetVersion())
 
 	exists, err := repo.Exists(ctx, 1)
 	require.NoError(t, err)

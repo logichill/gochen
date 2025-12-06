@@ -73,7 +73,7 @@ func main() {
 	fmt.Printf("First load: value=%d version=%d duration=%s (no snapshot)\n", firstLoaded.Value, firstLoaded.GetVersion(), firstDuration)
 
 	// 4) 为当前聚合创建快照（示例中直接调用 Manager）
-	_ = snapMgr.CreateSnapshot(ctx, aggID, "Counter", firstLoaded, uint64(firstLoaded.GetVersion()))
+	_ = snapMgr.CreateSnapshot(ctx, aggID, "Counter", firstLoaded, firstLoaded.GetVersion())
 
 	// 5) 第二次：先从快照恢复，再重放增量事件
 	// 模拟“应用重启”：新仓储实例 + 从快照恢复

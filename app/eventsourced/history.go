@@ -235,11 +235,7 @@ func (a snapshotAggregateAdapter[T]) GetID() int64 {
 }
 
 func (a snapshotAggregateAdapter[T]) GetVersion() uint64 {
-	version := a.aggregate.GetVersion()
-	if version <= 0 {
-		return 0
-	}
-	return uint64(version)
+	return a.aggregate.GetVersion()
 }
 
 func (a snapshotAggregateAdapter[T]) GetAggregateType() string {

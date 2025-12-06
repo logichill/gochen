@@ -50,8 +50,8 @@ func (a *EventSourcedAggregate[T]) GetID() T {
 }
 
 // GetVersion 实现 IEntity 接口。
-func (a *EventSourcedAggregate[T]) GetVersion() int64 {
-	return int64(a.version)
+func (a *EventSourcedAggregate[T]) GetVersion() uint64 {
+	return a.version
 }
 
 // GetAggregateType 返回聚合类型。

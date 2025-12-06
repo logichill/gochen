@@ -43,7 +43,7 @@ type IAuditedEntity[T comparable] interface {
 // Entity 通用审计实体字段（用于嵌入），默认使用 int64 作为主键类型。
 type Entity struct {
 	ID        int64      `json:"id"`
-	Version   int64      `json:"version"`
+	Version   uint64     `json:"version"`
 	CreatedAt time.Time  `json:"created_at"`
 	CreatedBy string     `json:"created_by"`
 	UpdatedAt time.Time  `json:"updated_at"`
@@ -52,8 +52,8 @@ type Entity struct {
 	DeletedBy *string    `json:"deleted_by,omitempty"`
 }
 
-func (e *Entity) GetID() int64      { return e.ID }
-func (e *Entity) GetVersion() int64 { return e.Version }
+func (e *Entity) GetID() int64       { return e.ID }
+func (e *Entity) GetVersion() uint64 { return e.Version }
 
 func (e *Entity) GetCreatedAt() time.Time { return e.CreatedAt }
 func (e *Entity) GetCreatedBy() string    { return e.CreatedBy }

@@ -28,6 +28,11 @@ type IFlowControl interface {
 }
 
 // IFileHandler 文件处理接口 - 只负责文件操作
+//
+// 约定：
+//   - 为保持 http 抽象与具体 Web 框架解耦，这里使用 any 承载文件对象；
+//   - 具体实现（如 http/basic）应在文档中约定实际返回类型，例如 *multipart.FileHeader 或自定义结构体；
+//   - 调用方在使用时应根据实现进行安全的类型断言，而不是假定统一的具体类型。
 type IFileHandler interface {
 	FormFile(name string) (any, error)
 	SaveUploadedFile(file any, dst string) error
