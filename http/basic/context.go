@@ -2,6 +2,7 @@ package basic
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/url"
 
@@ -41,13 +42,20 @@ func (c *HttpContext) GetQuery(key string) string  { return c.request.URL.Query(
 func (c *HttpContext) GetParam(key string) string  { return c.params[key] }
 func (c *HttpContext) GetHeader(key string) string { return c.request.Header.Get(key) }
 func (c *HttpContext) GetBody() ([]byte, error) {
-	defer c.request.Body.Close()
-	buf := make([]byte, c.request.ContentLength)
-	_, err := c.request.Body.Read(buf)
+	// 若已缓存请求体，直接返回缓存内容，避免重复读取和 Body 关闭问题。
+	if v, ok := c.values["request_body_cache"]; ok {
+		if data, ok := v.([]byte); ok {
+			return data, nil
+		}
+	}
+
+	data, err := io.ReadAll(c.request.Body)
 	if err != nil {
 		return nil, errors.WrapError(err, errors.ErrCodeInternal, "failed to read request body")
 	}
-	return buf, nil
+	_ = c.request.Body.Close()
+	c.values["request_body_cache"] = data
+	return data, nil
 }
 func (c *HttpContext) BindJSON(obj any) error {
 	body, err := c.GetBody()

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -373,9 +374,18 @@ func (b *HTTPBridge) Start() error {
 	b.logger.Info(context.Background(), "启动 HTTP Bridge",
 		logging.String("addr", b.config.ListenAddr))
 
+	// 优先通过 net.Listen 提前暴露绑定错误，再在 goroutine 中启动 Serve。
+	ln, err := net.Listen("tcp", b.config.ListenAddr)
+	if err != nil {
+		b.mutex.Lock()
+		b.running = false
+		b.mutex.Unlock()
+		return fmt.Errorf("HTTP Bridge 监听端口失败: %w", err)
+	}
+
 	// 在 goroutine 中启动服务器
 	go func() {
-		if err := b.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := b.server.Serve(ln); err != nil && err != http.ErrServerClosed {
 			b.logger.Error(context.Background(), "HTTP Bridge 启动失败", logging.Error(err))
 		}
 	}()

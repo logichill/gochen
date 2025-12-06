@@ -138,10 +138,11 @@ func (s *HttpServer) registerRoutes() {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for _, r := range s.routes {
-		pattern := s.convertPathPattern(r.pattern)
-		handler := s.createHandler(r)
+		route := r // 捕获当前循环变量副本，避免闭包引用同一变量
+		pattern := s.convertPathPattern(route.pattern)
+		handler := s.createHandler(route)
 		s.mux.HandleFunc(pattern, func(w http.ResponseWriter, req *http.Request) {
-			if req.Method != r.method && r.method != "" { // 简单方法匹配
+			if req.Method != route.method && route.method != "" { // 简单方法匹配
 				if req.Method == http.MethodOptions {
 					w.WriteHeader(http.StatusNoContent)
 					return

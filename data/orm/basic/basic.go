@@ -352,6 +352,10 @@ func (m *model) UpdateValues(ctx context.Context, values map[string]any, opts ..
 // Delete 根据 QueryOptions 删除记录。
 func (m *model) Delete(ctx context.Context, opts ...orm.QueryOption) error {
 	qo := orm.CollectQueryOptions(opts...)
+	if len(qo.Where) == 0 {
+		return fmt.Errorf("basic.Orm: delete without where is not allowed")
+	}
+
 	builder := m.orm.sql.DeleteFrom(m.table)
 	for _, w := range qo.Where {
 		builder = builder.Where(w.Expr, w.Args...)

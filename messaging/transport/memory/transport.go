@@ -89,10 +89,9 @@ func newMemoryTransport(queueSize, workerCount int) *MemoryTransport {
 //   - error: 队列满或传输未启动时返回错误
 func (t *MemoryTransport) Publish(ctx context.Context, message messaging.IMessage) error {
 	t.mutex.RLock()
-	running := t.running
-	t.mutex.RUnlock()
+	defer t.mutex.RUnlock()
 
-	if !running {
+	if !t.running {
 		return fmt.Errorf("memory transport is not running")
 	}
 
@@ -122,10 +121,9 @@ func (t *MemoryTransport) PublishAll(ctx context.Context, messages []messaging.I
 	}
 
 	t.mutex.RLock()
-	running := t.running
-	t.mutex.RUnlock()
+	defer t.mutex.RUnlock()
 
-	if !running {
+	if !t.running {
 		return fmt.Errorf("memory transport is not running")
 	}
 

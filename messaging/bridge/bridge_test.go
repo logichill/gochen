@@ -131,7 +131,8 @@ func (m *mockMessageHandler) Type() string                                      
 // TestHTTPBridge_StartStop 测试启动和停止
 func TestHTTPBridge_StartStop(t *testing.T) {
 	config := &HTTPBridgeConfig{
-		ListenAddr:   ":18080", // 使用不同端口避免冲突
+		// 使用 0 端口让内核自动分配空闲端口，避免本地环境端口占用导致测试失败
+		ListenAddr:   "127.0.0.1:0",
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 5 * time.Second,
 	}
