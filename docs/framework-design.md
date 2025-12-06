@@ -425,13 +425,53 @@ type IMessageHandler interface {
 
 ---
 
-## 8. 监控与日志
+## 8. 错误与日志
 
-### 8.1 日志（`logging`）
+### 8.1 错误设计与错误码
 
-定义统一的 `logging.ILogger` 接口与基础实现，所有核心组件（eventing、messaging、saga 等）通过该接口输出结构化日志，便于统一接入实际日志后台。
+gochen 在错误设计上采用“**错误码 + 结构化错误类型 + 哨兵 + 工厂函数**”的组合模式，核心思路：
 
-### 8.2 监控（`eventing/monitoring`、传输 stats 等）
+- 核心错误包：`gochen/errors`
+  - 定义统一的应用错误接口 `errors.IError` 与错误码枚举 `errors.ErrorCode`；
+  - 使用 `AppError` 承载错误码、消息、堆栈与上下文（Details），通过 `NewError` / `NewErrorWithCause` / `WrapError` 等工厂函数创建实例；
+  - 为常见错误预定义哨兵（`ErrInternal()`、`ErrNotFound()` 等），仅用于 `errors.Is` 比较，不捕获堆栈，业务代码应优先使用 `NewXxxError` 创建带堆栈的实例。
+
+- 领域与基础设施错误：
+  - `domain/errors.go` 定义领域错误码 `domain.ErrorCode` 与 `RepositoryError` 类型，分为：
+    - 仓储操作错误：`ENTITY_NOT_FOUND`、`ENTITY_ALREADY_EXISTS`、`INVALID_ID`、`VERSION_CONFLICT`、`REPOSITORY_FAILED`；
+    - 实体状态错误：`ALREADY_DELETED`、`NOT_DELETED`、`INVALID_VERSION`（例如审计/软删场景）。
+  - `eventing/errors.go` 定义事件存储错误码 `eventing.ErrorCode` 与 `EventStoreError` 类型，如：
+    - `AGGREGATE_NOT_FOUND`、`INVALID_EVENT`、`EVENT_NOT_FOUND`、`STORE_FAILED`、`EVENT_ALREADY_EXISTS` 等。
+  - `patterns/saga/errors.go` 定义 Saga 错误码 `saga.ErrorCode` 与 `SagaError` 类型，用于表达：
+    - `SAGA_NOT_FOUND`、`SAGA_INVALID_STATE`、`SAGA_STEP_FAILED`、`SAGA_COMPENSATION_FAILED`、`SAGA_ALREADY_COMPLETED` 等，并在错误中附带 `SagaID`、`StepName` 与 `Cause`。
+
+- 哨兵与工厂函数（统一模式）：
+  - 每个错误类型（`RepositoryError` / `EventStoreError` / `SagaError` / `AppError`）都提供：
+    - 私有哨兵变量（例如 `errEntityNotFound`），以及导出的访问函数（例如 `domain.ErrEntityNotFound()`）——用于 `errors.Is` 比较；
+    - 若干 `NewXxxError(...)` 工厂函数——用于创建带错误码与上下文的实例，内部调用点会捕获堆栈。
+  - 结构化错误类型都实现了：
+    - `Error() string`：人类可读消息；
+    - `Unwrap() error`：保留底层 `Cause`，便于 `errors.Unwrap` 链式处理；
+    - `Is(target error) bool`：基于错误码匹配，使 `errors.Is` 能按“错误类别”而不是“指针相等”工作（例如 `errors.Is(NewNotFoundError(...), domain.ErrEntityNotFound())`）。
+
+- 使用建议：
+  - 领域层与应用层：
+    - 在仓储/服务边界上使用 `domain.NewNotFoundError`、`domain.NewAlreadyExistsError` 等工厂函数创建错误，并根据需要附加实体 ID、预期/实际版本等上下文；
+    - 在审计/软删实体（`domain/audited.Entity`）中使用 `domain.NewAlreadyDeletedError` / `NewNotDeletedError` 表达实体状态问题，而仓储级错误使用 RepositoryError 的仓储错误码；
+  - 事件层与 Saga：
+    - 事件存储实现使用 `eventing.NewAggregateNotFoundError`、`NewInvalidEventError`、`NewStoreFailedErrorWithEvent` 等构造错误，并尽量提供 EventID / AggregateID / EventType 等信息；
+    - Saga 编排器通过 `NewSagaStepFailedError` / `NewSagaCompensationFailedError` / `NewSagaInvalidStateError` 等，将 SagaID、StepName 与底层错误绑定在一起，便于日志与追踪。
+  - 判断错误类型：
+    - 使用 `errors.Is(err, domain.ErrEntityNotFound())` / `errors.Is(err, eventing.ErrAggregateNotFound())` / `errors.Is(err, saga.ErrSagaStepFailed())` 判断错误类别；
+    - 使用 `errors.As(err, *domain.RepositoryError)` / `errors.As(err, *eventing.EventStoreError)` 拿到具体错误对象，进一步检查错误码、实体 ID 或事件信息。
+
+该错误设计在保证错误码一致性的同时，通过结构化类型与 `errors.Is/As` 的组合提供了良好的可诊断性和可扩展性。
+
+### 8.2 日志（`logging`）
+
+定义统一的 `logging.ILogger` 接口与基础实现，所有核心组件（eventing、messaging、saga、app 等）通过该接口输出结构化日志，便于统一接入实际日志后台。
+
+### 8.3 监控（`eventing/monitoring`、传输 stats 等）
 
 - `eventing/monitoring` 与 `eventing/monitoring.go` 提供事件与投影相关指标的收集辅助；
 - 传输层（如 `messaging/transport/memory`）提供 `Stats` 方法查看队列深度、处理器数量、worker 数等运行状态。
