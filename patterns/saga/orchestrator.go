@@ -103,7 +103,7 @@ func (o *SagaOrchestrator) Execute(ctx context.Context, saga ISaga) error {
 	steps := saga.GetSteps()
 
 	if len(steps) == 0 {
-		return ErrSagaNoSteps
+		return NewSagaNoStepsError(sagaID)
 	}
 
 	o.logger.Info(ctx, "starting saga execution",
@@ -165,7 +165,7 @@ func (o *SagaOrchestrator) Execute(ctx context.Context, saga ISaga) error {
 					"compensation_error": compErr.Error(),
 				})
 
-				return errors.Join(ErrSagaStepFailed, err, compErr)
+				return NewSagaStepFailedError(sagaID, step.Name, errors.Join(err, compErr))
 			}
 
 			// 调用失败回调
@@ -176,7 +176,7 @@ func (o *SagaOrchestrator) Execute(ctx context.Context, saga ISaga) error {
 				"error": err.Error(),
 			})
 
-			return errors.Join(ErrSagaStepFailed, err)
+			return NewSagaStepFailedError(sagaID, step.Name, err)
 		}
 
 		// 标记步骤完成
@@ -288,16 +288,14 @@ func (o *SagaOrchestrator) compensate(ctx context.Context, saga ISaga, state *Sa
 			o.logger.Error(ctx, "failed to generate compensation command", logging.Error(err),
 				logging.String("saga_id", sagaID),
 				logging.String("step", step.Name))
-			return fmt.Errorf("%w: failed to generate compensation command for step %s: %v",
-				ErrSagaCompensationFailed, step.Name, err)
+			return NewSagaCompensationFailedError(sagaID, step.Name, fmt.Errorf("failed to generate compensation command: %w", err))
 		}
 
 		if compCmd == nil {
 			o.logger.Error(ctx, "compensation command is nil",
 				logging.String("saga_id", sagaID),
 				logging.String("step", step.Name))
-			return fmt.Errorf("%w: compensation command is nil for step %s",
-				ErrSagaCompensationFailed, step.Name)
+			return NewSagaCompensationFailedError(sagaID, step.Name, fmt.Errorf("compensation command is nil"))
 		}
 
 		// 执行补偿命令
@@ -312,8 +310,7 @@ func (o *SagaOrchestrator) compensate(ctx context.Context, saga ISaga, state *Sa
 				"error": err.Error(),
 			})
 
-			return fmt.Errorf("%w: failed to execute compensation for step %s: %v",
-				ErrSagaCompensationFailed, step.Name, err)
+			return NewSagaCompensationFailedError(sagaID, step.Name, err)
 		}
 
 		// 发布补偿步骤完成事件
@@ -400,10 +397,10 @@ func (o *SagaOrchestrator) Resume(ctx context.Context, saga ISaga, state *SagaSt
 
 	// 检查状态
 	if state.IsCompleted() {
-		return ErrSagaAlreadyCompleted
+		return NewSagaAlreadyCompletedError(sagaID)
 	}
 	if state.IsFailed() || state.IsCompensated() {
-		return ErrSagaAlreadyFailed
+		return NewSagaAlreadyFailedError(sagaID)
 	}
 
 	o.logger.Info(ctx, "resuming saga execution",
@@ -425,11 +422,11 @@ func (o *SagaOrchestrator) Resume(ctx context.Context, saga ISaga, state *SagaSt
 			// 执行补偿
 			if compErr := o.compensate(ctx, saga, state, i); compErr != nil {
 				saga.OnFailed(ctx, fmt.Errorf("step failed and compensation failed: %w", errors.Join(err, compErr)))
-				return errors.Join(ErrSagaStepFailed, err, compErr)
+				return NewSagaStepFailedError(sagaID, step.Name, errors.Join(err, compErr))
 			}
 
 			saga.OnFailed(ctx, err)
-			return errors.Join(ErrSagaStepFailed, err)
+			return NewSagaStepFailedError(sagaID, step.Name, err)
 		}
 
 		state.MarkStepCompleted(step.Name)

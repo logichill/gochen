@@ -215,7 +215,7 @@ func (bus *CommandBus) RegisterHandlerWithContext(ctx context.Context, commandTy
 //  3. MessageBus 根据消息类型路由到对应的处理器
 func (bus *CommandBus) Dispatch(ctx context.Context, cmd *Command) error {
 	if cmd == nil {
-		return ErrInvalidCommand
+		return ErrInvalidCommand()
 	}
 
 	// 命令分发交由底层消息总线和 Transport 决定同步/异步语义

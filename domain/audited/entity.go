@@ -79,7 +79,7 @@ func (e *Entity) IsDeleted() bool          { return e.DeletedAt != nil }
 
 func (e *Entity) SoftDelete(by string, at time.Time) error {
 	if e.IsDeleted() {
-		return ErrAlreadyDeleted
+		return domain.NewAlreadyDeletedError(e.ID)
 	}
 	e.DeletedAt = &at
 	e.DeletedBy = &by
@@ -89,7 +89,7 @@ func (e *Entity) SoftDelete(by string, at time.Time) error {
 
 func (e *Entity) Restore() error {
 	if !e.IsDeleted() {
-		return ErrNotDeleted
+		return domain.NewNotDeletedError(e.ID)
 	}
 	e.DeletedAt = nil
 	e.DeletedBy = nil
@@ -97,17 +97,13 @@ func (e *Entity) Restore() error {
 	return nil
 }
 
-// 审计/软删相关错误。
+// 审计/软删相关错误哨兵（用于 errors.Is 比较）
+// 已迁移到 domain 包，这里提供别名以保持向后兼容
 var (
-	ErrAlreadyDeleted = &EntityError{Code: "ALREADY_DELETED", Message: "entity is already deleted"}
-	ErrNotDeleted     = &EntityError{Code: "NOT_DELETED", Message: "entity is not deleted"}
-	ErrInvalidVersion = &EntityError{Code: "INVALID_VERSION", Message: "entity version mismatch"}
+	// Deprecated: 使用 domain.ErrAlreadyDeleted() 代替
+	ErrAlreadyDeleted = domain.ErrAlreadyDeleted()
+	// Deprecated: 使用 domain.ErrNotDeleted() 代替
+	ErrNotDeleted = domain.ErrNotDeleted()
+	// Deprecated: 使用 domain.ErrInvalidVersion() 代替
+	ErrInvalidVersion = domain.ErrInvalidVersion()
 )
-
-// EntityError 实体错误。
-type EntityError struct {
-	Code    string
-	Message string
-}
-
-func (e *EntityError) Error() string { return e.Message }

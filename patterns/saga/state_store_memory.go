@@ -28,7 +28,7 @@ func (s *MemorySagaStateStore) Load(ctx context.Context, sagaID string) (*SagaSt
 
 	state, exists := s.states[sagaID]
 	if !exists {
-		return nil, ErrSagaNotFound
+		return nil, NewSagaNotFoundError(sagaID)
 	}
 
 	return state.Clone(), nil
@@ -37,7 +37,7 @@ func (s *MemorySagaStateStore) Load(ctx context.Context, sagaID string) (*SagaSt
 // Save 保存状态
 func (s *MemorySagaStateStore) Save(ctx context.Context, state *SagaState) error {
 	if state == nil || state.SagaID == "" {
-		return ErrSagaInvalidState
+		return NewSagaInvalidStateError("", "nil or empty", "valid state")
 	}
 
 	s.mutex.Lock()

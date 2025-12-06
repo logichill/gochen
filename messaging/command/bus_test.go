@@ -232,7 +232,7 @@ func TestCommandBus_NilCommand(t *testing.T) {
 
 	err := commandBus.Dispatch(context.Background(), nil)
 	assert.Error(t, err)
-	assert.Equal(t, ErrInvalidCommand, err)
+	assert.ErrorIs(t, err, ErrInvalidCommand())
 }
 
 // testMiddleware 测试用中间件

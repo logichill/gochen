@@ -19,14 +19,14 @@ func (s *SQLEventStore) AppendEvents(ctx context.Context, aggregateID int64, eve
 	}
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
-		return &eventing.EventStoreError{Code: eventing.ErrStoreFailed.Code, Message: "begin transaction failed", Cause: err}
+		return eventing.NewStoreFailedError("begin transaction failed", err)
 	}
 	defer tx.Rollback()
 	if err := s.AppendEventsWithDB(ctx, tx, aggregateID, events, expectedVersion); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
-		return &eventing.EventStoreError{Code: eventing.ErrStoreFailed.Code, Message: "commit transaction failed", Cause: err}
+		return eventing.NewStoreFailedError("commit transaction failed", err)
 	}
 	log.GetLogger().Info(ctx, "events appended", log.Int64("aggregate_id", aggregateID), log.Int("event_count", len(events)))
 	return nil
@@ -45,7 +45,7 @@ func (s *SQLEventStore) AppendEventsWithDB(ctx context.Context, db db.IDatabase,
 	}
 	currentVersion, err := s.getCurrentVersion(ctx, db, aggregateID, aggregateType)
 	if err != nil {
-		return &eventing.EventStoreError{Code: eventing.ErrStoreFailed.Code, Message: "query current version failed", Cause: err}
+		return eventing.NewStoreFailedError("query current version failed", err)
 	}
 	if currentVersion != expectedVersion {
 		return eventing.NewConcurrencyError(aggregateID, expectedVersion, currentVersion)
@@ -60,32 +60,22 @@ func (s *SQLEventStore) AppendEventsWithDB(ctx context.Context, db db.IDatabase,
 		} else if aggregateType == "" {
 			aggregateType = evt.GetAggregateType()
 		} else if evt.GetAggregateType() != aggregateType {
-			return &eventing.EventStoreError{
-				Code:      eventing.ErrInvalidEvent.Code,
-				Message:   "mixed aggregate types in append batch",
-				EventID:   evt.GetID(),
-				EventType: evt.GetType(),
-			}
+			return eventing.NewInvalidEventError(evt.GetID(), evt.GetType(), "mixed aggregate types in append batch")
 		}
 		expectedEventVersion := expectedVersion + uint64(idx) + 1
 		if evt.GetVersion() != expectedEventVersion {
-			return &eventing.EventStoreError{
-				Code:      eventing.ErrInvalidEvent.Code,
-				Message:   fmt.Sprintf("event version mismatch: expected %d, got %d", expectedEventVersion, evt.GetVersion()),
-				EventID:   evt.GetID(),
-				EventType: evt.GetType(),
-			}
+			return eventing.NewInvalidEventError(evt.GetID(), evt.GetType(), fmt.Sprintf("event version mismatch: expected %d, got %d", expectedEventVersion, evt.GetVersion()))
 		}
 		if err := evt.Validate(); err != nil {
-			return &eventing.EventStoreError{Code: eventing.ErrInvalidEvent.Code, Message: "event validation failed", Cause: err, EventID: evt.GetID(), EventType: evt.GetType()}
+			return eventing.NewInvalidEventErrorWithCause(evt.GetID(), evt.GetType(), "event validation failed", err)
 		}
 		payloadJSON, err := json.Marshal(evt.GetPayload())
 		if err != nil {
-			return &eventing.EventStoreError{Code: "SERIALIZE_PAYLOAD_FAILED", Message: "serialize payload failed", Cause: err, EventID: evt.GetID(), EventType: evt.GetType()}
+			return &eventing.EventStoreError{Code: eventing.ErrCodeSerializePayload, Message: "serialize payload failed", Cause: err, EventID: evt.GetID(), EventType: evt.GetType()}
 		}
 		metadataJSON, err := json.Marshal(evt.GetMetadata())
 		if err != nil {
-			return &eventing.EventStoreError{Code: "SERIALIZE_METADATA_FAILED", Message: "serialize metadata failed", Cause: err, EventID: evt.GetID(), EventType: evt.GetType()}
+			return &eventing.EventStoreError{Code: eventing.ErrCodeSerializeMetadata, Message: "serialize metadata failed", Cause: err, EventID: evt.GetID(), EventType: evt.GetType()}
 		}
 		_, err = db.Exec(ctx, insertSQL, evt.GetID(), evt.GetType(), aggregateID, evt.GetAggregateType(), evt.GetVersion(), evt.GetSchemaVersion(), evt.GetTimestamp(), string(payloadJSON), string(metadataJSON))
 		if err != nil {
@@ -95,7 +85,7 @@ func (s *SQLEventStore) AppendEventsWithDB(ctx context.Context, db db.IDatabase,
 				}
 				return eventing.NewEventAlreadyExistsError(evt.GetID(), aggregateID, evt.GetVersion())
 			}
-			return &eventing.EventStoreError{Code: eventing.ErrStoreFailed.Code, Message: "insert event failed", Cause: err, EventID: evt.GetID(), EventType: evt.GetType()}
+			return eventing.NewStoreFailedErrorWithEvent("insert event failed", err, evt.GetID(), evt.GetType())
 		}
 	}
 	duration := time.Since(start)

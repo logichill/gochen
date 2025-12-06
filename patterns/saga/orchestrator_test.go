@@ -167,7 +167,7 @@ func TestSagaOrchestrator_StepFailure_WithSuccessfulCompensation(t *testing.T) {
 	orchestrator := NewSagaOrchestrator(cmdBus, mockBus, stateStore)
 	err := orchestrator.Execute(ctx, saga)
 	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrSagaStepFailed)
+	assert.ErrorIs(t, err, ErrSagaStepFailed())
 
 	// 步骤执行与补偿情况
 	assert.Equal(t, 1, step1Executed)
@@ -240,7 +240,7 @@ func TestSagaOrchestrator_CompensationFailure_EmitsSagaFailed(t *testing.T) {
 	orchestrator := NewSagaOrchestrator(cmdBus, mockBus, stateStore)
 	err := orchestrator.Execute(ctx, saga)
 	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrSagaStepFailed)
+	assert.ErrorIs(t, err, ErrSagaStepFailed())
 
 	// 第一步执行一次，补偿尝试一次并失败
 	assert.Equal(t, 1, step1Executed)

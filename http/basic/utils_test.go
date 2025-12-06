@@ -81,7 +81,7 @@ func TestHttpUtils_WriteErrorResponse(t *testing.T) {
 
 	ctx := newTestContext(http.MethodGet, "/")
 	// 使用预定义错误，验证状态码和 payload
-	err := utils.WriteErrorResponse(ctx, errors.ErrNotFound)
+	err := utils.WriteErrorResponse(ctx, errors.ErrNotFound())
 	if err != nil {
 		t.Fatalf("WriteErrorResponse returned error: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestHttpUtils_WriteErrorResponse(t *testing.T) {
 	}
 
 	// 再次写入应被忽略（response_written 标记）
-	if err := utils.WriteErrorResponse(ctx, errors.ErrInternal); err != nil {
+	if err := utils.WriteErrorResponse(ctx, errors.ErrInternal()); err != nil {
 		t.Fatalf("second WriteErrorResponse returned error: %v", err)
 	}
 }

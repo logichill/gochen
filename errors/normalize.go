@@ -29,7 +29,7 @@ func Normalize(err error) error {
 	}
 
 	// 事件存储相关错误
-	if stdErrors.Is(err, eventing.ErrAggregateNotFound) {
+	if stdErrors.Is(err, eventing.ErrAggregateNotFound()) {
 		return WrapError(err, ErrCodeNotFound, "aggregate not found")
 	}
 
@@ -39,22 +39,22 @@ func Normalize(err error) error {
 	}
 
 	// 领域实体/仓储错误
-	if stdErrors.Is(err, eventing.ErrAggregateNotFound) || stdErrors.Is(err, domain.ErrEntityNotFound) {
+	if stdErrors.Is(err, eventing.ErrAggregateNotFound()) || stdErrors.Is(err, domain.ErrEntityNotFound()) {
 		return WrapError(err, ErrCodeNotFound, "entity not found")
 	}
 
-	if stdErrors.Is(err, domain.ErrVersionConflict) {
+	if stdErrors.Is(err, domain.ErrVersionConflict()) {
 		return WrapError(err, ErrCodeConcurrency, "repository version conflict")
 	}
 
 	// 命令总线常见错误
-	if stdErrors.Is(err, command.ErrAggregateNotFound) {
+	if stdErrors.Is(err, command.ErrAggregateNotFound()) {
 		return WrapError(err, ErrCodeNotFound, "command target aggregate not found")
 	}
-	if stdErrors.Is(err, command.ErrConcurrencyConflict) {
+	if stdErrors.Is(err, command.ErrConcurrencyConflict()) {
 		return WrapError(err, ErrCodeConcurrency, "command processing concurrency conflict")
 	}
-	if stdErrors.Is(err, command.ErrInvalidCommand) {
+	if stdErrors.Is(err, command.ErrInvalidCommand()) {
 		return WrapError(err, ErrCodeInvalidInput, "invalid command")
 	}
 

@@ -41,8 +41,3 @@ func New(code ErrorCode, msg string) error {
 	enhancedMsg := fmt.Sprintf("%s (location: %s:%d)", msg, file, line)
 	return NewError(code, enhancedMsg)
 }
-
-// NewValidationError 创建新的验证错误
-func NewValidationError(msg string) error {
-	return New(ErrCodeValidation, msg)
-}

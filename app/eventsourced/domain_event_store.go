@@ -201,7 +201,7 @@ func (a *DomainEventStore[T]) RestoreAggregate(ctx context.Context, aggregate de
 	}
 
 	if err != nil {
-		if errors.Is(err, eventing.ErrAggregateNotFound) {
+		if errors.Is(err, eventing.ErrAggregateNotFound()) {
 			// 不存在聚合时返回空聚合与版本 0。
 			return 0, nil
 		}
@@ -240,7 +240,7 @@ func (a *DomainEventStore[T]) Exists(ctx context.Context, aggregateID int64) (bo
 	}
 	events, err := a.eventStore.LoadEvents(ctx, aggregateID, 0)
 	if err != nil {
-		if errors.Is(err, eventing.ErrAggregateNotFound) {
+		if errors.Is(err, eventing.ErrAggregateNotFound()) {
 			return false, nil
 		}
 		return false, err

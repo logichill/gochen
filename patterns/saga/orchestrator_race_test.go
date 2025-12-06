@@ -32,7 +32,7 @@ func (s *inMemoryStateStore) Load(ctx context.Context, sagaID string) (*SagaStat
 	if st, ok := s.states[sagaID]; ok {
 		return st, nil
 	}
-	return nil, ErrSagaNotFound
+	return nil, NewSagaNotFoundError(sagaID)
 }
 
 func (s *inMemoryStateStore) Save(ctx context.Context, state *SagaState) error {
@@ -55,7 +55,7 @@ func (s *inMemoryStateStore) Get(ctx context.Context, sagaID string) (*SagaState
 	if st, ok := s.states[sagaID]; ok {
 		return st, nil
 	}
-	return nil, ErrSagaNotFound
+	return nil, NewSagaNotFoundError(sagaID)
 }
 
 func (s *inMemoryStateStore) Delete(ctx context.Context, sagaID string) error {

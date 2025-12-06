@@ -237,7 +237,7 @@ func TestMemorySagaStateStore(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = store.Load(ctx, "saga-123")
-	assert.Equal(t, ErrSagaNotFound, err)
+	assert.ErrorIs(t, err, ErrSagaNotFound())
 }
 
 // TestMemorySagaStateStore_List 测试列表查询
