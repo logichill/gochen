@@ -2,6 +2,7 @@ package sql
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -28,7 +29,10 @@ func (s *SQLEventStore) GetEventStreamWithCursor(ctx context.Context, opts *esto
 	if opts.After != "" {
 		row := s.db.QueryRow(ctx, fmt.Sprintf("SELECT timestamp FROM %s WHERE id = ?", s.tableName), opts.After)
 		if err := row.Scan(&cursorTimestamp); err != nil {
-			cursorTimestamp = time.Time{}
+			if err == sql.ErrNoRows {
+				return nil, fmt.Errorf("sqleventstore: cursor %q not found", opts.After)
+			}
+			return nil, err
 		}
 	}
 

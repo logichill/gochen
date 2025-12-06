@@ -543,13 +543,12 @@ func TestSQLEventStore_GetEventStreamWithCursor_InvalidCursor(t *testing.T) {
 	require.NoError(t, err)
 
 	// 使用不存在的游标
-	result, err := store.GetEventStreamWithCursor(ctx, &estore.StreamOptions{
+	_, err = store.GetEventStreamWithCursor(ctx, &estore.StreamOptions{
 		After: "non-existent-cursor-id",
 		Limit: 10,
 	})
-	assert.NoError(t, err)
-	// 无效游标应该返回所有事件
-	assert.GreaterOrEqual(t, len(result.Events), 1)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "cursor")
 }
 
 func TestSQLEventStore_DefaultTableName(t *testing.T) {

@@ -612,10 +612,10 @@ func (pm *ProjectionManager) RebuildProjection(ctx context.Context, name string,
 	pm.mutex.Lock()
 	checkpointStore := pm.checkpointStore
 	projection, exists := pm.projections[name]
-	status := pm.statuses[name]
+	_, statusExists := pm.statuses[name]
 	pm.mutex.Unlock()
 
-	if !exists {
+	if !exists || !statusExists {
 		return fmt.Errorf("projection %s not found", name)
 	}
 
@@ -633,23 +633,29 @@ func (pm *ProjectionManager) RebuildProjection(ctx context.Context, name string,
 	}
 
 	pm.mutex.Lock()
-	status.Status = "rebuilding"
-	status.UpdatedAt = time.Now()
+	if status, ok := pm.statuses[name]; ok {
+		status.Status = "rebuilding"
+		status.UpdatedAt = time.Now()
+	}
 	pm.mutex.Unlock()
 
 	if err := projection.Rebuild(ctx, events); err != nil {
 		pm.mutex.Lock()
-		status.Status = "error"
-		status.LastError = err.Error()
-		status.UpdatedAt = time.Now()
+		if status, ok := pm.statuses[name]; ok {
+			status.Status = "error"
+			status.LastError = err.Error()
+			status.UpdatedAt = time.Now()
+		}
 		pm.mutex.Unlock()
 		return fmt.Errorf("failed to rebuild projection %s: %w", name, err)
 	}
 
 	pm.mutex.Lock()
-	status.Status = "stopped"
-	status.ProcessedEvents = int64(len(events))
-	status.UpdatedAt = time.Now()
+	if status, ok := pm.statuses[name]; ok {
+		status.Status = "stopped"
+		status.ProcessedEvents = int64(len(events))
+		status.UpdatedAt = time.Now()
+	}
 	pm.mutex.Unlock()
 
 	// 保存新的检查点

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -53,6 +54,7 @@ type IServer interface {
 type Engine struct {
 	server  IServer
 	options *Options
+	mu      sync.RWMutex
 	state   State
 }
 
@@ -77,7 +79,15 @@ func NewEngine(server IServer, opts ...Option) *Engine {
 
 // State 获取当前引擎状态
 func (e *Engine) State() State {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
 	return e.state
+}
+
+func (e *Engine) setState(state State) {
+	e.mu.Lock()
+	e.state = state
+	e.mu.Unlock()
 }
 
 func (e *Engine) log(msg string, args ...interface{}) {
@@ -97,7 +107,7 @@ func (e *Engine) Start() error {
 	// ---------------------------------------------------------
 	// Phase 1: Initialization (Config)
 	// ---------------------------------------------------------
-	e.state = StateInitializing
+	e.setState(StateInitializing)
 
 	// Execute Hooks: OnBeforeInit
 	for _, hook := range e.options.OnBeforeInit {
@@ -107,7 +117,7 @@ func (e *Engine) Start() error {
 	}
 
 	if err := e.server.LoadConfig(); err != nil {
-		e.state = StateError
+		e.setState(StateError)
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
@@ -126,11 +136,11 @@ func (e *Engine) Start() error {
 	defer setupCancel()
 
 	if err := e.server.SetupDependencies(setupCtx); err != nil {
-		e.state = StateError
+		e.setState(StateError)
 		return fmt.Errorf("failed to setup dependencies: %w", err)
 	}
 
-	e.state = StatePrepared
+	e.setState(StatePrepared)
 
 	// ---------------------------------------------------------
 	// Phase 3: Execution (Background & Server)
@@ -144,12 +154,12 @@ func (e *Engine) Start() error {
 
 	// 3.1 Start Background Tasks
 	if err := e.server.StartBackgroundTasks(ctx); err != nil {
-		e.state = StateError
+		e.setState(StateError)
 		return fmt.Errorf("failed to start background tasks: %w", err)
 	}
 
 	// 3.2 Run Server (Non-blocking here, orchestrated by signal)
-	e.state = StateRunning
+	e.setState(StateRunning)
 	errChan := make(chan error, 1)
 
 	go func() {
@@ -190,7 +200,7 @@ func (e *Engine) Start() error {
 	// ---------------------------------------------------------
 	// Phase 5: Shutdown
 	// ---------------------------------------------------------
-	e.state = StateStopping
+	e.setState(StateStopping)
 
 	// Execute Hooks: OnBeforeStop
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), e.options.ShutdownTimeout)
@@ -203,7 +213,7 @@ func (e *Engine) Start() error {
 	}
 
 	if err := e.server.Shutdown(shutdownCtx); err != nil {
-		e.state = StateError
+		e.setState(StateError)
 		e.log("Shutdown error: %v", err)
 		return err
 	}
@@ -216,11 +226,11 @@ func (e *Engine) Start() error {
 	}
 
 	if runErr != nil {
-		e.state = StateError
+		e.setState(StateError)
 		return fmt.Errorf("server execution error: %w", runErr)
 	}
 
-	e.state = StateStopped
+	e.setState(StateStopped)
 	e.log("Shutdown complete.")
 	return nil
 }

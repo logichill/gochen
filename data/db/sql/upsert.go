@@ -74,14 +74,6 @@ func (b *upsertBuilder) Exec(ctx context.Context) (sql.Result, error) {
 	}
 
 	insertSQL, insertArgs := ins.Build()
-	res, err := b.db.Exec(ctx, insertSQL, insertArgs...)
-	if err == nil {
-		return res, nil
-	}
-
-	if !b.dialect.IsUniqueViolation(err) {
-		return nil, err
-	}
 
 	whereParts := make([]string, 0, len(b.keyColumns))
 	whereArgs := make([]any, 0, len(b.keyColumns))
@@ -132,5 +124,28 @@ func (b *upsertBuilder) Exec(ctx context.Context) (sql.Result, error) {
 	upd.Where(strings.Join(whereParts, " AND "), whereArgs...)
 
 	updateSQL, updateArgs := upd.Build()
-	return b.db.Exec(ctx, updateSQL, updateArgs...)
+
+	const maxAttempts = 3
+
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		res, err := b.db.Exec(ctx, insertSQL, insertArgs...)
+		if err == nil {
+			return res, nil
+		}
+
+		if !b.dialect.IsUniqueViolation(err) {
+			return nil, err
+		}
+
+		// 发生唯一键冲突时，尝试 UPDATE；若没有任何行被更新，则认为记录在期间被删除，重试 INSERT。
+		res, err = b.db.Exec(ctx, updateSQL, updateArgs...)
+		if err != nil {
+			return nil, err
+		}
+		if rows, err := res.RowsAffected(); err == nil && rows > 0 {
+			return res, nil
+		}
+	}
+
+	return nil, fmt.Errorf("upsert: failed after %d attempts due to concurrent modifications", maxAttempts)
 }

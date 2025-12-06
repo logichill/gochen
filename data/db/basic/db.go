@@ -100,7 +100,11 @@ func (d *DB) Begin(ctx context.Context) (core.ITransaction, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Tx{db: d.db, tx: tx}, nil
+	return &Tx{
+		db:      d.db,
+		tx:      tx,
+		dialect: dialect.New(d.driver),
+	}, nil
 }
 
 func (d *DB) BeginTx(ctx context.Context, opts *sql.TxOptions) (core.ITransaction, error) {
@@ -108,7 +112,11 @@ func (d *DB) BeginTx(ctx context.Context, opts *sql.TxOptions) (core.ITransactio
 	if err != nil {
 		return nil, err
 	}
-	return &Tx{db: d.db, tx: tx}, nil
+	return &Tx{
+		db:      d.db,
+		tx:      tx,
+		dialect: dialect.New(d.driver),
+	}, nil
 }
 
 func (d *DB) Ping(ctx context.Context) error { return d.db.PingContext(ctx) }
