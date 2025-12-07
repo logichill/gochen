@@ -64,13 +64,13 @@ func main() {
 	})
 	must(err)
 
-	repo, err := deventsourced.NewEventSourcedRepository[*Counter]("Counter", NewCounter, storeAdapter)
+	repo, err := deventsourced.NewEventSourcedRepository[*Counter, int64]("Counter", NewCounter, storeAdapter)
 	must(err)
 
 	// 服务与命令处理（领域层定义）
-	service, err := deventsourced.NewEventSourcedService(repo, nil)
+	service, err := deventsourced.NewEventSourcedService[*Counter, int64](repo, nil)
 	must(err)
-	must(service.RegisterCommandHandler(&SetValue{}, func(ctx context.Context, cmd deventsourced.IEventSourcedCommand, agg *Counter) error {
+	must(service.RegisterCommandHandler(&SetValue{}, func(ctx context.Context, cmd deventsourced.IEventSourcedCommand[int64], agg *Counter) error {
 		c := cmd.(*SetValue)
 		return agg.ApplyAndRecord(&ValueSet{V: c.V})
 	}))
@@ -83,7 +83,7 @@ func main() {
 	}))
 
 	// 将服务适配为命令处理器
-	handler := eventsourced.AsCommandMessageHandler[*Counter](service, "SetValue", func(c *cmd.Command) (deventsourced.IEventSourcedCommand, error) {
+	handler := eventsourced.AsCommandMessageHandler[*Counter, int64](service, "SetValue", func(c *cmd.Command) (deventsourced.IEventSourcedCommand[int64], error) {
 		v, _ := c.GetPayload().(int)
 		return &SetValue{ID: c.GetAggregateID(), V: v}, nil
 	})

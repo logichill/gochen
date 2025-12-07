@@ -29,43 +29,50 @@ type IEventSourcedRepository[T IEventSourcedAggregate[ID], ID comparable] interf
 //
 // 注意：该接口以领域事件（IDomainEvent）为中心，不关心具体存储实现与传输信封，
 // 由上层通过适配器对接 eventing/store.IEventStore、Outbox、Snapshot 等基础设施。
-type IEventStore interface {
+//
+// 类型参数：
+//   - ID: 聚合根 ID 类型，必须是可比较类型（如 int64、string、uuid.UUID 等）
+type IEventStore[ID comparable] interface {
 	// AppendEvents 追加领域事件到聚合的事件流中。
-	AppendEvents(ctx context.Context, aggregateID int64, events []domain.IDomainEvent, expectedVersion uint64) error
+	AppendEvents(ctx context.Context, aggregateID ID, events []domain.IDomainEvent, expectedVersion uint64) error
 
 	// RestoreAggregate 根据底层事件流（及可选快照）恢复聚合状态。
 	// 若聚合不存在，应返回 (0, nil) 并保持 aggregate 为初始状态。
 	//
 	// 返回值为当前聚合版本号（即最后一个事件的版本），用于上层判断是否存在或做乐观锁控制。
-	RestoreAggregate(ctx context.Context, aggregate IEventSourcedAggregate[int64]) (uint64, error)
+	RestoreAggregate(ctx context.Context, aggregate IEventSourcedAggregate[ID]) (uint64, error)
 
 	// Exists 检查聚合是否存在。
-	Exists(ctx context.Context, aggregateID int64) (bool, error)
+	Exists(ctx context.Context, aggregateID ID) (bool, error)
 
 	// GetAggregateVersion 获取聚合当前版本。
 	// 若聚合不存在，应返回 (0, nil)。
-	GetAggregateVersion(ctx context.Context, aggregateID int64) (uint64, error)
+	GetAggregateVersion(ctx context.Context, aggregateID ID) (uint64, error)
 }
 
 // EventSourcedRepository 领域层默认事件溯源仓储实现。
 //
 // 该实现仅依赖领域抽象：
-//   - IEventSourcedAggregate[int64]：聚合根；
-//   - IEventStore：领域事件存储接口。
+//   - IEventSourcedAggregate[ID]：聚合根；
+//   - IEventStore[ID]：领域事件存储接口。
 //
 // 具体的事件存储/快照/Outbox/EventBus 等能力由上层通过 IEventStore 适配器提供。
-type EventSourcedRepository[T IEventSourcedAggregate[int64]] struct {
+//
+// 类型参数：
+//   - T: 聚合根类型
+//   - ID: 聚合根 ID 类型，必须是可比较类型
+type EventSourcedRepository[T IEventSourcedAggregate[ID], ID comparable] struct {
 	aggregateType string
-	factory       func(id int64) T
-	store         IEventStore
+	factory       func(id ID) T
+	store         IEventStore[ID]
 }
 
 // NewEventSourcedRepository 创建领域层默认事件溯源仓储。
-func NewEventSourcedRepository[T IEventSourcedAggregate[int64]](
+func NewEventSourcedRepository[T IEventSourcedAggregate[ID], ID comparable](
 	aggregateType string,
-	factory func(id int64) T,
-	store IEventStore,
-) (*EventSourcedRepository[T], error) {
+	factory func(id ID) T,
+	store IEventStore[ID],
+) (*EventSourcedRepository[T, ID], error) {
 	if aggregateType == "" {
 		return nil, fmt.Errorf("aggregate type cannot be empty")
 	}
@@ -75,7 +82,7 @@ func NewEventSourcedRepository[T IEventSourcedAggregate[int64]](
 	if store == nil {
 		return nil, fmt.Errorf("event store cannot be nil")
 	}
-	return &EventSourcedRepository[T]{
+	return &EventSourcedRepository[T, ID]{
 		aggregateType: aggregateType,
 		factory:       factory,
 		store:         store,
@@ -118,7 +125,7 @@ func NewEventSourcedRepository[T IEventSourcedAggregate[int64]](
 //   - 将版本号递增逻辑统一实现到聚合基类中，具体聚合只负责状态变更；
 //   - 在接口与文档中显式强调上述约定；
 //   - 为聚合编写单元测试，验证 ApplyEvent 后版本号是否按预期递增。
-func (r *EventSourcedRepository[T]) Save(ctx context.Context, aggregate T) error {
+func (r *EventSourcedRepository[T, ID]) Save(ctx context.Context, aggregate T) error {
 	events := aggregate.GetUncommittedEvents()
 	if len(events) == 0 {
 		return nil
@@ -148,7 +155,7 @@ func (r *EventSourcedRepository[T]) Save(ctx context.Context, aggregate T) error
 }
 
 // GetByID 根据 ID 加载聚合（通过 RestoreAggregate 恢复）。
-func (r *EventSourcedRepository[T]) GetByID(ctx context.Context, id int64) (T, error) {
+func (r *EventSourcedRepository[T, ID]) GetByID(ctx context.Context, id ID) (T, error) {
 	aggregate := r.factory(id)
 	if _, err := r.store.RestoreAggregate(ctx, aggregate); err != nil {
 		return aggregate, err
@@ -157,12 +164,12 @@ func (r *EventSourcedRepository[T]) GetByID(ctx context.Context, id int64) (T, e
 }
 
 // Exists 检查聚合是否存在。
-func (r *EventSourcedRepository[T]) Exists(ctx context.Context, id int64) (bool, error) {
+func (r *EventSourcedRepository[T, ID]) Exists(ctx context.Context, id ID) (bool, error) {
 	return r.store.Exists(ctx, id)
 }
 
 // GetAggregateVersion 获取聚合当前版本。
-func (r *EventSourcedRepository[T]) GetAggregateVersion(ctx context.Context, id int64) (uint64, error) {
+func (r *EventSourcedRepository[T, ID]) GetAggregateVersion(ctx context.Context, id ID) (uint64, error) {
 	version, err := r.store.GetAggregateVersion(ctx, id)
 	if err != nil {
 		return 0, err
@@ -172,4 +179,4 @@ func (r *EventSourcedRepository[T]) GetAggregateVersion(ctx context.Context, id 
 }
 
 // Ensure interface compliance.
-var _ IEventSourcedRepository[IEventSourcedAggregate[int64], int64] = (*EventSourcedRepository[IEventSourcedAggregate[int64]])(nil)
+var _ IEventSourcedRepository[IEventSourcedAggregate[int64], int64] = (*EventSourcedRepository[IEventSourcedAggregate[int64], int64])(nil)

@@ -67,21 +67,21 @@ func main() {
 	})
 	must(err)
 
-	repo, err := deventsourced.NewEventSourcedRepository[*Counter]("Counter", NewCounter, storeAdapter)
+	repo, err := deventsourced.NewEventSourcedRepository[*Counter, int64]("Counter", NewCounter, storeAdapter)
 	must(err)
 
 	// 事件溯源服务（领域层定义）
-	service, err := deventsourced.NewEventSourcedService(repo, nil)
+	service, err := deventsourced.NewEventSourcedService[*Counter, int64](repo, nil)
 	must(err)
 
 	// 注册命令处理：SetValue -> 产生 ValueSet 事件
-	must(service.RegisterCommandHandler(&SetValue{}, func(ctx context.Context, cmd deventsourced.IEventSourcedCommand, agg *Counter) error {
+	must(service.RegisterCommandHandler(&SetValue{}, func(ctx context.Context, cmd deventsourced.IEventSourcedCommand[int64], agg *Counter) error {
 		c := cmd.(*SetValue)
 		return agg.ApplyAndRecord(&ValueSet{V: c.V})
 	}))
 
 	// 适配为命令消息处理器，并订阅到 MessageBus（按 command_type 匹配）
-	handler := eventsourced.AsCommandMessageHandler[*Counter](service, "SetValue", func(c *cmd.Command) (deventsourced.IEventSourcedCommand, error) {
+	handler := eventsourced.AsCommandMessageHandler[*Counter, int64](service, "SetValue", func(c *cmd.Command) (deventsourced.IEventSourcedCommand[int64], error) {
 		v, _ := c.GetPayload().(int)
 		return &SetValue{ID: c.GetAggregateID(), V: v}, nil
 	})

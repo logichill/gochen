@@ -17,25 +17,29 @@ import (
 //   - 保存聚合（由 IEventSourcedRepository 实现具体持久化策略）。
 //
 // 注意：该实现仅依赖领域抽象与日志接口，不直接依赖 EventStore、EventBus 等基础设施。
-type EventSourcedService[T IEventSourcedAggregate[int64]] struct {
-	repository IEventSourcedRepository[T, int64]
-	handlers   map[reflect.Type]EventSourcedCommandHandler[T]
+//
+// 类型参数：
+//   - T: 聚合根类型
+//   - ID: 聚合根 ID 类型，必须是可比较类型
+type EventSourcedService[T IEventSourcedAggregate[ID], ID comparable] struct {
+	repository IEventSourcedRepository[T, ID]
+	handlers   map[reflect.Type]EventSourcedCommandHandler[T, ID]
 	logger     logging.ILogger
-	hooks      []EventSourcedCommandHook[T]
+	hooks      []EventSourcedCommandHook[T, ID]
 	tracer     ICommandTracer
 }
 
 // NewEventSourcedService 创建事件溯源服务模板。
-func NewEventSourcedService[T IEventSourcedAggregate[int64]](
-	repository IEventSourcedRepository[T, int64],
-	opts *EventSourcedServiceOptions[T],
-) (*EventSourcedService[T], error) {
+func NewEventSourcedService[T IEventSourcedAggregate[ID], ID comparable](
+	repository IEventSourcedRepository[T, ID],
+	opts *EventSourcedServiceOptions[T, ID],
+) (*EventSourcedService[T, ID], error) {
 	if repository == nil {
 		return nil, fmt.Errorf("repository cannot be nil")
 	}
-	service := &EventSourcedService[T]{
+	service := &EventSourcedService[T, ID]{
 		repository: repository,
-		handlers:   make(map[reflect.Type]EventSourcedCommandHandler[T]),
+		handlers:   make(map[reflect.Type]EventSourcedCommandHandler[T, ID]),
 	}
 	if opts != nil {
 		service.hooks = opts.CommandHooks
@@ -49,12 +53,9 @@ func NewEventSourcedService[T IEventSourcedAggregate[int64]](
 }
 
 // RegisterCommandHandler 注册命令处理器。
-func (s *EventSourcedService[T]) RegisterCommandHandler(prototype IEventSourcedCommand, handler EventSourcedCommandHandler[T]) error {
+func (s *EventSourcedService[T, ID]) RegisterCommandHandler(prototype IEventSourcedCommand[ID], handler EventSourcedCommandHandler[T, ID]) error {
 	if prototype == nil {
 		return fmt.Errorf("command prototype cannot be nil")
-	}
-	if handler == nil {
-		return fmt.Errorf("command handler cannot be nil")
 	}
 	cmdType := reflect.TypeOf(prototype)
 	if cmdType.Kind() != reflect.Ptr {
@@ -65,7 +66,7 @@ func (s *EventSourcedService[T]) RegisterCommandHandler(prototype IEventSourcedC
 }
 
 // ExecuteCommand 执行命令。
-func (s *EventSourcedService[T]) ExecuteCommand(ctx context.Context, cmd IEventSourcedCommand) error {
+func (s *EventSourcedService[T, ID]) ExecuteCommand(ctx context.Context, cmd IEventSourcedCommand[ID]) error {
 	if cmd == nil {
 		return fmt.Errorf("command cannot be nil")
 	}
@@ -76,9 +77,6 @@ func (s *EventSourcedService[T]) ExecuteCommand(ctx context.Context, cmd IEventS
 	}
 
 	aggregateID := cmd.AggregateID()
-	if aggregateID <= 0 {
-		return fmt.Errorf("invalid aggregate id %d", aggregateID)
-	}
 
 	aggregate, err := s.repository.GetByID(ctx, aggregateID)
 	if err != nil {
@@ -97,11 +95,11 @@ func (s *EventSourcedService[T]) ExecuteCommand(ctx context.Context, cmd IEventS
 
 	for _, hook := range s.hooks {
 		if hookErr := hook.AfterExecute(ctx, cmd, aggregate, execErr); hookErr != nil {
-            if s.logger != nil {
-			    s.logger.Warn(ctx, "after execute hook failed",
-				    logging.Error(hookErr),
-				    logging.String("command", cmdType.String()))
-            }
+			if s.logger != nil {
+				s.logger.Warn(ctx, "after execute hook failed",
+					logging.Error(hookErr),
+					logging.String("command", cmdType.String()))
+			}
 		}
 	}
 
@@ -119,7 +117,7 @@ func (s *EventSourcedService[T]) ExecuteCommand(ctx context.Context, cmd IEventS
 	return nil
 }
 
-func (s *EventSourcedService[T]) trace(ctx context.Context, commandName string, elapsed time.Duration, execErr error) {
+func (s *EventSourcedService[T, ID]) trace(ctx context.Context, commandName string, elapsed time.Duration, execErr error) {
 	if s.tracer != nil {
 		s.tracer.Trace(ctx, commandName, elapsed, execErr)
 	}

@@ -18,6 +18,9 @@ import (
 
 // DomainEventStoreOptions 配置领域层 IEventStore 的基础设施适配。
 // 用于构造基于 eventing/store + Outbox + EventBus 的事件存储实现。
+//
+// 注意：当前实现固定使用 int64 作为聚合 ID 类型，因为底层 eventing 基础设施使用 int64。
+// 如需支持其他 ID 类型（如 string/UUID），请自行实现 deventsourced.IEventStore[ID] 接口。
 type DomainEventStoreOptions[T deventsourced.IEventSourcedAggregate[int64]] struct {
 	AggregateType   string
 	Factory         func(id int64) T
@@ -33,7 +36,9 @@ type DomainEventStoreOptions[T deventsourced.IEventSourcedAggregate[int64]] stru
 type EventStoreAdapterOptions[T deventsourced.IEventSourcedAggregate[int64]] = DomainEventStoreOptions[T]
 
 // DomainEventStore 将 eventing/store.IEventStore + Snapshot/Outbox/EventBus
-// 适配为领域层的 deventsourced.IEventStore。
+// 适配为领域层的 deventsourced.IEventStore[int64]。
+//
+// 注意：当前实现固定使用 int64 作为聚合 ID 类型，因为底层 eventing 基础设施使用 int64。
 type DomainEventStore[T deventsourced.IEventSourcedAggregate[int64]] struct {
 	aggregateType   string
 	factory         func(id int64) T
@@ -45,10 +50,10 @@ type DomainEventStore[T deventsourced.IEventSourcedAggregate[int64]] struct {
 	logger          logging.ILogger
 }
 
-// NewDomainEventStore 创建领域层 IEventStore 的基础设施实现。
+// NewDomainEventStore 创建领域层 IEventStore[int64] 的基础设施实现。
 func NewDomainEventStore[T deventsourced.IEventSourcedAggregate[int64]](
 	opts DomainEventStoreOptions[T],
-) (deventsourced.IEventStore, error) {
+) (deventsourced.IEventStore[int64], error) {
 	if opts.AggregateType == "" {
 		return nil, fmt.Errorf("aggregate type cannot be empty")
 	}
@@ -90,7 +95,7 @@ func NewDomainEventStore[T deventsourced.IEventSourcedAggregate[int64]](
 // Deprecated: 请使用 NewDomainEventStore。
 func NewEventStoreAdapter[T deventsourced.IEventSourcedAggregate[int64]](
 	opts DomainEventStoreOptions[T],
-) (deventsourced.IEventStore, error) {
+) (deventsourced.IEventStore[int64], error) {
 	return NewDomainEventStore(opts)
 }
 

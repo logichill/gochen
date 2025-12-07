@@ -56,13 +56,13 @@ func TestEventSourcedService_ExecuteCommand_Success(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	repo, err := deventsourced.NewEventSourcedRepository[*serviceAggregate]("ServiceAggregate", newServiceAggregate, adapter)
+	repo, err := deventsourced.NewEventSourcedRepository[*serviceAggregate, int64]("ServiceAggregate", newServiceAggregate, adapter)
 	require.NoError(t, err)
 
-	service, err := deventsourced.NewEventSourcedService[*serviceAggregate](repo, nil)
+	service, err := deventsourced.NewEventSourcedService[*serviceAggregate, int64](repo, nil)
 	require.NoError(t, err)
 
-	require.NoError(t, service.RegisterCommandHandler(&setCommand{}, func(ctx context.Context, cmd deventsourced.IEventSourcedCommand, agg *serviceAggregate) error {
+	require.NoError(t, service.RegisterCommandHandler(&setCommand{}, func(ctx context.Context, cmd deventsourced.IEventSourcedCommand[int64], agg *serviceAggregate) error {
 		c := cmd.(*setCommand)
 		return agg.ApplyAndRecord(&setEvent{V: c.V})
 	}))
@@ -86,13 +86,13 @@ func TestEventSourcedService_AsCommandMessageHandler(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	repo, err := deventsourced.NewEventSourcedRepository[*serviceAggregate]("ServiceAggregate", newServiceAggregate, adapter)
+	repo, err := deventsourced.NewEventSourcedRepository[*serviceAggregate, int64]("ServiceAggregate", newServiceAggregate, adapter)
 	require.NoError(t, err)
 
-	service, err := deventsourced.NewEventSourcedService[*serviceAggregate](repo, nil)
+	service, err := deventsourced.NewEventSourcedService[*serviceAggregate, int64](repo, nil)
 	require.NoError(t, err)
 
-	require.NoError(t, service.RegisterCommandHandler(&setCommand{}, func(ctx context.Context, cmd deventsourced.IEventSourcedCommand, agg *serviceAggregate) error {
+	require.NoError(t, service.RegisterCommandHandler(&setCommand{}, func(ctx context.Context, cmd deventsourced.IEventSourcedCommand[int64], agg *serviceAggregate) error {
 		c := cmd.(*setCommand)
 		return agg.ApplyAndRecord(&setEvent{V: c.V})
 	}))
@@ -100,7 +100,7 @@ func TestEventSourcedService_AsCommandMessageHandler(t *testing.T) {
 	transport := mtransport.NewMemoryTransport(100, 1)
 	require.NoError(t, transport.Start(ctx))
 	bus := messaging.NewMessageBus(transport)
-	handler := AsCommandMessageHandler[*serviceAggregate](service, "Set", func(c *cmd.Command) (deventsourced.IEventSourcedCommand, error) {
+	handler := AsCommandMessageHandler[*serviceAggregate, int64](service, "Set", func(c *cmd.Command) (deventsourced.IEventSourcedCommand[int64], error) {
 		v, _ := c.GetPayload().(int)
 		return &setCommand{ID: c.GetAggregateID(), V: v}, nil
 	})

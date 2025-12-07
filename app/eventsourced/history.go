@@ -226,6 +226,8 @@ func GetEventHistoryPage(
 }
 
 // snapshotAggregateAdapter 将领域聚合适配为快照管理器所需的接口。
+//
+// 注意：当前实现固定使用 int64 作为聚合 ID 类型，因为底层 eventing 基础设施使用 int64。
 type snapshotAggregateAdapter[T deventsourced.IEventSourcedAggregate[int64]] struct {
 	aggregate T
 }

@@ -8,7 +8,7 @@ import (
 	"gochen/domain"
 )
 
-// Mock 事件存储
+// Mock 事件存储（实现 IEventStore[int64]）
 type mockEventStore struct {
 	appendCalled          bool
 	restoreCalled         bool
@@ -58,6 +58,9 @@ func (m *mockEventStore) GetAggregateVersion(ctx context.Context, aggregateID in
 	m.getVersionCalled = true
 	return m.version, m.versionError
 }
+
+// 确保 mockEventStore 实现 IEventStore[int64] 接口
+var _ IEventStore[int64] = (*mockEventStore)(nil)
 
 // TestNewEventSourcedRepository 测试仓储创建
 func TestNewEventSourcedRepository(t *testing.T) {
