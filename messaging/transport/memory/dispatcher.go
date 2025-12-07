@@ -4,6 +4,7 @@ package memory
 import (
 	"context"
 
+	"gochen/logging"
 	"gochen/messaging"
 )
 
@@ -19,9 +20,9 @@ import (
 //   - ctx: 上下文
 //   - message: 待分发的消息
 func (t *MemoryTransport) dispatch(ctx context.Context, message messaging.IMessage) {
-	t.mutex.RLock()
 	messageType := message.GetType()
 
+	t.mutex.RLock()
 	// 收集精确匹配和通配符("*")的处理器
 	exact := t.handlers[messageType]
 	wildcard := t.handlers["*"]
@@ -42,8 +43,15 @@ func (t *MemoryTransport) dispatch(ctx context.Context, message messaging.IMessa
 	}
 
 	// 调用所有注册的处理器
+	// 注意：MemoryTransport 是异步分发，handler 错误不会传播给发布者。
+	// 如需错误处理，请在 handler 内部实现重试/DLQ 等机制。
 	for _, handler := range handlers {
-		// 忽略错误，继续处理其他处理器
-		_ = handler.Handle(ctx, message)
+		if err := handler.Handle(ctx, message); err != nil {
+			// 记录错误但继续处理其他处理器
+			t.logger.Warn(ctx, "message handler failed",
+				logging.String("message_type", messageType),
+				logging.String("message_id", message.GetID()),
+				logging.Error(err))
+		}
 	}
 }

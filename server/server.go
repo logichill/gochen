@@ -156,9 +156,19 @@ type Server struct {
 	httpServer httpx.IHttpServer
 	eventBus   bus.IEventBus
 
-	transport         messaging.ITransport
+	transport messaging.ITransport
+	// projectionManager 投影管理器（预留字段）
+	//
+	// 通过模块的 RegisterProjections 方法收集，但当前轻量方案不主动启动投影。
+	// 如需启动投影，可在 StartBackgroundTasks 中添加：
+	//   if s.projectionManager != nil {
+	//       s.projectionManager.StartAll(ctx)
+	//   }
 	projectionManager *projection.ProjectionManager
-	projectionNames   []string
+	// projectionNames 收集的投影名称列表（预留字段）
+	//
+	// 可用于监控、健康检查或按需启动特定投影。
+	projectionNames []string
 }
 
 // NewServer 创建模块级 Server。

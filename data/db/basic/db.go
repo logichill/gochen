@@ -128,11 +128,22 @@ func (d *DB) GetDialectName() string {
 	return d.driver
 }
 
-// MustExecDDL 辅助：执行 DDL（用于测试环境）
-func (d *DB) MustExecDDL(sqlStmt string) error {
+// ExecDDL 执行 DDL 语句（用于测试环境）
+//
+// 注意：DDL 语句不经过 Rebind 处理，直接执行。
+func (d *DB) ExecDDL(sqlStmt string) error {
 	if d.db == nil {
 		return fmt.Errorf("db is nil")
 	}
 	_, err := d.db.Exec(sqlStmt)
 	return err
+}
+
+// MustExecDDL 执行 DDL 语句，失败时 panic（用于测试环境）
+//
+// Deprecated: 建议使用 ExecDDL 并显式处理错误。
+func (d *DB) MustExecDDL(sqlStmt string) {
+	if err := d.ExecDDL(sqlStmt); err != nil {
+		panic(fmt.Sprintf("MustExecDDL failed: %v", err))
+	}
 }

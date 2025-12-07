@@ -3,6 +3,7 @@ package snapshot
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -77,20 +78,30 @@ func (s *MemoryStore) DeleteSnapshot(ctx context.Context, aggregateType string, 
 }
 
 // GetSnapshots 获取快照列表
+//
+// 返回结果按 Timestamp 降序排列（最新的在前），确保结果顺序一致。
 func (s *MemoryStore) GetSnapshots(ctx context.Context, aggregateType string, limit int) ([]Snapshot, error) {
 	s.mutex.RLock()
 	defer s.mutex.RUnlock()
+
+	// 先收集所有匹配的快照
 	var result []Snapshot
-	count := 0
 	for _, ss := range s.snapshots {
 		if aggregateType == "" || ss.AggregateType == aggregateType {
 			result = append(result, ss)
-			count++
-			if limit > 0 && count >= limit {
-				break
-			}
 		}
 	}
+
+	// 按时间戳降序排序，确保结果顺序一致
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Timestamp.After(result[j].Timestamp)
+	})
+
+	// 应用 limit
+	if limit > 0 && len(result) > limit {
+		result = result[:limit]
+	}
+
 	return result, nil
 }
 

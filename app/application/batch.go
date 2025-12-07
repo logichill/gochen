@@ -6,6 +6,7 @@ import (
 
 	"gochen/domain/crud"
 	"gochen/errors"
+	"gochen/logging"
 )
 
 // BatchOperationResult 批量操作结果
@@ -64,7 +65,13 @@ func (s *Application[T]) CreateBatch(ctx context.Context, entities []T) (*BatchO
 		for _, entity := range pending {
 			result.Success++
 			result.SuccessIDs = append(result.SuccessIDs, entity.GetID())
-			_ = s.AfterCreate(ctx, entity) // 忽略后置钩子错误
+			if err := s.AfterCreate(ctx, entity); err != nil {
+				// 后置钩子失败不影响主流程，但需要记录日志以便追踪问题
+				logging.ComponentLogger("app.application.batch").
+					Warn(ctx, "AfterCreate hook failed",
+						logging.Int64("entity_id", entity.GetID()),
+						logging.Error(err))
+			}
 		}
 
 		return result, nil
@@ -130,7 +137,13 @@ func (s *Application[T]) UpdateBatch(ctx context.Context, entities []T) (*BatchO
 		for _, entity := range pending {
 			result.Success++
 			result.SuccessIDs = append(result.SuccessIDs, entity.GetID())
-			_ = s.AfterUpdate(ctx, entity) // 忽略后置钩子错误
+			if err := s.AfterUpdate(ctx, entity); err != nil {
+				// 后置钩子失败不影响主流程，但需要记录日志以便追踪问题
+				logging.ComponentLogger("app.application.batch").
+					Warn(ctx, "AfterUpdate hook failed",
+						logging.Int64("entity_id", entity.GetID()),
+						logging.Error(err))
+			}
 		}
 
 		return result, nil
@@ -206,7 +219,13 @@ func (s *Application[T]) DeleteBatch(ctx context.Context, ids []int64) (*BatchOp
 		for _, id := range pending {
 			result.Success++
 			result.SuccessIDs = append(result.SuccessIDs, id)
-			_ = s.AfterDelete(ctx, id) // 忽略后置钩子错误
+			if err := s.AfterDelete(ctx, id); err != nil {
+				// 后置钩子失败不影响主流程，但需要记录日志以便追踪问题
+				logging.ComponentLogger("app.application.batch").
+					Warn(ctx, "AfterDelete hook failed",
+						logging.Int64("entity_id", id),
+						logging.Error(err))
+			}
 		}
 
 		return result, nil

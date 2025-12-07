@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sync"
 
+	"gochen/logging"
 	"gochen/messaging"
 )
 
@@ -33,6 +34,7 @@ type MemoryTransport struct {
 	running     bool
 	mutex       sync.RWMutex
 	wg          sync.WaitGroup
+	logger      logging.ILogger
 }
 
 // NewMemoryTransport 创建内存传输实例
@@ -74,6 +76,7 @@ func newMemoryTransport(queueSize, workerCount int) *MemoryTransport {
 		queueSize:   queueSize,
 		workerCount: workerCount,
 		workers:     make([]chan struct{}, workerCount),
+		logger:      logging.ComponentLogger("messaging.transport.memory"),
 	}
 }
 

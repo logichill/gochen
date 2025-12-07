@@ -64,10 +64,14 @@ func (m *MemoryEventStore) AppendEvents(ctx context.Context, aggregateID int64, 
 func (m *MemoryEventStore) LoadEvents(ctx context.Context, aggregateID int64, afterVersion uint64) ([]eventing.Event, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	// 使用精确的后缀匹配：":aggregateID"
+	// 确保不会误匹配，例如 ":123" 不会匹配 ":1234"
 	suffix := fmt.Sprintf(":%d", aggregateID)
 	var aggregateEvents []eventing.Event
 	for key, evts := range m.events {
-		if strings.HasSuffix(key, suffix) {
+		// 检查 key 是否以 suffix 结尾，且 suffix 前面是 aggregateType（不含冒号）
+		// key 格式为 "aggregateType:aggregateID"
+		if strings.HasSuffix(key, suffix) && (len(key) == len(suffix) || key[len(key)-len(suffix)-1] != ':') {
 			aggregateEvents = append(aggregateEvents, evts...)
 		}
 	}

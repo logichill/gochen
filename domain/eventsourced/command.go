@@ -8,7 +8,15 @@ import (
 )
 
 // IEventSourcedCommand 事件溯源命令接口。
+//
 // 命令需要提供聚合 ID，用于定位目标聚合根。
+//
+// 设计说明：
+// - AggregateID() 返回 int64 类型，与项目中聚合根的 ID 类型保持一致
+// - int64 能够兼容 Snowflake ID、数据库自增 ID 等常见场景
+// - 如果业务需要使用其他 ID 类型（如 UUID），建议：
+//   1. 在命令中同时保存原始 ID 和转换后的 int64 ID
+//   2. 或在应用层实现 ID 映射逻辑
 type IEventSourcedCommand interface {
 	AggregateID() int64
 }

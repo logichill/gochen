@@ -54,8 +54,16 @@ type Hook func(ctx context.Context) error
 
 // Options 服务器启动配置选项
 type Options struct {
-	Name            string
-	Version         string
+	Name    string
+	Version string
+	// ID 服务实例唯一标识符（预留字段）
+	//
+	// 当前未使用，预留用于以下场景：
+	// - 服务注册与发现：在注册中心标识服务实例
+	// - 分布式追踪：关联日志和追踪信息
+	// - 集群管理：区分同一服务的不同实例
+	//
+	// 如果未设置，可由服务器启动时自动生成（如使用 UUID 或 Snowflake ID）。
 	ID              string
 	Metadata        map[string]string
 	StartupTimeout  time.Duration

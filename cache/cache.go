@@ -308,14 +308,26 @@ func (c *Cache[K, V]) removeEntryUnsafe(entry *cacheEntry[K, V]) {
 
 // String 返回缓存信息的字符串表示
 func (c *Cache[K, V]) String() string {
-	stats := c.Stats()
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	// 在单一锁内计算所有统计信息，避免多次加锁
+	stats := c.stats
+	stats.Size = len(c.items)
+
+	total := stats.Hits + stats.Misses
+	hitRate := 0.0
+	if total > 0 {
+		hitRate = float64(stats.Hits) / float64(total)
+	}
+
 	return fmt.Sprintf("Cache[%s]: size=%d/%d, hits=%d, misses=%d, hit_rate=%.2f%%, evictions=%d, expires=%d",
 		c.name,
 		stats.Size,
 		c.config.MaxSize,
 		stats.Hits,
 		stats.Misses,
-		c.HitRate()*100,
+		hitRate*100,
 		stats.Evictions,
 		stats.Expires,
 	)

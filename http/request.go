@@ -35,15 +35,16 @@ type IRequestBinder interface {
 }
 
 // 预定义上下文键（供实现与调用方共享）
+// 使用自定义类型 contextKey（定义在 tracing.go）避免与其他包的字符串 key 冲突
 const (
-	TraceIDKey       string = "trace_id"
-	UserIDKey        string = "user_id"
-	RequestIDKey     string = "request_id"
-	TenantIDKey      string = "tenant_id"
-	SessionIDKey     string = "session_id"
-	IPAddressKey     string = "ip_address"
-	UserAgentKey     string = "user_agent"
-	CorrelationIDKey string = "correlation_id"
+	TraceIDKey       contextKey = "trace_id"
+	UserIDKey        contextKey = "user_id"
+	RequestIDKey     contextKey = "request_id"
+	TenantIDKey      contextKey = "tenant_id"
+	SessionIDKey     contextKey = "session_id"
+	IPAddressKey     contextKey = "ip_address"
+	UserAgentKey     contextKey = "user_agent"
+	CorrelationIDKey contextKey = "correlation_id"
 )
 
 // IRequestContext 请求上下文接口（实现见 httpx/basic）

@@ -106,13 +106,19 @@ func (h *EventSourcedTypedHandler[T]) HandleEvent(ctx context.Context, evt event
 	}
 
 	var lastErr error
+	currentBackoff := backoff
 	for attempt := 0; attempt <= retries; attempt++ {
 		if err := h.handle(ctx, payload); err != nil {
 			lastErr = err
 			if attempt == retries {
 				break
 			}
-			time.Sleep(backoff)
+			// 指数退避：每次重试延迟翻倍，最大不超过 30 秒
+			time.Sleep(currentBackoff)
+			currentBackoff *= 2
+			if currentBackoff > 30*time.Second {
+				currentBackoff = 30 * time.Second
+			}
 			continue
 		}
 		return nil

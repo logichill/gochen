@@ -2,7 +2,10 @@ package repo
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
+
+	"gochen/logging"
 )
 
 func (r *Repo[T]) applyAdvancedFilters(q *queryBuilder, advanced map[string]any) *queryBuilder {
@@ -85,13 +88,33 @@ func buildOrCondition(conditions []map[string]string, isAllowedField func(string
 	return strings.Join(exprs, " OR "), args
 }
 
-// toStringMap 将 map[string]interface{} 转为 map[string]string（主要用于查询参数来自 URL）
+// toStringMap 将 map[string]interface{} 转为 map[string]string
+//
+// 该函数主要用于处理来自 URL 查询参数的过滤条件，这些参数通常是基本类型（string, int, bool 等）。
+// 对于复杂类型（struct, slice, map），会使用 fmt.Sprint 进行字符串化，但结果可能不符合预期。
+//
+// 注意：如果值是复杂类型，会记录警告日志，建议在调用侧避免传入复杂类型。
 func toStringMap(src map[string]interface{}) map[string]string {
 	if len(src) == 0 {
 		return nil
 	}
 	dst := make(map[string]string, len(src))
 	for k, v := range src {
+		if v == nil {
+			dst[k] = ""
+			continue
+		}
+		// 检查是否为复杂类型
+		rv := reflect.ValueOf(v)
+		kind := rv.Kind()
+		if kind == reflect.Struct || kind == reflect.Slice || kind == reflect.Map || kind == reflect.Array {
+			// 复杂类型的字符串化可能不符合预期，记录警告
+			logging.ComponentLogger("orm.repo").
+				Warn(nil, "toStringMap: converting complex type to string",
+					logging.String("key", k),
+					logging.String("type", rv.Type().String()),
+					logging.String("kind", kind.String()))
+		}
 		dst[k] = fmt.Sprint(v)
 	}
 	return dst
