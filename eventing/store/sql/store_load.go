@@ -11,7 +11,7 @@ import (
 	"gochen/messaging"
 )
 
-func (s *SQLEventStore) LoadEvents(ctx context.Context, aggregateID int64, afterVersion uint64) ([]eventing.Event, error) {
+func (s *SQLEventStore) LoadEvents(ctx context.Context, aggregateID int64, afterVersion uint64) ([]eventing.Event[int64], error) {
 	query := fmt.Sprintf("SELECT id, type, aggregate_id, aggregate_type, version, schema_version, timestamp, payload, metadata FROM %s WHERE aggregate_id = ? AND version > ? ORDER BY version ASC", s.tableName)
 	rows, err := s.db.Query(ctx, query, aggregateID, afterVersion)
 	if err != nil {
@@ -21,7 +21,7 @@ func (s *SQLEventStore) LoadEvents(ctx context.Context, aggregateID int64, after
 	return s.scanEvents(rows)
 }
 
-func (s *SQLEventStore) StreamEvents(ctx context.Context, from time.Time) ([]eventing.Event, error) {
+func (s *SQLEventStore) StreamEvents(ctx context.Context, from time.Time) ([]eventing.Event[int64], error) {
 	query := fmt.Sprintf("SELECT id, type, aggregate_id, aggregate_type, version, schema_version, timestamp, payload, metadata FROM %s WHERE timestamp >= ? ORDER BY timestamp ASC, version ASC", s.tableName)
 	rows, err := s.db.Query(ctx, query, from)
 	if err != nil {
@@ -32,7 +32,7 @@ func (s *SQLEventStore) StreamEvents(ctx context.Context, from time.Time) ([]eve
 }
 
 // LoadEventsByType 按聚合类型加载事件（可选接口）
-func (s *SQLEventStore) LoadEventsByType(ctx context.Context, aggregateType string, aggregateID int64, afterVersion uint64) ([]eventing.Event, error) {
+func (s *SQLEventStore) LoadEventsByType(ctx context.Context, aggregateType string, aggregateID int64, afterVersion uint64) ([]eventing.Event[int64], error) {
 	query := fmt.Sprintf("SELECT id, type, aggregate_id, aggregate_type, version, schema_version, timestamp, payload, metadata FROM %s WHERE aggregate_id = ? AND aggregate_type = ? AND version > ? ORDER BY version ASC", s.tableName)
 	rows, err := s.db.Query(ctx, query, aggregateID, aggregateType, afterVersion)
 	if err != nil {
@@ -42,8 +42,8 @@ func (s *SQLEventStore) LoadEventsByType(ctx context.Context, aggregateType stri
 	return s.scanEvents(rows)
 }
 
-// StreamAggregate 按聚合顺序流式读取事件（实现 IAggregateEventStore，可选能力）
-func (s *SQLEventStore) StreamAggregate(ctx context.Context, opts *store.AggregateStreamOptions) (*store.AggregateStreamResult, error) {
+// StreamAggregate 按聚合顺序流式读取事件（实现 IAggregateEventStore[int64]，可选能力）
+func (s *SQLEventStore) StreamAggregate(ctx context.Context, opts *store.AggregateStreamOptions[int64]) (*store.AggregateStreamResult[int64], error) {
 	if opts == nil {
 		return nil, fmt.Errorf("AggregateStreamOptions cannot be nil")
 	}
@@ -76,7 +76,7 @@ func (s *SQLEventStore) StreamAggregate(ctx context.Context, opts *store.Aggrega
 		return nil, err
 	}
 
-	res := &store.AggregateStreamResult{Events: events}
+	res := &store.AggregateStreamResult[int64]{Events: events}
 	if len(events) == 0 {
 		return res, nil
 	}
@@ -96,8 +96,8 @@ type rowScanner interface {
 	Close() error
 }
 
-func (s *SQLEventStore) scanEvents(rows rowScanner) ([]eventing.Event, error) {
-	var events []eventing.Event
+func (s *SQLEventStore) scanEvents(rows rowScanner) ([]eventing.Event[int64], error) {
+	var events []eventing.Event[int64]
 	for rows.Next() {
 		var (
 			id, typ      string
@@ -126,7 +126,7 @@ func (s *SQLEventStore) scanEvents(rows rowScanner) ([]eventing.Event, error) {
 				return nil, fmt.Errorf("failed to unmarshal event metadata for id=%s, type=%s: %w", id, typ, err)
 			}
 		}
-		events = append(events, eventing.Event{
+		events = append(events, eventing.Event[int64]{
 			Message: messaging.Message{
 				ID:        id,
 				Type:      typ,

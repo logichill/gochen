@@ -8,12 +8,12 @@ import (
 	"gochen/eventing"
 )
 
-// AggregateExists 检查聚合是否存在
-func AggregateExists(ctx context.Context, store IEventStore, aggregateID int64) (bool, error) {
-	if inspector, ok := store.(IAggregateInspector); ok {
+// AggregateExists 检查聚合是否存在（基于 int64 聚合 ID 的便捷方法）
+func AggregateExists(ctx context.Context, store IEventStore[int64], aggregateID int64) (bool, error) {
+	if inspector, ok := store.(IAggregateInspector[int64]); ok {
 		return inspector.HasAggregate(ctx, aggregateID)
 	}
-	if typed, ok := store.(ITypedEventStore); ok {
+	if typed, ok := store.(ITypedEventStore[int64]); ok {
 		return AggregateExistsWithType(ctx, typed, "", aggregateID)
 	}
 
@@ -24,8 +24,8 @@ func AggregateExists(ctx context.Context, store IEventStore, aggregateID int64) 
 	return len(events) > 0, nil
 }
 
-// AggregateExistsWithType 检查指定聚合类型是否存在事件
-func AggregateExistsWithType(ctx context.Context, store ITypedEventStore, aggregateType string, aggregateID int64) (bool, error) {
+// AggregateExistsWithType 检查指定聚合类型是否存在事件（基于 int64 聚合 ID）
+func AggregateExistsWithType(ctx context.Context, store ITypedEventStore[int64], aggregateType string, aggregateID int64) (bool, error) {
 	events, err := store.LoadEventsByType(ctx, aggregateType, aggregateID, 0)
 	if err != nil {
 		return false, err
@@ -33,12 +33,12 @@ func AggregateExistsWithType(ctx context.Context, store ITypedEventStore, aggreg
 	return len(events) > 0, nil
 }
 
-// GetCurrentVersion 获取聚合当前版本
-func GetCurrentVersion(ctx context.Context, store IEventStore, aggregateID int64) (uint64, error) {
-	if inspector, ok := store.(IAggregateInspector); ok {
+// GetCurrentVersion 获取聚合当前版本（基于 int64 聚合 ID）
+func GetCurrentVersion(ctx context.Context, store IEventStore[int64], aggregateID int64) (uint64, error) {
+	if inspector, ok := store.(IAggregateInspector[int64]); ok {
 		return inspector.GetAggregateVersion(ctx, aggregateID)
 	}
-	if typed, ok := store.(ITypedEventStore); ok {
+	if typed, ok := store.(ITypedEventStore[int64]); ok {
 		return GetCurrentVersionWithType(ctx, typed, "", aggregateID)
 	}
 
@@ -52,8 +52,8 @@ func GetCurrentVersion(ctx context.Context, store IEventStore, aggregateID int64
 	return events[len(events)-1].GetVersion(), nil
 }
 
-// GetCurrentVersionWithType 获取指定聚合类型的版本
-func GetCurrentVersionWithType(ctx context.Context, store ITypedEventStore, aggregateType string, aggregateID int64) (uint64, error) {
+// GetCurrentVersionWithType 获取指定聚合类型的版本（基于 int64 聚合 ID）
+func GetCurrentVersionWithType(ctx context.Context, store ITypedEventStore[int64], aggregateType string, aggregateID int64) (uint64, error) {
 	events, err := store.LoadEventsByType(ctx, aggregateType, aggregateID, 0)
 	if err != nil {
 		return 0, err
@@ -64,18 +64,18 @@ func GetCurrentVersionWithType(ctx context.Context, store ITypedEventStore, aggr
 	return events[len(events)-1].GetVersion(), nil
 }
 
-// LoadAllEvents 加载聚合所有事件
-func LoadAllEvents(ctx context.Context, store IEventStore, aggregateID int64) ([]eventing.Event, error) {
+// LoadAllEvents 加载聚合所有事件（基于 int64 聚合 ID）
+func LoadAllEvents(ctx context.Context, store IEventStore[int64], aggregateID int64) ([]eventing.Event[int64], error) {
 	return store.LoadEvents(ctx, aggregateID, 0)
 }
 
-// LoadAggregatesHelper 并发加载多个聚合
-func LoadAggregatesHelper(ctx context.Context, store IEventStore, aggregateIDs []int64, concurrency int) (map[int64][]eventing.Event, error) {
+// LoadAggregatesHelper 并发加载多个聚合（基于 int64 聚合 ID）
+func LoadAggregatesHelper(ctx context.Context, store IEventStore[int64], aggregateIDs []int64, concurrency int) (map[int64][]eventing.Event[int64], error) {
 	if concurrency <= 0 {
 		concurrency = 5
 	}
 
-	results := make(map[int64][]eventing.Event)
+	results := make(map[int64][]eventing.Event[int64])
 	var mutex sync.Mutex
 	var wg sync.WaitGroup
 	errChan := make(chan error, len(aggregateIDs))

@@ -31,7 +31,7 @@ func TestProjectionEventHandler_ConcurrentHandleEvent(t *testing.T) {
 	}
 
 	// 构造事件
-	evt := &eventing.Event{
+	evt := &eventing.Event[int64]{
 		Message: messaging.Message{
 			ID:        "evt-1",
 			Type:      "ConcurrentEvent",

@@ -49,42 +49,43 @@ func defaultEventHistoryMapper(evt eventing.IEvent) *EventHistoryEntry {
 	if evt == nil {
 		return nil
 	}
-	base, ok := evt.(*eventing.Event)
+	typed, ok := evt.(eventing.ITypedEvent[int64])
 	if !ok {
 		return nil
 	}
 	actor := ""
-	if md := base.GetMetadata(); md != nil {
+	if md := evt.GetMetadata(); md != nil {
 		if v, ok := md["actor_id"].(string); ok {
 			actor = v
 		}
 	}
+	payload := evt.GetPayload()
 	return &EventHistoryEntry{
-		EventID:       base.GetID(),
-		AggregateID:   base.GetAggregateID(),
-		AggregateType: base.GetAggregateType(),
-		Version:       base.GetVersion(),
-		EventType:     base.GetType(),
-		OccurredAt:    base.GetTimestamp(),
+		EventID:       evt.GetID(),
+		AggregateID:   typed.GetAggregateID(),
+		AggregateType: typed.GetAggregateType(),
+		Version:       typed.GetVersion(),
+		EventType:     evt.GetType(),
+		OccurredAt:    evt.GetTimestamp(),
 		ActorID:       actor,
-		SummaryKey:    base.GetType(),
-		SummaryParams: map[string]any{"payload": base.GetPayload()},
-		RawPayload:    base.GetPayload(),
+		SummaryKey:    evt.GetType(),
+		SummaryParams: map[string]any{"payload": payload},
+		RawPayload:    payload,
 	}
 }
 
 // GetEventHistory 获取聚合的事件历史。
 func GetEventHistory(
 	ctx context.Context,
-	eventStore store.IEventStore,
+	eventStore store.IEventStore[int64],
 	aggregateType string,
 	id int64,
 ) ([]eventing.IEvent, error) {
 	var (
-		events []eventing.Event
+		events []eventing.Event[int64]
 		err    error
 	)
-	if typedStore, ok := eventStore.(store.ITypedEventStore); ok {
+	if typedStore, ok := eventStore.(store.ITypedEventStore[int64]); ok {
 		events, err = typedStore.LoadEventsByType(ctx, aggregateType, id, 0)
 	} else {
 		events, err = eventStore.LoadEvents(ctx, id, 0)
@@ -103,16 +104,16 @@ func GetEventHistory(
 // GetEventHistoryAfter 获取指定版本之后的事件历史。
 func GetEventHistoryAfter(
 	ctx context.Context,
-	eventStore store.IEventStore,
+	eventStore store.IEventStore[int64],
 	aggregateType string,
 	id int64,
 	afterVersion uint64,
 ) ([]eventing.IEvent, error) {
 	var (
-		events []eventing.Event
+		events []eventing.Event[int64]
 		err    error
 	)
-	if typedStore, ok := eventStore.(store.ITypedEventStore); ok {
+	if typedStore, ok := eventStore.(store.ITypedEventStore[int64]); ok {
 		events, err = typedStore.LoadEventsByType(ctx, aggregateType, id, afterVersion)
 	} else {
 		events, err = eventStore.LoadEvents(ctx, id, afterVersion)
@@ -134,7 +135,7 @@ func GetEventHistoryAfter(
 //   - 当前实现优先使用 IAggregateEventStore + IAggregateInspector，其次回退为内存分页
 func GetEventHistoryPage(
 	ctx context.Context,
-	eventStore store.IEventStore,
+	eventStore store.IEventStore[int64],
 	aggregateType string,
 	id int64,
 	page int,
@@ -151,9 +152,9 @@ func GetEventHistoryPage(
 		mapper = defaultEventHistoryMapper
 	}
 
-	// 优先使用 IAggregateEventStore + IAggregateInspector 做基于版本的分页
-	if aggStore, ok := eventStore.(store.IAggregateEventStore); ok {
-		if inspector, ok2 := eventStore.(store.IAggregateInspector); ok2 {
+	// 优先使用 IAggregateEventStore[int64] + IAggregateInspector[int64] 做基于版本的分页
+	if aggStore, ok := eventStore.(store.IAggregateEventStore[int64]); ok {
+		if inspector, ok2 := eventStore.(store.IAggregateInspector[int64]); ok2 {
 			// 版本即事件总数（按聚合内版本连续的假设）
 			totalVersion, err := inspector.GetAggregateVersion(ctx, id)
 			if err != nil {
@@ -169,7 +170,7 @@ func GetEventHistoryPage(
 				return &EventHistoryPage{Entries: []*EventHistoryEntry{}, Total: total, Page: page, PageSize: pageSize}, nil
 			}
 
-			opts := &store.AggregateStreamOptions{
+			opts := &store.AggregateStreamOptions[int64]{
 				AggregateType: aggregateType,
 				AggregateID:   id,
 				AfterVersion:  uint64(start),

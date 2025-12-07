@@ -155,7 +155,7 @@ publisher := outbox.NewPublisher(repo, eventBus, cfg, noop)
 
   ```go
   type ProjectionManagerOptions struct {
-      EventStore store.IEventStore
+      EventStore store.IEventStore[int64]
       EventBus   bus.IEventBus
       Logger     logging.ILogger
       Config     *ProjectionConfig

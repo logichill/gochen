@@ -48,9 +48,9 @@ type SimpleSQLOutboxRepository struct {
 type IEventStoreWithDB interface {
 	// 从 eventing/store 包导入
 	Init(ctx context.Context) error
-	AppendEvents(ctx context.Context, aggregateID int64, events []eventing.IStorableEvent, expectedVersion uint64) error
-	AppendEventsWithDB(ctx context.Context, db database.IDatabase, aggregateID int64, events []eventing.IStorableEvent, expectedVersion uint64) error
-	LoadEvents(ctx context.Context, aggregateID int64, afterVersion uint64) ([]eventing.Event, error)
+	AppendEvents(ctx context.Context, aggregateID int64, events []eventing.IStorableEvent[int64], expectedVersion uint64) error
+	AppendEventsWithDB(ctx context.Context, db database.IDatabase, aggregateID int64, events []eventing.IStorableEvent[int64], expectedVersion uint64) error
+	LoadEvents(ctx context.Context, aggregateID int64, afterVersion uint64) ([]eventing.Event[int64], error)
 }
 
 // NewSimpleSQLOutboxRepository 创建简化的 SQL Outbox 仓储
@@ -68,7 +68,7 @@ func NewSimpleSQLOutboxRepository(db database.IDatabase, eventStore IEventStoreW
 }
 
 // SaveWithEvents 在同一事务中保存聚合事件和 Outbox 记录
-func (r *SimpleSQLOutboxRepository) SaveWithEvents(ctx context.Context, aggregateID int64, events []eventing.Event) error {
+func (r *SimpleSQLOutboxRepository) SaveWithEvents(ctx context.Context, aggregateID int64, events []eventing.Event[int64]) error {
 	if len(events) == 0 {
 		return nil
 	}
@@ -105,7 +105,7 @@ func (r *SimpleSQLOutboxRepository) SaveWithEvents(ctx context.Context, aggregat
 }
 
 // saveOutboxEntries 保存 Outbox 记录
-func (r *SimpleSQLOutboxRepository) saveOutboxEntries(ctx context.Context, tx database.ITransaction, aggregateID int64, events []eventing.IStorableEvent) error {
+func (r *SimpleSQLOutboxRepository) saveOutboxEntries(ctx context.Context, tx database.ITransaction, aggregateID int64, events []eventing.IStorableEvent[int64]) error {
 	for _, event := range events {
 		eventData, err := r.serializeEvent(event)
 		if err != nil {
@@ -269,7 +269,7 @@ func (r *SimpleSQLOutboxRepository) EnsureTable(ctx context.Context) error {
 }
 
 // calculateExpectedVersion 计算期望版本
-func (r *SimpleSQLOutboxRepository) calculateExpectedVersion(events []eventing.Event) uint64 {
+func (r *SimpleSQLOutboxRepository) calculateExpectedVersion(events []eventing.Event[int64]) uint64 {
 	if len(events) == 0 {
 		return 0
 	}
@@ -277,7 +277,7 @@ func (r *SimpleSQLOutboxRepository) calculateExpectedVersion(events []eventing.E
 }
 
 // serializeEvent 序列化事件
-func (r *SimpleSQLOutboxRepository) serializeEvent(event eventing.IStorableEvent) (string, error) {
+func (r *SimpleSQLOutboxRepository) serializeEvent(event eventing.IStorableEvent[int64]) (string, error) {
 	data := map[string]any{
 		"id":             event.GetID(),
 		"type":           event.GetType(),

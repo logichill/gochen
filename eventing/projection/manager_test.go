@@ -21,7 +21,7 @@ type MockProjection struct {
 	name            string
 	supportedTypes  []string
 	handleFunc      func(ctx context.Context, event eventing.IEvent) error
-	rebuildFunc     func(ctx context.Context, events []eventing.Event) error
+	rebuildFunc     func(ctx context.Context, events []eventing.Event[int64]) error
 	processedEvents int
 	failedEvents    int
 	status          string
@@ -59,7 +59,7 @@ func (p *MockProjection) GetSupportedEventTypes() []string {
 	return p.supportedTypes
 }
 
-func (p *MockProjection) Rebuild(ctx context.Context, events []eventing.Event) error {
+func (p *MockProjection) Rebuild(ctx context.Context, events []eventing.Event[int64]) error {
 	if p.rebuildFunc != nil {
 		return p.rebuildFunc(ctx, events)
 	}
@@ -174,8 +174,8 @@ func (m *MockEventBus) Use(middleware messaging.IMiddleware) {
 }
 
 // toStorableEvents 将事件切片转换为存储接口切片（测试辅助）
-func toStorableEvents(events []eventing.Event) []eventing.IStorableEvent {
-	storable := make([]eventing.IStorableEvent, len(events))
+func toStorableEvents(events []eventing.Event[int64]) []eventing.IStorableEvent[int64] {
+	storable := make([]eventing.IStorableEvent[int64], len(events))
 	for i := range events {
 		storable[i] = &events[i]
 	}
@@ -340,7 +340,7 @@ func TestProjectionEventHandler_ShouldProcessOnlyWhenRunning(t *testing.T) {
 		manager:    manager,
 	}
 
-	evt := &eventing.Event{
+	evt := &eventing.Event[int64]{
 		Message: messaging.Message{
 			ID:        "event-1",
 			Type:      "TestEvent",
@@ -374,10 +374,10 @@ func TestProjectionManager_ResumeFromCheckpoint_ReplaysFromStore(t *testing.T) {
 	projection := NewMockProjection("test-projection", []string{"TestEvent"})
 	require.NoError(t, manager.RegisterProjection(projection))
 
-	events := []eventing.Event{
-		*eventing.NewEvent(1, "Agg", "TestEvent", 1, map[string]any{"i": 1}),
-		*eventing.NewEvent(1, "Agg", "TestEvent", 2, map[string]any{"i": 2}),
-		*eventing.NewEvent(1, "Agg", "TestEvent", 3, map[string]any{"i": 3}),
+	events := []eventing.Event[int64]{
+		*eventing.NewEvent[int64](1, "Agg", "TestEvent", 1, map[string]any{"i": 1}),
+		*eventing.NewEvent[int64](1, "Agg", "TestEvent", 2, map[string]any{"i": 2}),
+		*eventing.NewEvent[int64](1, "Agg", "TestEvent", 3, map[string]any{"i": 3}),
 	}
 	// 统一时间戳，验证同时间戳下不会重复重放 checkpoint 前的事件
 	now := time.Now()
@@ -416,12 +416,12 @@ func TestProjectionManager_ResumeFromCheckpoint_ReplayFailureStops(t *testing.T)
 	}
 	require.NoError(t, manager.RegisterProjection(projection))
 
-	e1 := eventing.NewEvent(1, "Agg", "TestEvent", 1, nil)
-	e2 := eventing.NewEvent(1, "Agg", "TestEvent", 2, nil)
+	e1 := eventing.NewEvent[int64](1, "Agg", "TestEvent", 1, nil)
+	e2 := eventing.NewEvent[int64](1, "Agg", "TestEvent", 2, nil)
 	now := time.Now()
 	e1.Timestamp = now
 	e2.Timestamp = now
-	require.NoError(t, eventStore.AppendEvents(ctx, 1, []eventing.IStorableEvent{e1, e2}, 0))
+	require.NoError(t, eventStore.AppendEvents(ctx, 1, []eventing.IStorableEvent[int64]{e1, e2}, 0))
 
 	// checkpoint 在第一个事件
 	checkpoint := NewCheckpoint("test-projection", 1, e1.ID, e1.Timestamp)
@@ -461,7 +461,7 @@ func TestProjectionManager_ReplayRetry_Success(t *testing.T) {
 	require.NoError(t, manager.RegisterProjection(projection))
 	manager.checkpointStore = NewMemoryCheckpointStore()
 
-	evt := eventing.NewEvent(1, "Agg", "TestEvent", 1, nil)
+	evt := eventing.NewEvent[int64](1, "Agg", "TestEvent", 1, nil)
 	err := manager.applyReplayEvent(ctx, "retry-projection", projection, evt)
 	require.NoError(t, err)
 
@@ -495,7 +495,7 @@ func TestProjectionManager_ReplayRetry_MaxRetriesExceeded(t *testing.T) {
 	}
 	require.NoError(t, manager.RegisterProjection(projection))
 
-	evt := eventing.NewEvent(1, "Agg", "TestEvent", 1, nil)
+	evt := eventing.NewEvent[int64](1, "Agg", "TestEvent", 1, nil)
 	err := manager.applyReplayEvent(ctx, "retry-projection", projection, evt)
 	require.Error(t, err)
 

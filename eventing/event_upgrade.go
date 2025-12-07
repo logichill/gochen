@@ -16,7 +16,7 @@ import (
 //
 // 说明：对象级升级链（eventing/upgrader/*）与本方法相互独立，调用方可在合适
 // 场景（不产生循环依赖处）组合两者以实现完整的演进策略。
-func UpgradeEventPayload(ctx context.Context, evt *Event) (*Event, error) {
+func UpgradeEventPayload[ID comparable](ctx context.Context, evt *Event[ID]) (*Event[ID], error) {
 	if evt == nil {
 		return nil, nil
 	}

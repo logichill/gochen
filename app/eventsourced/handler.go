@@ -21,7 +21,7 @@ type RetryPolicy struct {
 type EventSourcedHandlerOption[T any] struct {
 	Name        string
 	EventType   string
-	Decoder     func(event eventing.Event) (T, error)
+	Decoder     func(event eventing.IEvent) (T, error)
 	Handle      func(ctx context.Context, payload T) error
 	RetryPolicy RetryPolicy
 	Logger      logging.ILogger
@@ -31,7 +31,7 @@ type EventSourcedHandlerOption[T any] struct {
 type EventSourcedTypedHandler[T any] struct {
 	name      string
 	eventType string
-	decoder   func(event eventing.Event) (T, error)
+	decoder   func(event eventing.IEvent) (T, error)
 	handle    func(ctx context.Context, payload T) error
 	retry     RetryPolicy
 	logger    logging.ILogger
@@ -47,11 +47,15 @@ func NewEventSourcedTypedHandler[T any](opt EventSourcedHandlerOption[T]) (*Even
 	}
 	decoder := opt.Decoder
 	if decoder == nil {
-		decoder = func(evt eventing.Event) (T, error) {
-			payload, ok := evt.Payload.(T)
+		decoder = func(evt eventing.IEvent) (T, error) {
+			if evt == nil {
+				var zero T
+				return zero, fmt.Errorf("event cannot be nil")
+			}
+			payload, ok := evt.GetPayload().(T)
 			if !ok {
 				var zero T
-				return zero, fmt.Errorf("payload type mismatch: %T", evt.Payload)
+				return zero, fmt.Errorf("payload type mismatch: %T", evt.GetPayload())
 			}
 			return payload, nil
 		}
@@ -86,12 +90,11 @@ func (h *EventSourcedTypedHandler[T]) Handle(ctx context.Context, message messag
 
 // HandleEvent 处理事件。
 func (h *EventSourcedTypedHandler[T]) HandleEvent(ctx context.Context, evt eventing.IEvent) error {
-	domainEvent, ok := evt.(*eventing.Event)
-	if !ok {
-		return fmt.Errorf("event payload must be *eventing.Event, got %T", evt)
+	if evt == nil {
+		return fmt.Errorf("event cannot be nil")
 	}
 
-	payload, err := h.decoder(*domainEvent)
+	payload, err := h.decoder(evt)
 	if err != nil {
 		return fmt.Errorf("decode event payload failed: %w", err)
 	}
@@ -123,11 +126,10 @@ func (h *EventSourcedTypedHandler[T]) HandleEvent(ctx context.Context, evt event
 		}
 		return nil
 	}
-
 	h.logger.Warn(ctx, "event handler failed",
 		logging.Error(lastErr),
 		logging.String("event_type", h.eventType),
-		logging.String("event_id", domainEvent.ID),
+		logging.String("event_id", evt.GetID()),
 		logging.Int("retries", retries))
 	return lastErr
 }
@@ -149,4 +151,3 @@ func (h *EventSourcedTypedHandler[T]) Type() string {
 
 // Ensure interface compliance.
 var _ bus.IEventHandler = (*EventSourcedTypedHandler[any])(nil)
-

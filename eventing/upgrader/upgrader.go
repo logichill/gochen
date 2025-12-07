@@ -13,7 +13,7 @@ import (
 // IEventUpgrader 事件升级器接口
 type IEventUpgrader interface {
 	// Upgrade 升级事件
-	Upgrade(ctx context.Context, event eventing.Event) (eventing.Event, error)
+	Upgrade(ctx context.Context, event eventing.Event[int64]) (eventing.Event[int64], error)
 
 	// GetFromVersion 获取源版本
 	GetFromVersion() int
@@ -57,8 +57,8 @@ func (c *UpgradeChain) Register(upgrader IEventUpgrader) error {
 	return nil
 }
 
-// Upgrade 升级事件
-func (c *UpgradeChain) Upgrade(ctx context.Context, event eventing.Event) (eventing.Event, error) {
+// Upgrade 升级事件（当前全局实现针对 Event[int64]）
+func (c *UpgradeChain) Upgrade(ctx context.Context, event eventing.Event[int64]) (eventing.Event[int64], error) {
 	c.mutex.RLock()
 	upgraders := c.upgraders[event.GetType()]
 	c.mutex.RUnlock()
@@ -77,7 +77,7 @@ func (c *UpgradeChain) Upgrade(ctx context.Context, event eventing.Event) (event
 			if upgrader.GetFromVersion() == currentVersion {
 				newEvent, err := upgrader.Upgrade(ctx, currentEvent)
 				if err != nil {
-					var empty eventing.Event
+					var empty eventing.Event[int64]
 					return empty, fmt.Errorf("upgrade failed from v%d to v%d: %w",
 						upgrader.GetFromVersion(), upgrader.GetToVersion(), err)
 				}
@@ -105,8 +105,8 @@ func (c *UpgradeChain) Upgrade(ctx context.Context, event eventing.Event) (event
 }
 
 // UpgradeAll 批量升级事件
-func (c *UpgradeChain) UpgradeAll(ctx context.Context, events []eventing.Event) ([]eventing.Event, error) {
-	result := make([]eventing.Event, 0, len(events))
+func (c *UpgradeChain) UpgradeAll(ctx context.Context, events []eventing.Event[int64]) ([]eventing.Event[int64], error) {
+	result := make([]eventing.Event[int64], 0, len(events))
 
 	for _, event := range events {
 		upgraded, err := c.Upgrade(ctx, event)
@@ -128,6 +128,6 @@ func RegisterGlobal(upgrader IEventUpgrader) error {
 }
 
 // UpgradeGlobal 使用全局升级链升级
-func UpgradeGlobal(ctx context.Context, event eventing.Event) (eventing.Event, error) {
+func UpgradeGlobal(ctx context.Context, event eventing.Event[int64]) (eventing.Event[int64], error) {
 	return globalChain.Upgrade(ctx, event)
 }

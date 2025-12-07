@@ -39,7 +39,7 @@ func TestEventSourcedRepository_SaveAndLoad(t *testing.T) {
 	ctx := context.Background()
 	eventStore := store.NewMemoryEventStore()
 
-	adapter, err := NewDomainEventStore[*testAggregate](DomainEventStoreOptions[*testAggregate]{
+	adapter, err := NewDomainEventStore(DomainEventStoreOptions[*testAggregate, int64]{
 		AggregateType: "TestAggregate",
 		Factory:       newTestAggregate,
 		EventStore:    eventStore,

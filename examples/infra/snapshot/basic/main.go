@@ -49,10 +49,10 @@ func main() {
 	snapStore := ssnap.NewSQLStore(db, "event_snapshots")
 	snapCfg := ssnap.DefaultConfig()
 	snapCfg.Frequency = 3 // 每 3 个事件建议创建一次快照
-	snapMgr := ssnap.NewManager(snapStore, eventStore, snapCfg)
+	snapMgr := ssnap.NewManager[int64](snapStore, snapCfg)
 
 	// 2) 构建 ES 仓储
-	storeAdapter, err := eventsourced.NewDomainEventStore[*Counter](eventsourced.DomainEventStoreOptions[*Counter]{
+	storeAdapter, err := eventsourced.NewDomainEventStore(eventsourced.DomainEventStoreOptions[*Counter, int64]{
 		AggregateType:   "Counter",
 		Factory:         NewCounter,
 		EventStore:      eventStore,

@@ -2,7 +2,6 @@ package snapshot
 
 import (
 	"context"
-	"gochen/eventing/store"
 	"testing"
 )
 
@@ -26,10 +25,9 @@ func (a *testSnapshotAggregate) GetAggregateType() string {
 
 func TestSnapshotManager_EventCountStrategy(t *testing.T) {
 	ctx := context.Background()
-	snapshotStore := NewMemoryStore()
-	eventStore := store.NewMemoryEventStore()
+	snapshotStore := NewMemoryStore[int64]()
 	config := &Config{Frequency: 5, Enabled: true}
-	mgr := NewManager(snapshotStore, eventStore, config)
+	mgr := NewManager[int64](snapshotStore, config)
 
 	agg := &testSnapshotAggregate{ID: 1, Version: 5, AggregateType: "test"}
 

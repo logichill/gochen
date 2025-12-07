@@ -17,7 +17,8 @@
 
 ```go
 // IEventStore 定义事件存储的核心接口（最小化设计）
-type IEventStore interface {
+// ID 为聚合根 ID 类型，常见为 int64
+type IEventStore[ID comparable] interface {
     // AppendEvents 追加事件到指定聚合的事件流
     //
     // 参数：
@@ -28,7 +29,7 @@ type IEventStore interface {
     //
     // 返回：
     //   - error: 版本冲突返回 ConcurrencyError
-    AppendEvents(ctx context.Context, aggregateID int64, 
+    AppendEvents(ctx context.Context, aggregateID ID,
                  events []IEvent, expectedVersion uint64) error
     
     // LoadEvents 加载聚合的事件历史
@@ -41,7 +42,7 @@ type IEventStore interface {
     // 返回：
     //   - []IEvent: 事件列表
     //   - error: 错误
-    LoadEvents(ctx context.Context, aggregateID int64, 
+    LoadEvents(ctx context.Context, aggregateID ID,
                afterVersion uint64) ([]IEvent, error)
     
     // StreamEvents 拉取指定时间后的事件列表（按时间升序）
@@ -57,12 +58,12 @@ type IEventStore interface {
 
 ```go
 // IAggregateInspector 聚合检查器接口
-type IAggregateInspector interface {
+type IAggregateInspector[ID comparable] interface {
     // HasAggregate 检查聚合是否存在
-    HasAggregate(ctx context.Context, aggregateID int64) (bool, error)
+    HasAggregate(ctx context.Context, aggregateID ID) (bool, error)
     
     // GetAggregateVersion 获取聚合当前版本
-    GetAggregateVersion(ctx context.Context, aggregateID int64) (uint64, error)
+    GetAggregateVersion(ctx context.Context, aggregateID ID) (uint64, error)
 }
 ```
 
@@ -70,12 +71,12 @@ type IAggregateInspector interface {
 
 ```go
 // ITypedEventStore 类型化事件存储接口
-type ITypedEventStore interface {
-    IEventStore
+type ITypedEventStore[ID comparable] interface {
+    IEventStore[ID]
     
     // LoadEventsByType 按聚合类型加载事件
-    LoadEventsByType(ctx context.Context, aggregateType string, 
-                     aggregateID int64, afterVersion uint64) ([]IEvent, error)
+    LoadEventsByType(ctx context.Context, aggregateType string,
+                     aggregateID ID, afterVersion uint64) ([]IEvent, error)
 }
 ```
 
@@ -160,8 +161,8 @@ if err != nil {
 ### 4. 增量读取事件
 
 ```go
-// 推荐：若实现了 IEventStoreExtended，使用游标 + limit 方式读取
-if extended, ok := eventStore.(store.IEventStoreExtended); ok {
+// 推荐：若实现了 IEventStoreExtended[int64]，使用游标 + limit 方式读取
+if extended, ok := eventStore.(store.IEventStoreExtended[int64]); ok {
     stream, err := extended.GetEventStreamWithCursor(ctx, &store.StreamOptions{
         FromTime: time.Now().Add(-24 * time.Hour),              // 最近24小时
         Types:    []string{"UserCreated", "UserUpdated"},       // 可选类型过滤
@@ -175,7 +176,7 @@ if extended, ok := eventStore.(store.IEventStoreExtended); ok {
     }
 }
 
-// 回退：仅有基础 IEventStore 时，先取时间窗口，再用 FilterEventsWithOptions 过滤
+// 回退：仅有基础 IEventStore[int64] 时，先取时间窗口，再用 FilterEventsWithOptions 过滤
 events, err := eventStore.StreamEvents(ctx, time.Now().Add(-24*time.Hour))
 if err != nil {
     log.Fatal(err)
@@ -193,10 +194,10 @@ for _, event := range filtered.Events {
 
 ### 游标与类型过滤（推荐）
 
-为避免在事件表上做全表扫描，可以优先使用 `IEventStoreExtended.GetEventStreamWithCursor`：
+为避免在事件表上做全表扫描，可以优先使用 `IEventStoreExtended[int64].GetEventStreamWithCursor`：
 
 ```go
-stream, err := eventStore.(store.IEventStoreExtended).GetEventStreamWithCursor(ctx, &store.StreamOptions{
+stream, err := eventStore.(store.IEventStoreExtended[int64]).GetEventStreamWithCursor(ctx, &store.StreamOptions{
     After:    lastCursor,                // 上次处理的事件 ID（可为空）
     Types:    []string{"UserUpdated"},   // 可选：按事件类型过滤
     FromTime: lastEventTime,             // 可选：时间窗口
@@ -212,7 +213,7 @@ nextCursor := stream.NextCursor
 ```
 
 常用实现支持情况：
-- SQL/Memory/Cached/Metrics 事件存储均实现 `IEventStoreExtended`
+- SQL/Memory/Cached/Metrics 事件存储均实现 `IEventStoreExtended[int64]`
 - 若当前实例不支持，可回退到 `StreamEvents` 并使用 `store.FilterEventsWithOptions` 过滤
 
 ### SQL 索引建议

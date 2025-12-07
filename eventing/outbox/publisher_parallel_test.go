@@ -38,7 +38,7 @@ func newConcurrentOutboxRepo(entries []OutboxEntry) *concurrentOutboxRepo {
 	return m
 }
 
-func (r *concurrentOutboxRepo) SaveWithEvents(ctx context.Context, aggregateID int64, events []eventing.Event) error {
+func (r *concurrentOutboxRepo) SaveWithEvents(ctx context.Context, aggregateID int64, events []eventing.Event[int64]) error {
 	return nil
 }
 
@@ -165,7 +165,7 @@ type dlqRecordingRepo struct {
 	}
 }
 
-func (r *dlqRecordingRepo) SaveWithEvents(ctx context.Context, aggregateID int64, events []eventing.Event) error {
+func (r *dlqRecordingRepo) SaveWithEvents(ctx context.Context, aggregateID int64, events []eventing.Event[int64]) error {
 	return nil
 }
 

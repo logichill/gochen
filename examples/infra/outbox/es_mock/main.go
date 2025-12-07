@@ -40,7 +40,7 @@ func (a *Wallet) ApplyEvent(evt domain.IDomainEvent) error {
 // mockOutbox 仅打印 SaveWithEvents，演示 API 用法（生产可替换为 SQL 实现）
 type mockOutbox struct{}
 
-func (m *mockOutbox) SaveWithEvents(ctx context.Context, aggregateID int64, events []eventing.Event) error {
+func (m *mockOutbox) SaveWithEvents(ctx context.Context, aggregateID int64, events []eventing.Event[int64]) error {
 	log.Printf("[outbox] aggregate=%d, events=%d", aggregateID, len(events))
 	for _, e := range events {
 		log.Printf("  -> id=%s type=%s v=%d payload=%#v", e.GetID(), e.GetType(), e.GetVersion(), e.GetPayload())
@@ -62,7 +62,7 @@ func main() {
 	ctx := context.Background()
 
 	// 基础 ES 仓储（内存事件存储）
-	storeAdapter, err := eventsourced.NewDomainEventStore[*Wallet](eventsourced.DomainEventStoreOptions[*Wallet]{
+	storeAdapter, err := eventsourced.NewDomainEventStore(eventsourced.DomainEventStoreOptions[*Wallet, int64]{
 		AggregateType: "Wallet",
 		Factory:       NewWallet,
 		EventStore:    estore.NewMemoryEventStore(),

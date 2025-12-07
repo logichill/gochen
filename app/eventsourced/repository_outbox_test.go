@@ -41,15 +41,15 @@ func (a *outboxAggregate) ApplyEvent(evt domain.IDomainEvent) error {
 // mockOutboxRepo 是最小可用的 IOutboxRepository 测试桩。
 type mockOutboxRepo struct {
 	savedAggregateID int64
-	savedEvents      []eventing.Event
+	savedEvents      []eventing.Event[int64]
 	calls            int
 	saveErr          error
 }
 
-func (m *mockOutboxRepo) SaveWithEvents(ctx context.Context, aggregateID int64, events []eventing.Event) error {
+func (m *mockOutboxRepo) SaveWithEvents(ctx context.Context, aggregateID int64, events []eventing.Event[int64]) error {
 	m.calls++
 	m.savedAggregateID = aggregateID
-	m.savedEvents = append([]eventing.Event(nil), events...)
+	m.savedEvents = append([]eventing.Event[int64](nil), events...)
 	return m.saveErr
 }
 
@@ -76,7 +76,7 @@ func TestOutboxAwareRepository_Save_UsesOutboxAndMarksCommitted(t *testing.T) {
 	baseStore := store.NewMemoryEventStore()
 	mox := &mockOutboxRepo{}
 
-	storeWithOutbox, err := NewDomainEventStore(DomainEventStoreOptions[*outboxAggregate]{
+	storeWithOutbox, err := NewDomainEventStore(DomainEventStoreOptions[*outboxAggregate, int64]{
 		AggregateType: "OutboxAggregate",
 		Factory:       newOutboxAggregate,
 		EventStore:    baseStore,

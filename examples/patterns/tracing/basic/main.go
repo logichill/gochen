@@ -55,7 +55,7 @@ func main() {
 	eventBus := ebus.NewEventBus(messageBus)
 
 	// 事件存储（内存） + ES 仓储
-	storeAdapter, err := eventsourced.NewDomainEventStore[*Counter](eventsourced.DomainEventStoreOptions[*Counter]{
+	storeAdapter, err := eventsourced.NewDomainEventStore(eventsourced.DomainEventStoreOptions[*Counter, int64]{
 		AggregateType: "Counter",
 		Factory:       NewCounter,
 		EventStore:    estore.NewMemoryEventStore(),

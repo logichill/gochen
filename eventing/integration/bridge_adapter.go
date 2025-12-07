@@ -72,7 +72,7 @@ func ToEvent(msg messaging.IMessage) (eventing.IEvent, error) {
 		version = 1
 	}
 
-	return &eventing.Event{
+	return &eventing.Event[int64]{
 		Message: messaging.Message{
 			ID:        msg.GetID(),
 			Type:      msg.GetType(),

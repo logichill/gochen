@@ -19,8 +19,11 @@ func NewOrderAmountProjection() (projection.IProjection, error) {
 	return eventsourced.NewEventSourcedProjection[*OrderCreated](eventsourced.EventSourcedProjectionOption[*OrderCreated]{
 		Name:       "order_amount_sql_checkpoint",
 		EventTypes: []string{"OrderCreated"},
-		Decoder: func(evt eventing.Event) (*OrderCreated, error) {
-			if p, ok := evt.Payload.(*OrderCreated); ok {
+		Decoder: func(evt eventing.IEvent) (*OrderCreated, error) {
+			if evt == nil {
+				return nil, nil
+			}
+			if p, ok := evt.GetPayload().(*OrderCreated); ok {
 				return p, nil
 			}
 			return nil, nil

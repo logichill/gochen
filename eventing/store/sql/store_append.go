@@ -13,7 +13,7 @@ import (
 	log "gochen/logging"
 )
 
-func (s *SQLEventStore) AppendEvents(ctx context.Context, aggregateID int64, events []eventing.IStorableEvent, expectedVersion uint64) error {
+func (s *SQLEventStore) AppendEvents(ctx context.Context, aggregateID int64, events []eventing.IStorableEvent[int64], expectedVersion uint64) error {
 	if len(events) == 0 {
 		return nil
 	}
@@ -32,7 +32,7 @@ func (s *SQLEventStore) AppendEvents(ctx context.Context, aggregateID int64, eve
 	return nil
 }
 
-func (s *SQLEventStore) AppendEventsWithDB(ctx context.Context, db db.IDatabase, aggregateID int64, events []eventing.IStorableEvent, expectedVersion uint64) error {
+func (s *SQLEventStore) AppendEventsWithDB(ctx context.Context, db db.IDatabase, aggregateID int64, events []eventing.IStorableEvent[int64], expectedVersion uint64) error {
 	if len(events) == 0 {
 		return nil
 	}

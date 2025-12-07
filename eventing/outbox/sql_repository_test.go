@@ -17,32 +17,32 @@ import (
 
 // MockEventStoreWithDB 模拟支持数据库接口的事件存储
 type MockEventStoreWithDB struct {
-	events []eventing.Event
+	events []eventing.Event[int64]
 }
 
 func (m *MockEventStoreWithDB) Init(ctx context.Context) error {
 	return nil
 }
 
-func (m *MockEventStoreWithDB) AppendEvents(ctx context.Context, aggregateID int64, events []eventing.IStorableEvent, expectedVersion uint64) error {
+func (m *MockEventStoreWithDB) AppendEvents(ctx context.Context, aggregateID int64, events []eventing.IStorableEvent[int64], expectedVersion uint64) error {
 	m.append(events)
 	return nil
 }
 
-func (m *MockEventStoreWithDB) AppendEventsWithDB(ctx context.Context, db db.IDatabase, aggregateID int64, events []eventing.IStorableEvent, expectedVersion uint64) error {
+func (m *MockEventStoreWithDB) AppendEventsWithDB(ctx context.Context, db db.IDatabase, aggregateID int64, events []eventing.IStorableEvent[int64], expectedVersion uint64) error {
 	m.append(events)
 	return nil
 }
 
-func (m *MockEventStoreWithDB) append(events []eventing.IStorableEvent) {
+func (m *MockEventStoreWithDB) append(events []eventing.IStorableEvent[int64]) {
 	for _, evt := range events {
-		if e, ok := evt.(*eventing.Event); ok {
+		if e, ok := evt.(*eventing.Event[int64]); ok {
 			m.events = append(m.events, *e)
 			continue
 		}
 		// 兜底：使用接口方法克隆事件
 		payload := evt.GetPayload()
-		cloned := eventing.NewEvent(evt.GetAggregateID(), evt.GetAggregateType(), evt.GetType(), evt.GetVersion(), payload, evt.GetSchemaVersion())
+		cloned := eventing.NewEvent[int64](evt.GetAggregateID(), evt.GetAggregateType(), evt.GetType(), evt.GetVersion(), payload, evt.GetSchemaVersion())
 		metadata := evt.GetMetadata()
 		for k, v := range metadata {
 			cloned.Metadata[k] = v
@@ -51,12 +51,12 @@ func (m *MockEventStoreWithDB) append(events []eventing.IStorableEvent) {
 	}
 }
 
-func (m *MockEventStoreWithDB) LoadEvents(ctx context.Context, aggregateID int64, afterVersion uint64) ([]eventing.Event, error) {
+func (m *MockEventStoreWithDB) LoadEvents(ctx context.Context, aggregateID int64, afterVersion uint64) ([]eventing.Event[int64], error) {
 	return m.events, nil
 }
 
-func (m *MockEventStoreWithDB) LoadEventsByType(ctx context.Context, aggregateType string, aggregateID int64, afterVersion uint64) ([]eventing.Event, error) {
-	var filtered []eventing.Event
+func (m *MockEventStoreWithDB) LoadEventsByType(ctx context.Context, aggregateType string, aggregateID int64, afterVersion uint64) ([]eventing.Event[int64], error) {
+	var filtered []eventing.Event[int64]
 	for _, event := range m.events {
 		if event.GetAggregateType() == aggregateType {
 			filtered = append(filtered, event)
@@ -65,16 +65,16 @@ func (m *MockEventStoreWithDB) LoadEventsByType(ctx context.Context, aggregateTy
 	return filtered, nil
 }
 
-func (m *MockEventStoreWithDB) StreamEvents(ctx context.Context, from time.Time) ([]eventing.Event, error) {
+func (m *MockEventStoreWithDB) StreamEvents(ctx context.Context, from time.Time) ([]eventing.Event[int64], error) {
 	return m.events, nil
 }
 
-func newTestEvent(aggregateID int64, version uint64, id string, payload map[string]any) eventing.Event {
+func newTestEvent(aggregateID int64, version uint64, id string, payload map[string]any) eventing.Event[int64] {
 	if payload == nil {
 		payload = make(map[string]any)
 	}
 
-	evt := eventing.NewEvent(aggregateID, "TestAggregate", "TestEvent", version, payload)
+	evt := eventing.NewEvent[int64](aggregateID, "TestAggregate", "TestEvent", version, payload)
 	evt.ID = id
 	evt.Metadata["source"] = "unit_test"
 	return *evt
@@ -260,7 +260,7 @@ func TestSQLOutboxRepository_SaveWithEvents(t *testing.T) {
 	aggregateID := int64(123)
 
 	// 创建测试事件
-	events := []eventing.Event{
+	events := []eventing.Event[int64]{
 		newTestEvent(aggregateID, 1, "event-1", map[string]any{"value": 100}),
 		newTestEvent(aggregateID, 2, "event-2", map[string]any{"value": 200}),
 	}
@@ -303,7 +303,7 @@ func TestSQLOutboxRepository_GetPendingEntries(t *testing.T) {
 	ctx := context.Background()
 
 	// 先保存一些事件
-	events := []eventing.Event{
+	events := []eventing.Event[int64]{
 		newTestEvent(1, 1, "event-1", nil),
 		newTestEvent(2, 1, "event-2", nil),
 	}
@@ -339,7 +339,7 @@ func TestSQLOutboxRepository_MarkAsPublished(t *testing.T) {
 	ctx := context.Background()
 
 	// 先保存一个事件
-	events := []eventing.Event{
+	events := []eventing.Event[int64]{
 		newTestEvent(1, 1, "event-1", nil),
 	}
 
@@ -372,7 +372,7 @@ func TestSQLOutboxRepository_MarkAsFailed(t *testing.T) {
 	ctx := context.Background()
 
 	// 先保存一个事件
-	events := []eventing.Event{
+	events := []eventing.Event[int64]{
 		newTestEvent(1, 1, "event-1", nil),
 	}
 
@@ -422,7 +422,7 @@ func TestSQLOutboxRepository_DeletePublished(t *testing.T) {
 	ctx := context.Background()
 
 	// 先保存一个事件
-	events := []eventing.Event{
+	events := []eventing.Event[int64]{
 		newTestEvent(1, 1, "event-1", nil),
 	}
 

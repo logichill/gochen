@@ -8,37 +8,37 @@ import (
 
 // ISnapshotAggregate 快照聚合接口
 // 避免循环依赖，定义快照所需的最小接口
-type ISnapshotAggregate interface {
-	GetID() int64
+type ISnapshotAggregate[ID comparable] interface {
+	GetID() ID
 	GetVersion() uint64
 	GetAggregateType() string
 }
 
 // ISnapshotStrategy 快照策略接口
 // 用于判断是否应该为聚合根创建快照
-type ISnapshotStrategy interface {
-	ShouldCreateSnapshot(ctx context.Context, aggregate ISnapshotAggregate) (bool, error)
+type ISnapshotStrategy[ID comparable] interface {
+	ShouldCreateSnapshot(ctx context.Context, aggregate ISnapshotAggregate[ID]) (bool, error)
 	GetName() string // 策略名称
 }
 
 // EventCountStrategy 基于事件数量的快照策略
 // 当事件数量达到指定频率时创建快照
-type EventCountStrategy struct {
+type EventCountStrategy[ID comparable] struct {
 	Frequency int // 每N个事件创建一次快照
 }
 
 // NewEventCountStrategy 创建事件计数策略
-func NewEventCountStrategy(frequency int) *EventCountStrategy {
+func NewEventCountStrategy[ID comparable](frequency int) *EventCountStrategy[ID] {
 	if frequency <= 0 {
 		frequency = 100 // 默认每100个事件
 	}
-	return &EventCountStrategy{
+	return &EventCountStrategy[ID]{
 		Frequency: frequency,
 	}
 }
 
 // ShouldCreateSnapshot 判断是否应该创建快照
-func (s *EventCountStrategy) ShouldCreateSnapshot(ctx context.Context, aggregate ISnapshotAggregate) (bool, error) {
+func (s *EventCountStrategy[ID]) ShouldCreateSnapshot(ctx context.Context, aggregate ISnapshotAggregate[ID]) (bool, error) {
 	version := aggregate.GetVersion()
 
 	// 检查版本是否是频率的倍数
@@ -46,25 +46,25 @@ func (s *EventCountStrategy) ShouldCreateSnapshot(ctx context.Context, aggregate
 }
 
 // GetName 获取策略名称
-func (s *EventCountStrategy) GetName() string {
+func (s *EventCountStrategy[ID]) GetName() string {
 	return "EventCountStrategy"
 }
 
 // TimeDurationStrategy 基于时间间隔的快照策略
 // 当距离上次快照超过指定时间时创建快照
-type TimeDurationStrategy struct {
+type TimeDurationStrategy[ID comparable] struct {
 	Duration          time.Duration
 	lastSnapshotTimes map[string]time.Time // 聚合键 -> 上次快照时间
-	snapshotStore     ISnapshotStore
+	snapshotStore     ISnapshotStore[ID]
 	mutex             sync.RWMutex
 }
 
 // NewTimeDurationStrategy 创建时间间隔策略
-func NewTimeDurationStrategy(duration time.Duration, snapshotStore ISnapshotStore) *TimeDurationStrategy {
+func NewTimeDurationStrategy[ID comparable](duration time.Duration, snapshotStore ISnapshotStore[ID]) *TimeDurationStrategy[ID] {
 	if duration <= 0 {
 		duration = 24 * time.Hour // 默认24小时
 	}
-	return &TimeDurationStrategy{
+	return &TimeDurationStrategy[ID]{
 		Duration:          duration,
 		lastSnapshotTimes: make(map[string]time.Time),
 		snapshotStore:     snapshotStore,
@@ -72,7 +72,7 @@ func NewTimeDurationStrategy(duration time.Duration, snapshotStore ISnapshotStor
 }
 
 // ShouldCreateSnapshot 判断是否应该创建快照
-func (s *TimeDurationStrategy) ShouldCreateSnapshot(ctx context.Context, aggregate ISnapshotAggregate) (bool, error) {
+func (s *TimeDurationStrategy[ID]) ShouldCreateSnapshot(ctx context.Context, aggregate ISnapshotAggregate[ID]) (bool, error) {
 	aggregateID := aggregate.GetID()
 	aggregateType := aggregate.GetAggregateType()
 	key := snapshotKey(aggregateType, aggregateID)
@@ -96,12 +96,12 @@ func (s *TimeDurationStrategy) ShouldCreateSnapshot(ctx context.Context, aggrega
 }
 
 // GetName 获取策略名称
-func (s *TimeDurationStrategy) GetName() string {
+func (s *TimeDurationStrategy[ID]) GetName() string {
 	return "TimeDurationStrategy"
 }
 
 // UpdateLastSnapshotTime 更新最后快照时间
-func (s *TimeDurationStrategy) UpdateLastSnapshotTime(aggregateType string, aggregateID int64, timestamp time.Time) {
+func (s *TimeDurationStrategy[ID]) UpdateLastSnapshotTime(aggregateType string, aggregateID ID, timestamp time.Time) {
 	s.mutex.Lock()
 	key := snapshotKey(aggregateType, aggregateID)
 	s.lastSnapshotTimes[key] = timestamp
@@ -110,32 +110,32 @@ func (s *TimeDurationStrategy) UpdateLastSnapshotTime(aggregateType string, aggr
 
 // AggregateSizeStrategy 基于聚合大小的快照策略
 // 当聚合事件数量或数据大小超过阈值时创建快照
-type AggregateSizeStrategy struct {
+type AggregateSizeStrategy[ID comparable] struct {
 	MaxEvents    int // 最大事件数量
 	MaxSizeBytes int // 最大数据大小（字节）
 
 	// SizeEstimator 可选：估算聚合大小的函数
 	// 返回聚合占用的字节数，用于判断是否超过 MaxSizeBytes。
 	// 若未提供，则仅基于事件数量判断。
-	SizeEstimator func(aggregate ISnapshotAggregate) (int, error)
+	SizeEstimator func(aggregate ISnapshotAggregate[ID]) (int, error)
 }
 
 // NewAggregateSizeStrategy 创建聚合大小策略
-func NewAggregateSizeStrategy(maxEvents int, maxSizeBytes int) *AggregateSizeStrategy {
+func NewAggregateSizeStrategy[ID comparable](maxEvents int, maxSizeBytes int) *AggregateSizeStrategy[ID] {
 	if maxEvents <= 0 {
 		maxEvents = 1000 // 默认1000个事件
 	}
 	if maxSizeBytes <= 0 {
 		maxSizeBytes = 1024 * 1024 // 默认1MB
 	}
-	return &AggregateSizeStrategy{
+	return &AggregateSizeStrategy[ID]{
 		MaxEvents:    maxEvents,
 		MaxSizeBytes: maxSizeBytes,
 	}
 }
 
 // ShouldCreateSnapshot 判断是否应该创建快照
-func (s *AggregateSizeStrategy) ShouldCreateSnapshot(ctx context.Context, aggregate ISnapshotAggregate) (bool, error) {
+func (s *AggregateSizeStrategy[ID]) ShouldCreateSnapshot(ctx context.Context, aggregate ISnapshotAggregate[ID]) (bool, error) {
 	version := aggregate.GetVersion()
 
 	// 检查事件数量是否超过阈值
@@ -158,14 +158,14 @@ func (s *AggregateSizeStrategy) ShouldCreateSnapshot(ctx context.Context, aggreg
 }
 
 // GetName 获取策略名称
-func (s *AggregateSizeStrategy) GetName() string {
+func (s *AggregateSizeStrategy[ID]) GetName() string {
 	return "AggregateSizeStrategy"
 }
 
 // CompositeSnapshotStrategy 组合快照策略
 // 支持多个策略组合，任一策略满足条件即创建快照
-type CompositeSnapshotStrategy struct {
-	strategies []ISnapshotStrategy
+type CompositeSnapshotStrategy[ID comparable] struct {
+	strategies []ISnapshotStrategy[ID]
 	mode       CompositeMode
 }
 
@@ -180,23 +180,23 @@ const (
 )
 
 // NewCompositeSnapshotStrategy 创建组合策略
-func NewCompositeSnapshotStrategy(mode CompositeMode, strategies ...ISnapshotStrategy) *CompositeSnapshotStrategy {
+func NewCompositeSnapshotStrategy[ID comparable](mode CompositeMode, strategies ...ISnapshotStrategy[ID]) *CompositeSnapshotStrategy[ID] {
 	if mode == "" {
 		mode = CompositeModeAny // 默认使用ANY模式
 	}
-	return &CompositeSnapshotStrategy{
+	return &CompositeSnapshotStrategy[ID]{
 		strategies: strategies,
 		mode:       mode,
 	}
 }
 
 // AddStrategy 添加策略
-func (s *CompositeSnapshotStrategy) AddStrategy(strategy ISnapshotStrategy) {
+func (s *CompositeSnapshotStrategy[ID]) AddStrategy(strategy ISnapshotStrategy[ID]) {
 	s.strategies = append(s.strategies, strategy)
 }
 
 // ShouldCreateSnapshot 判断是否应该创建快照
-func (s *CompositeSnapshotStrategy) ShouldCreateSnapshot(ctx context.Context, aggregate ISnapshotAggregate) (bool, error) {
+func (s *CompositeSnapshotStrategy[ID]) ShouldCreateSnapshot(ctx context.Context, aggregate ISnapshotAggregate[ID]) (bool, error) {
 	if len(s.strategies) == 0 {
 		return false, nil
 	}
@@ -234,52 +234,52 @@ func (s *CompositeSnapshotStrategy) ShouldCreateSnapshot(ctx context.Context, ag
 }
 
 // GetName 获取策略名称
-func (s *CompositeSnapshotStrategy) GetName() string {
+func (s *CompositeSnapshotStrategy[ID]) GetName() string {
 	return "CompositeSnapshotStrategy"
 }
 
 // GetStrategies 获取所有子策略
-func (s *CompositeSnapshotStrategy) GetStrategies() []ISnapshotStrategy {
+func (s *CompositeSnapshotStrategy[ID]) GetStrategies() []ISnapshotStrategy[ID] {
 	return s.strategies
 }
 
 // GetMode 获取组合模式
-func (s *CompositeSnapshotStrategy) GetMode() CompositeMode {
+func (s *CompositeSnapshotStrategy[ID]) GetMode() CompositeMode {
 	return s.mode
 }
 
 // PresetSnapshotStrategies 预设快照策略
-type PresetSnapshotStrategies struct{}
+type PresetSnapshotStrategies[ID comparable] struct{}
 
 // DefaultStrategy 默认策略（每100个事件）
-func (PresetSnapshotStrategies) DefaultStrategy() ISnapshotStrategy {
-	return NewEventCountStrategy(100)
+func (PresetSnapshotStrategies[ID]) DefaultStrategy() ISnapshotStrategy[ID] {
+	return NewEventCountStrategy[ID](100)
 }
 
 // AggressiveStrategy 激进策略（每50个事件或12小时）
-func (PresetSnapshotStrategies) AggressiveStrategy(snapshotStore ISnapshotStore) ISnapshotStrategy {
-	return NewCompositeSnapshotStrategy(
+func (PresetSnapshotStrategies[ID]) AggressiveStrategy(snapshotStore ISnapshotStore[ID]) ISnapshotStrategy[ID] {
+	return NewCompositeSnapshotStrategy[ID](
 		CompositeModeAny,
-		NewEventCountStrategy(50),
-		NewTimeDurationStrategy(12*time.Hour, snapshotStore),
+		NewEventCountStrategy[ID](50),
+		NewTimeDurationStrategy[ID](12*time.Hour, snapshotStore),
 	)
 }
 
 // ConservativeStrategy 保守策略（每200个事件且至少48小时）
-func (PresetSnapshotStrategies) ConservativeStrategy(snapshotStore ISnapshotStore) ISnapshotStrategy {
-	return NewCompositeSnapshotStrategy(
+func (PresetSnapshotStrategies[ID]) ConservativeStrategy(snapshotStore ISnapshotStore[ID]) ISnapshotStrategy[ID] {
+	return NewCompositeSnapshotStrategy[ID](
 		CompositeModeAll,
-		NewEventCountStrategy(200),
-		NewTimeDurationStrategy(48*time.Hour, snapshotStore),
+		NewEventCountStrategy[ID](200),
+		NewTimeDurationStrategy[ID](48*time.Hour, snapshotStore),
 	)
 }
 
 // HighVolumeStrategy 高频策略（适合高并发聚合）
-func (PresetSnapshotStrategies) HighVolumeStrategy(snapshotStore ISnapshotStore) ISnapshotStrategy {
-	return NewCompositeSnapshotStrategy(
+func (PresetSnapshotStrategies[ID]) HighVolumeStrategy(snapshotStore ISnapshotStore[ID]) ISnapshotStrategy[ID] {
+	return NewCompositeSnapshotStrategy[ID](
 		CompositeModeAny,
-		NewEventCountStrategy(20),
-		NewAggregateSizeStrategy(500, 512*1024), // 500事件或512KB
-		NewTimeDurationStrategy(6*time.Hour, snapshotStore),
+		NewEventCountStrategy[ID](20),
+		NewAggregateSizeStrategy[ID](500, 512*1024), // 500事件或512KB
+		NewTimeDurationStrategy[ID](6*time.Hour, snapshotStore),
 	)
 }

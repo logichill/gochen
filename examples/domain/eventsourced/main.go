@@ -74,7 +74,7 @@ func main() {
 	bus := ebus.NewEventBus(messaging.NewMessageBus(mtransport.NewMemoryTransport(1000, 2)))
 
 	// 构造 IEventStore 实现
-	eventStoreAdapter, err := eventsourced.NewDomainEventStore[*Account](eventsourced.DomainEventStoreOptions[*Account]{
+	eventStoreAdapter, err := eventsourced.NewDomainEventStore(eventsourced.DomainEventStoreOptions[*Account, int64]{
 		AggregateType: "account",
 		Factory:       NewAccount,
 		EventStore:    store,
@@ -93,7 +93,11 @@ func main() {
 
 	// 订阅打印事件
 	_ = bus.SubscribeEvent(context.Background(), "*", ebus.EventHandlerFunc(func(ctx context.Context, evt eventing.IEvent) error {
-		log.Printf("事件: %s v%d -> agg=%d", evt.GetType(), evt.GetVersion(), evt.GetAggregateID())
+		aggID := int64(0)
+		if typed, ok := evt.(eventing.ITypedEvent[int64]); ok {
+			aggID = typed.GetAggregateID()
+		}
+		log.Printf("事件: %s v%d -> agg=%d", evt.GetType(), evt.GetVersion(), aggID)
 		return nil
 	}))
 

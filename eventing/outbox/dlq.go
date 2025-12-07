@@ -33,10 +33,10 @@ func (DLQEntry) TableName() string {
 }
 
 // ToEvent 将 DLQ 记录转换为事件
-func (e *DLQEntry) ToEvent() (eventing.Event, error) {
-	var evt eventing.Event
+func (e *DLQEntry) ToEvent() (eventing.Event[int64], error) {
+	var evt eventing.Event[int64]
 	if err := json.Unmarshal([]byte(e.EventData), &evt); err != nil {
-		return eventing.Event{}, fmt.Errorf("unmarshal event data: %w", err)
+		return eventing.Event[int64]{}, fmt.Errorf("unmarshal event data: %w", err)
 	}
 	return evt, nil
 }
@@ -70,7 +70,7 @@ type IDLQRepository interface {
 // SQLDLQRepository DLQ 的 SQL 实现
 type SQLDLQRepository struct {
 	db          db.IDatabase
-	outboxRepo  IOutboxRepository
+	outboxRepo  IOutboxRepository[int64]
 	maxRetries  int
 	autoCleanup bool
 }
@@ -81,7 +81,7 @@ type SQLDLQRepository struct {
 // autoCleanup 指定是否在移到 DLQ 后自动删除 Outbox 记录。
 func NewSQLDLQRepository(
 	db db.IDatabase,
-	outboxRepo IOutboxRepository,
+	outboxRepo IOutboxRepository[int64],
 	maxRetries int,
 	autoCleanup bool,
 ) IDLQRepository {

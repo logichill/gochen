@@ -15,7 +15,7 @@ import (
 )
 
 func TestToEvent_ReturnsOriginal(t *testing.T) {
-	evt := eventing.NewEvent(1, "Order", "OrderCreated", 1, map[string]any{"k": "v"})
+	evt := eventing.NewEvent[int64](1, "Order", "OrderCreated", 1, map[string]any{"k": "v"})
 
 	out, err := ToEvent(evt)
 	require.NoError(t, err)
@@ -24,7 +24,7 @@ func TestToEvent_ReturnsOriginal(t *testing.T) {
 
 func TestToEvent_FromBridgeMessageWithRaw(t *testing.T) {
 	serializer := bridge.NewJSONSerializer()
-	orig := eventing.NewEvent(123, "Order", "OrderCreated", 3, map[string]any{"foo": "bar"}, 4)
+	orig := eventing.NewEvent[int64](123, "Order", "OrderCreated", 3, map[string]any{"foo": "bar"}, 4)
 
 	data, err := serializer.SerializeEvent(orig)
 	require.NoError(t, err)
@@ -35,12 +35,15 @@ func TestToEvent_FromBridgeMessageWithRaw(t *testing.T) {
 	out, err := ToEvent(msg)
 	require.NoError(t, err)
 
-	assert.Equal(t, orig.AggregateID, out.GetAggregateID())
-	assert.Equal(t, orig.AggregateType, out.GetAggregateType())
-	assert.Equal(t, orig.GetType(), out.GetType())
-	assert.Equal(t, orig.GetVersion(), out.GetVersion())
-	assert.Equal(t, orig.GetSchemaVersion(), out.(interface{ GetSchemaVersion() int }).GetSchemaVersion())
-	assert.Equal(t, orig.GetPayload(), out.GetPayload())
+	typed, ok := out.(*eventing.Event[int64])
+	require.True(t, ok)
+
+	assert.Equal(t, orig.AggregateID, typed.GetAggregateID())
+	assert.Equal(t, orig.AggregateType, typed.GetAggregateType())
+	assert.Equal(t, orig.GetType(), typed.GetType())
+	assert.Equal(t, orig.GetVersion(), typed.GetVersion())
+	assert.Equal(t, orig.GetSchemaVersion(), typed.GetSchemaVersion())
+	assert.Equal(t, orig.GetPayload(), typed.GetPayload())
 }
 
 func TestRegisterBridgeEventHandler_WithAdapter(t *testing.T) {
@@ -52,7 +55,7 @@ func TestRegisterBridgeEventHandler_WithAdapter(t *testing.T) {
 	require.NotNil(t, br.lastEventHandler)
 
 	serializer := bridge.NewJSONSerializer()
-	evt := eventing.NewEvent(10, "Order", "OrderCreated", 1, map[string]any{"x": 1})
+	evt := eventing.NewEvent[int64](10, "Order", "OrderCreated", 1, map[string]any{"x": 1})
 	data, err := serializer.SerializeEvent(evt)
 	require.NoError(t, err)
 	msg, err := serializer.DeserializeEvent(data)
@@ -63,7 +66,9 @@ func TestRegisterBridgeEventHandler_WithAdapter(t *testing.T) {
 
 	assert.True(t, handler.called)
 	assert.Equal(t, evt.GetID(), handler.lastEvent.GetID())
-	assert.Equal(t, evt.AggregateID, handler.lastEvent.GetAggregateID())
+	typed, ok := handler.lastEvent.(*eventing.Event[int64])
+	require.True(t, ok)
+	assert.Equal(t, evt.AggregateID, typed.GetAggregateID())
 }
 
 type stubBridge struct {

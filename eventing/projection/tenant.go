@@ -74,7 +74,7 @@ func (p *TenantAwareProjector) GetStatus() ProjectionStatus {
 }
 
 // Rebuild 重建投影
-func (p *TenantAwareProjector) Rebuild(ctx context.Context, events []eventing.Event) error {
+func (p *TenantAwareProjector) Rebuild(ctx context.Context, events []eventing.Event[int64]) error {
 	// 过滤租户事件
 	contextTenantID := httpx.GetTenantID(ctx)
 	if contextTenantID == "" {
@@ -83,7 +83,7 @@ func (p *TenantAwareProjector) Rebuild(ctx context.Context, events []eventing.Ev
 	}
 
 	// 过滤事件
-	filteredEvents := make([]eventing.Event, 0, len(events))
+	filteredEvents := make([]eventing.Event[int64], 0, len(events))
 	for _, event := range events {
 		eventTenantID := extractTenantIDFromEvent(&event)
 		if eventTenantID == contextTenantID {
@@ -95,7 +95,7 @@ func (p *TenantAwareProjector) Rebuild(ctx context.Context, events []eventing.Ev
 }
 
 // extractTenantIDFromEvent 从事件中提取租户 ID
-func extractTenantIDFromEvent(event *eventing.Event) string {
+func extractTenantIDFromEvent(event *eventing.Event[int64]) string {
 	if event == nil {
 		return ""
 	}

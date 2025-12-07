@@ -8,15 +8,14 @@ import (
 	"time"
 
 	"gochen/eventing/monitoring"
-	"gochen/eventing/store"
 	"gochen/logging"
 )
 
 // Manager 快照管理器
-type Manager struct {
-	snapshotStore ISnapshotStore
+type Manager[ID comparable] struct {
+	snapshotStore ISnapshotStore[ID]
 	config        *Config
-	strategy      ISnapshotStrategy // 快照策略
+	strategy      ISnapshotStrategy[ID] // 快照策略
 	mutex         sync.RWMutex
 }
 
@@ -34,30 +33,30 @@ func DefaultConfig() *Config {
 }
 
 // NewManager 创建快照管理器
-func NewManager(snapshotStore ISnapshotStore, eventStore store.IEventStore, config *Config) *Manager {
+func NewManager[ID comparable](snapshotStore ISnapshotStore[ID], config *Config) *Manager[ID] {
 	if config == nil {
 		config = DefaultConfig()
 	}
-	defaultStrategy := NewEventCountStrategy(config.Frequency)
-	return &Manager{snapshotStore: snapshotStore, config: config, strategy: defaultStrategy}
+	defaultStrategy := NewEventCountStrategy[ID](config.Frequency)
+	return &Manager[ID]{snapshotStore: snapshotStore, config: config, strategy: defaultStrategy}
 }
 
 // SetStrategy 设置快照策略
-func (sm *Manager) SetStrategy(strategy ISnapshotStrategy) {
+func (sm *Manager[ID]) SetStrategy(strategy ISnapshotStrategy[ID]) {
 	sm.mutex.Lock()
 	sm.strategy = strategy
 	sm.mutex.Unlock()
 }
 
 // GetStrategy 获取当前快照策略
-func (sm *Manager) GetStrategy() ISnapshotStrategy {
+func (sm *Manager[ID]) GetStrategy() ISnapshotStrategy[ID] {
 	sm.mutex.RLock()
 	defer sm.mutex.RUnlock()
 	return sm.strategy
 }
 
 // ShouldCreateSnapshot 判断是否应该创建快照
-func (sm *Manager) ShouldCreateSnapshot(ctx context.Context, aggregate ISnapshotAggregate) (bool, error) {
+func (sm *Manager[ID]) ShouldCreateSnapshot(ctx context.Context, aggregate ISnapshotAggregate[ID]) (bool, error) {
 	if !sm.config.Enabled || aggregate == nil {
 		return false, nil
 	}
@@ -89,7 +88,7 @@ func (sm *Manager) ShouldCreateSnapshot(ctx context.Context, aggregate ISnapshot
 }
 
 // CreateSnapshot 创建快照
-func (sm *Manager) CreateSnapshot(ctx context.Context, aggregateID int64, aggregateType string, data any, version uint64) error {
+func (sm *Manager[ID]) CreateSnapshot(ctx context.Context, aggregateID ID, aggregateType string, data any, version uint64) error {
 	if !sm.config.Enabled {
 		return nil
 	}
@@ -98,23 +97,26 @@ func (sm *Manager) CreateSnapshot(ctx context.Context, aggregateID int64, aggreg
 	if lightweight, ok := data.(interface{ GetSnapshotData() any }); ok {
 		snapshotData = lightweight.GetSnapshotData()
 		snapshotLogger().Debug(ctx, "[SnapshotManager] 使用轻量快照",
-			logging.Int64("aggregate_id", aggregateID), logging.String("aggregate_type", aggregateType))
+			logging.Any("aggregate_id", aggregateID), logging.String("aggregate_type", aggregateType))
 	}
 	serializedData, err := json.Marshal(snapshotData)
 	if err != nil {
 		return fmt.Errorf("failed to serialize snapshot data: %w", err)
 	}
-	snap := Snapshot{AggregateID: aggregateID, AggregateType: aggregateType, Version: version, Data: serializedData, Timestamp: time.Now(), Metadata: map[string]any{"created_by": "snapshot_manager", "data_size": len(serializedData)}}
+	snap := Snapshot[ID]{AggregateID: aggregateID, AggregateType: aggregateType, Version: version, Data: serializedData, Timestamp: time.Now(), Metadata: map[string]any{"created_by": "snapshot_manager", "data_size": len(serializedData)}}
 	if err := sm.snapshotStore.SaveSnapshot(ctx, snap); err != nil {
 		return fmt.Errorf("failed to save snapshot: %w", err)
 	}
 	monitoring.GlobalMetrics().RecordSnapshotCreated(time.Since(start))
-	snapshotLogger().Info(ctx, "[SnapshotManager] 创建快照成功", logging.Int64("aggregate_id", aggregateID), logging.Any("version", version), logging.Int("data_size", len(serializedData)))
+	snapshotLogger().Info(ctx, "[SnapshotManager] 创建快照成功",
+		logging.Any("aggregate_id", aggregateID),
+		logging.Any("version", version),
+		logging.Int("data_size", len(serializedData)))
 	return nil
 }
 
 // LoadSnapshot 加载快照
-func (sm *Manager) LoadSnapshot(ctx context.Context, aggregateID int64, target any) (*Snapshot, error) {
+func (sm *Manager[ID]) LoadSnapshot(ctx context.Context, aggregateID ID, target any) (*Snapshot[ID], error) {
 	start := time.Now()
 	aggregateType := ""
 	if typed, ok := target.(interface{ GetAggregateType() string }); ok {
@@ -135,7 +137,8 @@ func (sm *Manager) LoadSnapshot(ctx context.Context, aggregateID int64, target a
 			monitoring.GlobalMetrics().RecordSnapshotLoaded(time.Since(start), false)
 			return nil, fmt.Errorf("failed to restore from lightweight snapshot: %w", err)
 		}
-		snapshotLogger().Debug(ctx, "[SnapshotManager] 使用轻量快照恢复", logging.Int64("aggregate_id", aggregateID))
+		snapshotLogger().Debug(ctx, "[SnapshotManager] 使用轻量快照恢复",
+			logging.Any("aggregate_id", aggregateID))
 	} else {
 		if err := json.Unmarshal(snapshot.Data, target); err != nil {
 			monitoring.GlobalMetrics().RecordSnapshotLoaded(time.Since(start), false)
@@ -143,17 +146,19 @@ func (sm *Manager) LoadSnapshot(ctx context.Context, aggregateID int64, target a
 		}
 	}
 	monitoring.GlobalMetrics().RecordSnapshotLoaded(time.Since(start), true)
-	snapshotLogger().Debug(ctx, "[SnapshotManager] 加载快照成功", logging.Int64("aggregate_id", aggregateID), logging.Any("version", snapshot.Version))
+	snapshotLogger().Debug(ctx, "[SnapshotManager] 加载快照成功",
+		logging.Any("aggregate_id", aggregateID),
+		logging.Any("version", snapshot.Version))
 	return snapshot, nil
 }
 
 // CleanupOldSnapshots 清理旧快照
-func (sm *Manager) CleanupOldSnapshots(ctx context.Context) error {
+func (sm *Manager[ID]) CleanupOldSnapshots(ctx context.Context) error {
 	return sm.snapshotStore.CleanupSnapshots(ctx, sm.config.RetentionPeriod)
 }
 
 // GetSnapshotStats 获取快照统计信息
-func (sm *Manager) GetSnapshotStats(ctx context.Context) (map[string]any, error) {
+func (sm *Manager[ID]) GetSnapshotStats(ctx context.Context) (map[string]any, error) {
 	snapshots, err := sm.snapshotStore.GetSnapshots(ctx, "", 0)
 	if err != nil {
 		return nil, err

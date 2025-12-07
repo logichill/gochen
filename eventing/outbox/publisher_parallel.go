@@ -25,7 +25,7 @@ import (
 //	err := publisher.Start(ctx)
 //	defer publisher.Stop()
 type ParallelPublisher struct {
-	repo        IOutboxRepository
+	repo        IOutboxRepository[int64]
 	bus         bus.IEventBus
 	cfg         OutboxConfig
 	log         logging.ILogger
@@ -48,7 +48,7 @@ type ParallelPublisher struct {
 //   - CPU 密集型：CPU 核数
 //   - IO 密集型：CPU 核数 * 2 ~ 4
 func NewParallelPublisher(
-	repo IOutboxRepository,
+	repo IOutboxRepository[int64],
 	bus bus.IEventBus,
 	cfg OutboxConfig,
 	logger logging.ILogger,

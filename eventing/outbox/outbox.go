@@ -45,9 +45,9 @@ func (OutboxEntry) TableName() string {
 }
 
 // IOutboxRepository 定义 Outbox 仓储接口
-type IOutboxRepository interface {
+type IOutboxRepository[ID comparable] interface {
 	// SaveWithEvents 在同一事务中保存聚合事件和 Outbox 记录
-	SaveWithEvents(ctx context.Context, aggregateID int64, events []eventing.Event) error
+	SaveWithEvents(ctx context.Context, aggregateID ID, events []eventing.Event[ID]) error
 
 	// GetPendingEntries 获取待发布的 Outbox 记录
 	GetPendingEntries(ctx context.Context, limit int) ([]OutboxEntry, error)
@@ -108,7 +108,7 @@ func DefaultOutboxConfig() OutboxConfig {
 }
 
 // EventToOutboxEntry 将事件转换为 Outbox 记录
-func EventToOutboxEntry(aggregateID int64, event eventing.Event) (*OutboxEntry, error) {
+func EventToOutboxEntry(aggregateID int64, event eventing.Event[int64]) (*OutboxEntry, error) {
 	eventData, err := json.Marshal(event)
 	if err != nil {
 		return nil, err
@@ -124,10 +124,10 @@ func EventToOutboxEntry(aggregateID int64, event eventing.Event) (*OutboxEntry, 
 }
 
 // ToEvent 将 Outbox 记录转换回事件
-func (entry *OutboxEntry) ToEvent() (eventing.Event, error) {
-	var event eventing.Event
+func (entry *OutboxEntry) ToEvent() (eventing.Event[int64], error) {
+	var event eventing.Event[int64]
 	if err := json.Unmarshal([]byte(entry.EventData), &event); err != nil {
-		return eventing.Event{}, err
+		return eventing.Event[int64]{}, err
 	}
 	return event, nil
 }

@@ -26,7 +26,7 @@ type IIntegrationEvent interface {
 
 // IntegrationEvent 集成事件基础结构
 type IntegrationEvent struct {
-	eventing.Event
+	eventing.Event[int64]
 	TargetContext string    `json:"target_context"` // 目标上下文
 	CorrelationID string    `json:"correlation_id"` // 关联ID
 	SourceContext string    `json:"source_context"` // 来源上下文
@@ -64,7 +64,7 @@ func NewIntegrationEvent(
 	sourceContext string,
 	correlationID string,
 ) *IntegrationEvent {
-	evt := eventing.NewEvent(aggregateID, aggregateType, eventType, version, data)
+	evt := eventing.NewEvent[int64](aggregateID, aggregateType, eventType, version, data)
 
 	return &IntegrationEvent{
 		Event:         *evt,
@@ -91,9 +91,9 @@ func NewIntegrationEventWithoutCorrelation(
 // IntegrationEventPublisher 集成事件发布器
 // 负责将集成事件发布到外部系统（如消息队列、事件总线等）
 type IntegrationEventPublisher struct {
-	eventBus    bus.IEventBus     // 内部事件总线
-	messageBus  msg.IMessageBus   // 外部消息总线（可选）
-	eventStore  store.IEventStore // 集成事件存储（可选，用于确保至少一次投递）
+	eventBus    bus.IEventBus           // 内部事件总线
+	messageBus  msg.IMessageBus         // 外部消息总线（可选）
+	eventStore  store.IEventStore[int64] // 集成事件存储（可选，用于确保至少一次投递）
 	handlers    map[string][]IntegrationEventHandler
 	mutex       sync.RWMutex
 	enableStore bool // 是否启用集成事件持久化
@@ -107,7 +107,7 @@ type IntegrationEventHandler func(ctx context.Context, event IIntegrationEvent) 
 func NewIntegrationEventPublisher(
 	eventBus bus.IEventBus,
 	messageBus msg.IMessageBus,
-	eventStore store.IEventStore,
+	eventStore store.IEventStore[int64],
 ) *IntegrationEventPublisher {
 	publisher := &IntegrationEventPublisher{
 		eventBus:    eventBus,
@@ -142,7 +142,7 @@ func (p *IntegrationEventPublisher) Publish(ctx context.Context, event IIntegrat
 	if p.enableStore && p.eventStore != nil {
 		evt := event.(*IntegrationEvent).Event
 		// 使用版本0表示这是集成事件，不参与聚合版本控制
-		if err := p.eventStore.AppendEvents(ctx, evt.AggregateID, []eventing.IStorableEvent{&evt}, 0); err != nil {
+		if err := p.eventStore.AppendEvents(ctx, evt.AggregateID, []eventing.IStorableEvent[int64]{&evt}, 0); err != nil {
 			return fmt.Errorf("failed to persist integration event: %w", err)
 		}
 	}

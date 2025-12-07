@@ -11,7 +11,7 @@ import (
 
 // Publisher 实现 IOutboxPublisher，按批拉取未发布记录并发布到事件总线
 type Publisher struct {
-	repo IOutboxRepository
+	repo IOutboxRepository[int64]
 	bus  bus.IEventBus
 	cfg  OutboxConfig
 	log  logging.ILogger
@@ -25,7 +25,7 @@ type Publisher struct {
 	stopOnce sync.Once
 }
 
-func NewPublisher(repo IOutboxRepository, bus bus.IEventBus, cfg OutboxConfig, logger logging.ILogger) *Publisher {
+func NewPublisher(repo IOutboxRepository[int64], bus bus.IEventBus, cfg OutboxConfig, logger logging.ILogger) *Publisher {
 	if logger == nil {
 		logger = logging.ComponentLogger("eventing.outbox.publisher")
 	}

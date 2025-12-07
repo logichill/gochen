@@ -28,17 +28,17 @@ import (
 //	// 所有事件的 Metadata["causation_id"] = "cmd-456"
 type TracingEventStore struct {
 	store interface {
-		AppendEvents(ctx context.Context, aggregateID int64, events []IStorableEvent, expectedVersion uint64) error
-		LoadEvents(ctx context.Context, aggregateID int64, afterVersion uint64) ([]Event, error)
-		StreamEvents(ctx context.Context, fromTime time.Time) ([]Event, error)
+		AppendEvents(ctx context.Context, aggregateID int64, events []IStorableEvent[int64], expectedVersion uint64) error
+		LoadEvents(ctx context.Context, aggregateID int64, afterVersion uint64) ([]Event[int64], error)
+		StreamEvents(ctx context.Context, fromTime time.Time) ([]Event[int64], error)
 	}
 }
 
 // NewTracingEventStore 创建带追踪的事件存储
 func NewTracingEventStore(store interface {
-	AppendEvents(ctx context.Context, aggregateID int64, events []IStorableEvent, expectedVersion uint64) error
-	LoadEvents(ctx context.Context, aggregateID int64, afterVersion uint64) ([]Event, error)
-	StreamEvents(ctx context.Context, fromTime time.Time) ([]Event, error)
+	AppendEvents(ctx context.Context, aggregateID int64, events []IStorableEvent[int64], expectedVersion uint64) error
+	LoadEvents(ctx context.Context, aggregateID int64, afterVersion uint64) ([]Event[int64], error)
+	StreamEvents(ctx context.Context, fromTime time.Time) ([]Event[int64], error)
 }) *TracingEventStore {
 	return &TracingEventStore{
 		store: store,
@@ -46,7 +46,7 @@ func NewTracingEventStore(store interface {
 }
 
 // AppendEvents 追加事件（自动注入追踪 ID）
-func (s *TracingEventStore) AppendEvents(ctx context.Context, aggregateID int64, events []IStorableEvent, expectedVersion uint64) error {
+func (s *TracingEventStore) AppendEvents(ctx context.Context, aggregateID int64, events []IStorableEvent[int64], expectedVersion uint64) error {
 	// 自动注入追踪 ID 到所有事件
 	for _, event := range events {
 		s.injectTraceContext(ctx, event)
@@ -56,23 +56,23 @@ func (s *TracingEventStore) AppendEvents(ctx context.Context, aggregateID int64,
 }
 
 // LoadEvents 加载事件
-func (s *TracingEventStore) LoadEvents(ctx context.Context, aggregateID int64, afterVersion uint64) ([]Event, error) {
+func (s *TracingEventStore) LoadEvents(ctx context.Context, aggregateID int64, afterVersion uint64) ([]Event[int64], error) {
 	return s.store.LoadEvents(ctx, aggregateID, afterVersion)
 }
 
 // StreamEvents 流式读取事件
-func (s *TracingEventStore) StreamEvents(ctx context.Context, fromTime time.Time) ([]Event, error) {
+func (s *TracingEventStore) StreamEvents(ctx context.Context, fromTime time.Time) ([]Event[int64], error) {
 	return s.store.StreamEvents(ctx, fromTime)
 }
 
 // injectTraceContext 注入追踪上下文到事件
-func (s *TracingEventStore) injectTraceContext(ctx context.Context, event IStorableEvent) {
+func (s *TracingEventStore) injectTraceContext(ctx context.Context, event IStorableEvent[int64]) {
 	// 从 Context 提取追踪 ID
 	correlationID := httpx.GetCorrelationID(ctx)
 	causationID := httpx.GetCausationID(ctx)
 
 	// 注入到事件的 Metadata
-	if e, ok := event.(*Event); ok {
+	if e, ok := event.(*Event[int64]); ok {
 		if e.Metadata == nil {
 			e.Metadata = make(map[string]any)
 		}

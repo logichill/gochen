@@ -359,14 +359,14 @@ type IEventSourcedRepository[T IEventSourcedAggregate[ID], ID comparable] interf
 #### 事件存储接口
 
 ```go
-// IEventStore 事件存储核心接口
-type IEventStore interface {
+// IEventStore 事件存储核心接口（ID 为聚合 ID 类型，常用为 int64）
+type IEventStore[ID comparable] interface {
     // AppendEvents 追加事件到指定聚合的事件流
-    AppendEvents(ctx context.Context, aggregateID int64, 
+    AppendEvents(ctx context.Context, aggregateID ID,
                  events []IEvent, expectedVersion uint64) error
     
     // LoadEvents 加载聚合的事件历史
-    LoadEvents(ctx context.Context, aggregateID int64, 
+    LoadEvents(ctx context.Context, aggregateID ID,
                afterVersion uint64) ([]IEvent, error)
     
     // StreamEvents 拉取指定时间之后的事件列表（按时间升序）
@@ -375,16 +375,16 @@ type IEventStore interface {
 }
 
 // IAggregateInspector 聚合检查器接口
-type IAggregateInspector interface {
-    HasAggregate(ctx context.Context, aggregateID int64) (bool, error)
-    GetAggregateVersion(ctx context.Context, aggregateID int64) (uint64, error)
+type IAggregateInspector[ID comparable] interface {
+    HasAggregate(ctx context.Context, aggregateID ID) (bool, error)
+    GetAggregateVersion(ctx context.Context, aggregateID ID) (uint64, error)
 }
 
 // ITypedEventStore 类型化事件存储接口
-type ITypedEventStore interface {
-    IEventStore
-    LoadEventsByType(ctx context.Context, aggregateType string, 
-                     aggregateID int64, afterVersion uint64) ([]IEvent, error)
+type ITypedEventStore[ID comparable] interface {
+    IEventStore[ID]
+    LoadEventsByType(ctx context.Context, aggregateType string,
+                     aggregateID ID, afterVersion uint64) ([]IEvent, error)
 }
 ```
 
@@ -884,7 +884,7 @@ Gochen Shared 遵循企业级 Go 项目命名规范：
 ```go
 // ✅ 正确
 type IRepository interface { ... }
-type IEventStore interface { ... }
+type IEventStore[ID comparable] interface { ... }
 type IMessageBus interface { ... }
 
 // ❌ 错误
@@ -945,7 +945,8 @@ sqlEventStore := eventstore.NewSQLEventStore(db, "event_store")
 obRepo := outbox.NewSimpleSQLOutboxRepository(db, sqlEventStore, logging.GetLogger())
 
 // 应用层：构建 IEventStore 实现（含 Outbox）
-storeWithOutbox, _ := appeventsourced.NewDomainEventStore[*Account](appeventsourced.DomainEventStoreOptions[*Account]{
+storeWithOutbox, _ := appeventsourced.NewDomainEventStore(
+	appeventsourced.DomainEventStoreOptions[*Account, int64]{
     AggregateType: "account",
     Factory:       NewAccount,
     EventStore:    sqlEventStore,

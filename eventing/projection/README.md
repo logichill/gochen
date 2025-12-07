@@ -371,7 +371,7 @@ func (m *ProjectionManager) Rebuild(ctx context.Context, projectionName string) 
     }
     
     // 2. 重新处理所有事件（优先使用游标接口，避免一次性拉取过多数据）
-    if extended, ok := m.eventStore.(store.IEventStoreExtended); ok {
+    if extended, ok := m.eventStore.(store.IEventStoreExtended[int64]); ok {
         stream, err := extended.GetEventStreamWithCursor(ctx, &store.StreamOptions{Limit: 500})
         if err != nil {
             return err

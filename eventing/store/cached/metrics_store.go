@@ -17,18 +17,19 @@ type IMetricsRecorder interface {
 
 // MetricsEventStore 为任意 EventStore 增加简单的指标记录
 type MetricsEventStore struct {
-	inner estore.IEventStore
+	inner estore.IEventStore[int64]
 	mr    IMetricsRecorder
 }
 
-func NewMetricsEventStore(inner estore.IEventStore, mr IMetricsRecorder) *MetricsEventStore {
+// NewMetricsEventStore 为 IEventStore[int64] 增加简单的指标记录能力。
+func NewMetricsEventStore(inner estore.IEventStore[int64], mr IMetricsRecorder) *MetricsEventStore {
 	if inner == nil {
 		panic("NewMetricsEventStore: inner IEventStore cannot be nil")
 	}
 	return &MetricsEventStore{inner: inner, mr: mr}
 }
 
-func (m *MetricsEventStore) AppendEvents(ctx context.Context, aggregateID int64, events []eventing.IStorableEvent, expectedVersion uint64) error {
+func (m *MetricsEventStore) AppendEvents(ctx context.Context, aggregateID int64, events []eventing.IStorableEvent[int64], expectedVersion uint64) error {
 	start := time.Now()
 	err := m.inner.AppendEvents(ctx, aggregateID, events, expectedVersion)
 	if m.mr != nil {
@@ -37,7 +38,7 @@ func (m *MetricsEventStore) AppendEvents(ctx context.Context, aggregateID int64,
 	return err
 }
 
-func (m *MetricsEventStore) LoadEvents(ctx context.Context, aggregateID int64, afterVersion uint64) ([]eventing.Event, error) {
+func (m *MetricsEventStore) LoadEvents(ctx context.Context, aggregateID int64, afterVersion uint64) ([]eventing.Event[int64], error) {
 	start := time.Now()
 	evs, err := m.inner.LoadEvents(ctx, aggregateID, afterVersion)
 	if m.mr != nil {
@@ -46,7 +47,7 @@ func (m *MetricsEventStore) LoadEvents(ctx context.Context, aggregateID int64, a
 	return evs, err
 }
 
-func (m *MetricsEventStore) StreamEvents(ctx context.Context, from time.Time) ([]eventing.Event, error) {
+func (m *MetricsEventStore) StreamEvents(ctx context.Context, from time.Time) ([]eventing.Event[int64], error) {
 	start := time.Now()
 	evs, err := m.inner.StreamEvents(ctx, from)
 	if m.mr != nil {
@@ -56,19 +57,19 @@ func (m *MetricsEventStore) StreamEvents(ctx context.Context, from time.Time) ([
 }
 
 // GetEventStreamWithCursor 若底层支持扩展接口则委托，否则回退到 StreamEvents 并应用过滤
-func (m *MetricsEventStore) GetEventStreamWithCursor(ctx context.Context, opts *estore.StreamOptions) (*estore.StreamResult, error) {
+func (m *MetricsEventStore) GetEventStreamWithCursor(ctx context.Context, opts *estore.StreamOptions) (*estore.StreamResult[int64], error) {
 	start := time.Now()
 	var (
-		res *estore.StreamResult
+		res *estore.StreamResult[int64]
 		err error
 	)
-	if extended, ok := m.inner.(estore.IEventStoreExtended); ok {
+	if extended, ok := m.inner.(estore.IEventStoreExtended[int64]); ok {
 		res, err = extended.GetEventStreamWithCursor(ctx, opts)
 	} else {
-		var evs []eventing.Event
+		var evs []eventing.Event[int64]
 		evs, err = m.inner.StreamEvents(ctx, opts.FromTime)
 		if err == nil {
-			res = estore.FilterEventsWithOptions(evs, opts)
+			res = estore.FilterEventsWithOptions[int64](evs, opts)
 		}
 	}
 
@@ -83,4 +84,4 @@ func (m *MetricsEventStore) GetEventStreamWithCursor(ctx context.Context, opts *
 }
 
 // 接口断言
-var _ estore.IEventStoreExtended = (*MetricsEventStore)(nil)
+var _ estore.IEventStoreExtended[int64] = (*MetricsEventStore)(nil)

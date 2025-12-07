@@ -27,7 +27,7 @@ type MockOutboxRepository struct {
 	deletePublishError error
 }
 
-func (m *MockOutboxRepository) SaveWithEvents(ctx context.Context, aggregateID int64, events []eventing.Event) error {
+func (m *MockOutboxRepository) SaveWithEvents(ctx context.Context, aggregateID int64, events []eventing.Event[int64]) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, evt := range events {
@@ -129,7 +129,7 @@ func (m *MockOutboxRepository) DeletedPublished() bool {
 // MockEventBus 模拟事件总线
 type MockEventBus struct {
 	mu              sync.Mutex
-	publishedEvents []eventing.Event
+	publishedEvents []eventing.Event[int64]
 	publishError    error
 }
 
@@ -139,7 +139,7 @@ func (m *MockEventBus) Publish(ctx context.Context, message messaging.IMessage) 
 	if m.publishError != nil {
 		return m.publishError
 	}
-	if evt, ok := message.(*eventing.Event); ok {
+	if evt, ok := message.(*eventing.Event[int64]); ok {
 		m.publishedEvents = append(m.publishedEvents, *evt)
 	}
 	return nil
@@ -163,7 +163,7 @@ func (m *MockEventBus) PublishEvent(ctx context.Context, event eventing.IEvent) 
 	if m.publishError != nil {
 		return m.publishError
 	}
-	if evt, ok := event.(*eventing.Event); ok {
+	if evt, ok := event.(*eventing.Event[int64]); ok {
 		m.publishedEvents = append(m.publishedEvents, *evt)
 	}
 	return nil
@@ -217,7 +217,7 @@ func (m *MockEventBus) publishLocked(ctx context.Context, message messaging.IMes
 	if m.publishError != nil {
 		return m.publishError
 	}
-	if evt, ok := message.(*eventing.Event); ok {
+	if evt, ok := message.(*eventing.Event[int64]); ok {
 		m.publishedEvents = append(m.publishedEvents, *evt)
 	}
 	return nil
@@ -227,7 +227,7 @@ func (m *MockEventBus) publishEventLocked(ctx context.Context, event eventing.IE
 	if m.publishError != nil {
 		return m.publishError
 	}
-	if evt, ok := event.(*eventing.Event); ok {
+	if evt, ok := event.(*eventing.Event[int64]); ok {
 		m.publishedEvents = append(m.publishedEvents, *evt)
 	}
 	return nil
@@ -304,7 +304,7 @@ func TestPublisher_PublishPending(t *testing.T) {
 	evt1 := newTestEvent(1, 1, "event-1", nil)
 	evt2 := newTestEvent(2, 1, "event-2", nil)
 	ctx := context.Background()
-	_ = repo.SaveWithEvents(ctx, 1, []eventing.Event{evt1, evt2})
+	_ = repo.SaveWithEvents(ctx, 1, []eventing.Event[int64]{evt1, evt2})
 
 	publisher := NewPublisher(repo, eventBus, cfg, logging.NewNoopLogger())
 
@@ -462,7 +462,7 @@ func TestPublisher_PublishPending_PublishError(t *testing.T) {
 	// 添加测试事件
 	evt := newTestEvent(1, 1, "event-1", nil)
 	ctx := context.Background()
-	_ = repo.SaveWithEvents(ctx, 1, []eventing.Event{evt})
+	_ = repo.SaveWithEvents(ctx, 1, []eventing.Event[int64]{evt})
 
 	publisher := NewPublisher(repo, eventBus, cfg, logging.NewNoopLogger())
 
@@ -495,7 +495,7 @@ func TestPublisher_Start_Stop(t *testing.T) {
 
 	// 添加事件
 	evt := newTestEvent(1, 1, "event-bg", nil)
-	_ = repo.SaveWithEvents(ctx, 1, []eventing.Event{evt})
+	_ = repo.SaveWithEvents(ctx, 1, []eventing.Event[int64]{evt})
 
 	// 等待后台任务处理
 	time.Sleep(200 * time.Millisecond)
@@ -513,7 +513,7 @@ func TestPublisher_Start_Stop(t *testing.T) {
 
 	// 添加新事件，不应该被处理
 	evt2 := newTestEvent(2, 1, "event-after-stop", nil)
-	_ = repo.SaveWithEvents(ctx, 2, []eventing.Event{evt2})
+	_ = repo.SaveWithEvents(ctx, 2, []eventing.Event[int64]{evt2})
 
 	time.Sleep(200 * time.Millisecond)
 	assert.Equal(t, prevLen, eventBus.PublishedEventsLen()) // 长度不应增加
@@ -565,7 +565,7 @@ func TestPublisher_MarkPublishedError(t *testing.T) {
 	// 添加测试事件
 	evt := newTestEvent(1, 1, "event-1", nil)
 	ctx := context.Background()
-	_ = repo.SaveWithEvents(ctx, 1, []eventing.Event{evt})
+	_ = repo.SaveWithEvents(ctx, 1, []eventing.Event[int64]{evt})
 
 	// 清除 markPublishError 以便事件能发布
 	repo.markPublishError = nil

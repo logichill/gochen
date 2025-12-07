@@ -61,7 +61,7 @@ func main() {
 	ob := outbox.NewSimpleSQLOutboxRepository(db, es, nil)
 
 	// 3) 基础 ES 仓储（含 Outbox 支持）
-	storeAdapter, err := eventsourced.NewDomainEventStore[*Account](eventsourced.DomainEventStoreOptions[*Account]{
+	storeAdapter, err := eventsourced.NewDomainEventStore(eventsourced.DomainEventStoreOptions[*Account, int64]{
 		AggregateType: "Account",
 		Factory:       NewAccount,
 		EventStore:    es,
@@ -84,7 +84,11 @@ func main() {
 	bus := ebus.NewEventBus(messaging.NewMessageBus(mtransport.NewMemoryTransport(1024, 2)))
 	// 订阅打印发布的事件
 	_ = bus.SubscribeEvent(ctx, "*", ebus.EventHandlerFunc(func(ctx context.Context, evt eventing.IEvent) error {
-		log.Printf("published event: %s v%d -> agg=%d", evt.GetType(), evt.GetVersion(), evt.GetAggregateID())
+		aggID := int64(0)
+		if typed, ok := evt.(eventing.ITypedEvent[int64]); ok {
+			aggID = typed.GetAggregateID()
+		}
+		log.Printf("published event: %s v%d -> agg=%d", evt.GetType(), evt.GetVersion(), aggID)
 		return nil
 	}))
 	cfg := outbox.DefaultOutboxConfig()

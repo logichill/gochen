@@ -39,7 +39,7 @@ func TestEndToEndTracing(t *testing.T) {
 	ctx = httpx.WithCausationID(ctx, cmd.GetID())
 
 	// 4. 创建事件
-	event := eventing.NewEvent(100, "Order", "OrderCreated", 1, map[string]any{
+	event := eventing.NewEvent[int64](100, "Order", "OrderCreated", 1, map[string]any{
 		"order_id": 100,
 	})
 
@@ -47,7 +47,7 @@ func TestEndToEndTracing(t *testing.T) {
 	baseStore := NewMemoryEventStore()
 	tracingStore := eventing.NewTracingEventStore(baseStore)
 
-	err := tracingStore.AppendEvents(ctx, event.AggregateID, []eventing.IStorableEvent{event}, 0)
+	err := tracingStore.AppendEvents(ctx, event.AggregateID, []eventing.IStorableEvent[int64]{event}, 0)
 	require.NoError(t, err)
 
 	// 6. 验证事件的追踪 ID
@@ -69,10 +69,10 @@ func TestTracingStore_MultipleEvents(t *testing.T) {
 	ctx = httpx.WithCausationID(ctx, "cmd-batch-456")
 
 	// 创建多个事件
-	events := []eventing.IStorableEvent{
-		eventing.NewEvent(100, "Order", "OrderCreated", 1, map[string]any{"order_id": 100}),
-		eventing.NewEvent(100, "Order", "OrderPaid", 2, map[string]any{"amount": 99.99}),
-		eventing.NewEvent(100, "Order", "OrderShipped", 3, map[string]any{"tracking": "ABC123"}),
+	events := []eventing.IStorableEvent[int64]{
+		eventing.NewEvent[int64](100, "Order", "OrderCreated", 1, map[string]any{"order_id": 100}),
+		eventing.NewEvent[int64](100, "Order", "OrderPaid", 2, map[string]any{"amount": 99.99}),
+		eventing.NewEvent[int64](100, "Order", "OrderShipped", 3, map[string]any{"tracking": "ABC123"}),
 	}
 
 	// 保存
@@ -84,7 +84,7 @@ func TestTracingStore_MultipleEvents(t *testing.T) {
 
 	// 验证所有事件都有追踪 ID
 	for i, event := range events {
-		e := event.(*eventing.Event)
+		e := event.(*eventing.Event[int64])
 		assert.Equal(t, "cor-batch-123", e.Metadata["correlation_id"],
 			"Event %d should have correlation_id", i)
 	}
@@ -94,12 +94,12 @@ func TestTracingStore_MultipleEvents(t *testing.T) {
 func TestTracingStore_WithoutContext(t *testing.T) {
 	ctx := context.Background()
 
-	event := eventing.NewEvent(100, "Order", "OrderCreated", 1, nil)
+	event := eventing.NewEvent[int64](100, "Order", "OrderCreated", 1, nil)
 
 	baseStore := NewMemoryEventStore()
 	tracingStore := eventing.NewTracingEventStore(baseStore)
 
-	err := tracingStore.AppendEvents(ctx, event.AggregateID, []eventing.IStorableEvent{event}, 0)
+	err := tracingStore.AppendEvents(ctx, event.AggregateID, []eventing.IStorableEvent[int64]{event}, 0)
 	require.NoError(t, err)
 
 	// 没有追踪 ID
@@ -126,10 +126,10 @@ func TestTraceContextChain(t *testing.T) {
 	ctx = httpx.WithCausationID(ctx, cmd1.GetID())
 
 	// Event1
-	event1 := eventing.NewEvent(100, "Order", "OrderCreated", 1, nil)
+	event1 := eventing.NewEvent[int64](100, "Order", "OrderCreated", 1, nil)
 	baseStore := NewMemoryEventStore()
 	tracingStore := eventing.NewTracingEventStore(baseStore)
-	err := tracingStore.AppendEvents(ctx, event1.AggregateID, []eventing.IStorableEvent{event1}, 0)
+	err := tracingStore.AppendEvents(ctx, event1.AggregateID, []eventing.IStorableEvent[int64]{event1}, 0)
 	require.NoError(t, err)
 
 	assert.Equal(t, correlationID, event1.Metadata["correlation_id"])

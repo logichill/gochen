@@ -8,7 +8,7 @@ import (
 )
 
 // FilterEventsWithOptions 按 StreamOptions 过滤并分页事件，统一 After/Types/时间窗口语义。
-func FilterEventsWithOptions(events []eventing.Event, opts *StreamOptions) *StreamResult {
+func FilterEventsWithOptions[ID comparable](events []eventing.Event[ID], opts *StreamOptions) *StreamResult[ID] {
 	if opts == nil {
 		opts = &StreamOptions{}
 	}
@@ -46,8 +46,8 @@ func FilterEventsWithOptions(events []eventing.Event, opts *StreamOptions) *Stre
 	if limit <= 0 {
 		limit = 1000
 	}
-	result := &StreamResult{
-		Events: make([]eventing.Event, 0, limit),
+	result := &StreamResult[ID]{
+		Events: make([]eventing.Event[ID], 0, limit),
 	}
 
 	matched := 0

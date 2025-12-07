@@ -195,7 +195,7 @@ type QueryOptions struct {
 - `IEventSourcedCommand`：命令接口，提供 `AggregateID()` 方法用于定位聚合
 
 **应用层（`app/eventsourced`）**：提供具体实现与扩展能力，依赖 eventing 基础设施
-- `EventSourcedRepository[T]`：基于 `eventing/store.IEventStore` 的仓储实现
+- `EventSourcedRepository[T]`：基于 `eventing/store.IEventStore[int64]` 的仓储实现
   - 负责在领域事件（`domain.IDomainEvent`）与存储事件（`eventing.Event`）之间转换
   - 支持快照（Snapshot）、事件发布（EventBus）等可选能力
 - `OutboxRepository[T]`：Outbox 模式装饰器，确保事件持久化与消息发布的一致性
@@ -214,12 +214,12 @@ type EventSourcedCommandHandler[T IEventSourcedAggregate[int64]] func(
     ctx context.Context, cmd IEventSourcedCommand, aggregate T,
 ) error
 
-// app/eventsourced - 应用实现：IEventStore 基于基础设施的实现
-storeAdapter, _ := appeventsourced.NewDomainEventStore[*Account](
-    appeventsourced.DomainEventStoreOptions[*Account]{
+// app/eventsourced - 应用实现：IEventStore[int64] 基于基础设施的实现
+storeAdapter, _ := appeventsourced.NewDomainEventStore[*Account, int64](
+    appeventsourced.DomainEventStoreOptions[*Account, int64]{
         AggregateType: "account",
         Factory:       NewAccount,
-        EventStore:    eventStore, // eventing/store.IEventStore
+        EventStore:    eventStore, // eventing/store.IEventStore[int64]
         EventBus:      eventBus,   // eventing/bus.IEventBus（可选）
         PublishEvents: true,
     },
@@ -239,43 +239,68 @@ repo, _ := eventsourced.NewEventSourcedRepository[*Account](
 
 ### 3.1 事件模型（`eventing/event.go`）
 
-事件模型围绕 `IEvent` / `IStorableEvent` / `Event`：
+事件模型围绕 `IEvent` / `ITypedEvent[ID]` / `IStorableEvent[ID]` / `Event[ID]`：
 
 ```go
+// IEvent：用于总线/投影等场景的“ID 无关”事件视图
 type IEvent interface {
     messaging.IMessage
-    GetAggregateID() int64
     GetAggregateType() string
     GetVersion() uint64
 }
 
-type IStorableEvent interface {
+// ITypedEvent[ID]：带强类型聚合 ID 的事件接口
+type ITypedEvent[ID comparable] interface {
     IEvent
+    GetAggregateID() ID
+}
+
+// IStorableEvent[ID]：用于事件持久化的扩展接口
+type IStorableEvent[ID comparable] interface {
+    ITypedEvent[ID]
     GetSchemaVersion() int
     SetAggregateType(string)
     Validate() error
 }
+
+// Event[ID]：泛型事件实现，ID 可以是 int64/string/自定义类型
+type Event[ID comparable] struct {
+    messaging.Message
+    AggregateID   ID
+    AggregateType string
+    Version       uint64
+    SchemaVersion int
+}
 ```
 
-`Event` 同时实现传输与存储接口，支持 SchemaVersion 与元数据（Metadata）。
+`Event[ID]` 同时实现传输与存储接口，支持 SchemaVersion 与元数据（Metadata）。当前框架内置实现主要以 `ID=int64` 形式使用（如 `Event[int64]`），但接口层已经完全支持自定义 ID 类型。
 
 ### 3.2 事件存储接口（`eventing/store`）
 
-核心接口：`IEventStore`（`eventing/store/eventstore.go`）：
+核心接口：`IEventStore[ID]`（`eventing/store/eventstore.go`）：
 
 ```go
-type IEventStore interface {
-    AppendEvents(ctx context.Context, aggregateID int64, events []eventing.IStorableEvent, expectedVersion uint64) error
-    LoadEvents(ctx context.Context, aggregateID int64, afterVersion uint64) ([]eventing.Event, error)
-    StreamEvents(ctx context.Context, fromTime time.Time) ([]eventing.Event, error)
+// ID 为聚合根 ID 类型（如 int64/string/自定义类型）
+type IEventStore[ID comparable] interface {
+    AppendEvents(ctx context.Context, aggregateID ID, events []eventing.IStorableEvent[ID], expectedVersion uint64) error
+    LoadEvents(ctx context.Context, aggregateID ID, afterVersion uint64) ([]eventing.Event[ID], error)
+    StreamEvents(ctx context.Context, fromTime time.Time) ([]eventing.Event[ID], error)
 }
 ```
 
 扩展接口：
 
-- `IAggregateInspector`：检查聚合是否存在/当前版本；
-- `IEventStoreExtended`：基于游标的事件流分页；
-- `IAggregateEventStore`：按聚合顺序流式读取。
+- `IAggregateInspector[ID]`：检查聚合是否存在/当前版本；
+- `IEventStoreExtended[ID]`：基于游标的事件流分页；
+- `IAggregateEventStore[ID]`：按聚合顺序流式读取。
+
+内置实现（内存/SQL/缓存/指标）目前实例化为 `ID=int64` 的形式，例如：
+
+```go
+memStore := store.NewMemoryEventStore()              // 实现 IEventStore[int64]
+sqlStore := sql.NewSQLEventStore(db, "event_store") // 实现 IEventStore[int64]
+cached   := cached.NewCachedEventStore(memStore, nil) // 实现 IEventStoreExtended[int64]
+```
 
 SQL 实现基于 `data/db` 与 `data/db/sql.ISql`，位于 `eventing/store/sql`（此处仅说明抽象层，具体 schema 见迁移指南）。
 

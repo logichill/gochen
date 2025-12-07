@@ -341,7 +341,7 @@ func (s *ProductService) ListProducts(ctx context.Context, page, size int) ([]*P
 
 在应用层中，`app/eventsourced` 提供了基于领域事件与事件存储的事件溯源模板，实现：
 
-- 基于 `domain/eventsourced.IEventSourcedAggregate` 的通用仓储实现 `EventSourcedRepository`（依赖 `eventing/store.IEventStore`、可选快照与事件总线）；
+- 基于 `domain/eventsourced.IEventSourcedAggregate` 的通用仓储实现 `EventSourcedRepository`（依赖 `eventing/store.IEventStore[int64]`、可选快照与事件总线）；
 - Outbox 装饰器 `OutboxAwareRepository`，与 `eventing/outbox` 协作实现“写事件 + 写 Outbox”原子操作；
 - 历史视图与分页查询（`GetEventHistory*`）；
 - 泛型事件处理器与投影模板（`EventSourcedTypedHandler`、`EventSourcedProjection`）；

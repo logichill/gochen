@@ -11,16 +11,16 @@ import (
 )
 
 // Stream 基于选项的游标化流式读取（可选能力）
-func (s *SQLEventStore) Stream(ctx context.Context, opts estore.StreamOptions) (estore.StreamResult, error) {
+func (s *SQLEventStore) Stream(ctx context.Context, opts estore.StreamOptions) (estore.StreamResult[int64], error) {
 	res, err := s.GetEventStreamWithCursor(ctx, &opts)
 	if err != nil {
-		return estore.StreamResult{}, err
+		return estore.StreamResult[int64]{}, err
 	}
 	return *res, nil
 }
 
 // GetEventStreamWithCursor 获取基于游标的事件流（兼容旧接口）
-func (s *SQLEventStore) GetEventStreamWithCursor(ctx context.Context, opts *estore.StreamOptions) (*estore.StreamResult, error) {
+func (s *SQLEventStore) GetEventStreamWithCursor(ctx context.Context, opts *estore.StreamOptions) (*estore.StreamResult[int64], error) {
 	if opts == nil {
 		opts = &estore.StreamOptions{}
 	}
@@ -84,7 +84,7 @@ func (s *SQLEventStore) GetEventStreamWithCursor(ctx context.Context, opts *esto
 		return nil, err
 	}
 
-	result := &estore.StreamResult{
+	result := &estore.StreamResult[int64]{
 		Events: events,
 	}
 	if len(events) == queryLimit {

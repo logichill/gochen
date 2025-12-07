@@ -29,12 +29,12 @@ func TestMetricsEventStore_GetEventStreamWithCursor(t *testing.T) {
 	recorder := &fakeRecorder{}
 	ms := NewMetricsEventStore(mem, recorder)
 
-	e1 := eventing.NewEvent(1, "Agg", "TypeA", 1, nil)
-	e2 := eventing.NewEvent(1, "Agg", "TypeB", 2, nil)
+	e1 := eventing.NewEvent[int64](1, "Agg", "TypeA", 1, nil)
+	e2 := eventing.NewEvent[int64](1, "Agg", "TypeB", 2, nil)
 	now := time.Now()
 	e1.Timestamp = now
 	e2.Timestamp = now
-	require.NoError(t, mem.AppendEvents(ctx, 1, []eventing.IStorableEvent{e1, e2}, 0))
+	require.NoError(t, mem.AppendEvents(ctx, 1, []eventing.IStorableEvent[int64]{e1, e2}, 0))
 
 	res, err := ms.GetEventStreamWithCursor(ctx, &store.StreamOptions{
 		After: e1.ID,

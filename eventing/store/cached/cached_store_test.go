@@ -12,13 +12,13 @@ import (
 	"gochen/eventing/store"
 )
 
-func makeTestEvent(aggregateID int64, eventType string, version uint64) eventing.Event {
-	return *eventing.NewEvent(aggregateID, "TestAggregate", eventType, version, nil)
+func makeTestEvent(aggregateID int64, eventType string, version uint64) eventing.Event[int64] {
+	return *eventing.NewEvent[int64](aggregateID, "TestAggregate", eventType, version, nil)
 }
 
-// 将 eventing.Event 切片转换为 IStorableEvent 切片
-func toStorableEvents(events []eventing.Event) []eventing.IStorableEvent {
-	storable := make([]eventing.IStorableEvent, len(events))
+// 将 eventing.Event[int64] 切片转换为 IStorableEvent[int64] 切片
+func toStorableEvents(events []eventing.Event[int64]) []eventing.IStorableEvent[int64] {
+	storable := make([]eventing.IStorableEvent[int64], len(events))
 	for i := range events {
 		storable[i] = &events[i]
 	}
@@ -32,7 +32,7 @@ func TestCachedEventStore(t *testing.T) {
 	ctx := context.Background()
 	aggregateID := int64(100)
 
-	events := []eventing.Event{
+	events := []eventing.Event[int64]{
 		makeTestEvent(aggregateID, "Event1", 1),
 		makeTestEvent(aggregateID, "Event2", 2),
 	}
@@ -51,8 +51,8 @@ func TestCachedEventStore_Concurrency(t *testing.T) {
 
 	ctx := context.Background()
 
-	events1 := []eventing.Event{makeTestEvent(1, "Event1", 1)}
-	events2 := []eventing.Event{makeTestEvent(2, "Event2", 1)}
+	events1 := []eventing.Event[int64]{makeTestEvent(1, "Event1", 1)}
+	events2 := []eventing.Event[int64]{makeTestEvent(2, "Event2", 1)}
 
 	go func() {
 		_ = cachedStore.AppendEvents(ctx, 1, toStorableEvents(events1), 0)
@@ -80,7 +80,7 @@ func TestCachedEventStore_GetStats(t *testing.T) {
 	ctx := context.Background()
 	aggregateID := int64(200)
 
-	events := []eventing.Event{makeTestEvent(aggregateID, "Event1", 1)}
+	events := []eventing.Event[int64]{makeTestEvent(aggregateID, "Event1", 1)}
 
 	// 触发缓存命中和未命中
 	_, _ = memStore.LoadEvents(ctx, aggregateID, 0) // 未命中
@@ -99,7 +99,7 @@ func TestMemoryEventStore(t *testing.T) {
 	ctx := context.Background()
 
 	for i := 1; i <= 5; i++ {
-		events := []eventing.Event{makeTestEvent(int64(i), "Event1", 1)}
+		events := []eventing.Event[int64]{makeTestEvent(int64(i), "Event1", 1)}
 		_ = memStore.AppendEvents(ctx, int64(i), toStorableEvents(events), 0)
 	}
 
@@ -118,14 +118,14 @@ func TestCachedEventStore_InvalidateCache(t *testing.T) {
 	ctx := context.Background()
 	aggregateID := int64(300)
 
-	events := []eventing.Event{makeTestEvent(aggregateID, "Event1", 1)}
+	events := []eventing.Event[int64]{makeTestEvent(aggregateID, "Event1", 1)}
 
 	// 写入并读取以填充缓存
 	_ = cachedStore.AppendEvents(ctx, aggregateID, toStorableEvents(events), 0)
 	_, _ = cachedStore.LoadEvents(ctx, aggregateID, 0)
 
 	// 再次写入会失效缓存
-	events2 := []eventing.Event{makeTestEvent(aggregateID, "Event2", 2)}
+	events2 := []eventing.Event[int64]{makeTestEvent(aggregateID, "Event2", 2)}
 	_ = cachedStore.AppendEvents(ctx, aggregateID, toStorableEvents(events2), 1)
 
 	loaded, err := cachedStore.LoadEvents(ctx, aggregateID, 0)
@@ -140,7 +140,7 @@ func TestCachedEventStore_GetCacheStats(t *testing.T) {
 	ctx := context.Background()
 	aggregateID := int64(400)
 
-	events := []eventing.Event{makeTestEvent(aggregateID, "Event1", 1)}
+	events := []eventing.Event[int64]{makeTestEvent(aggregateID, "Event1", 1)}
 
 	// 触发一些缓存操作
 	_, _ = memStore.LoadEvents(ctx, aggregateID, 0) // 未命中
@@ -167,7 +167,7 @@ func TestCachedEventStore_CacheTTL(t *testing.T) {
 	ctx := context.Background()
 	aggregateID := int64(500)
 
-	events := []eventing.Event{makeTestEvent(aggregateID, "Event1", 1)}
+	events := []eventing.Event[int64]{makeTestEvent(aggregateID, "Event1", 1)}
 
 	// 写入并读取
 	_ = cachedStore.AppendEvents(ctx, aggregateID, toStorableEvents(events), 0)
@@ -196,7 +196,7 @@ func TestCachedEventStore_MaxCapacity(t *testing.T) {
 
 	// 写入 10 个聚合
 	for i := 1; i <= 10; i++ {
-		events := []eventing.Event{makeTestEvent(int64(i), "Event1", 1)}
+		events := []eventing.Event[int64]{makeTestEvent(int64(i), "Event1", 1)}
 		_ = cachedStore.AppendEvents(ctx, int64(i), toStorableEvents(events), 0)
 		_, _ = cachedStore.LoadEvents(ctx, int64(i), 0) // 触发缓存
 	}
@@ -216,10 +216,10 @@ func TestCachedEventStore_LoadByType(t *testing.T) {
 	aggregateID := int64(600)
 
 	// 创建带聚合类型的事件
-	event1 := eventing.NewEvent(aggregateID, "User", "UserCreated", 1, nil)
-	event2 := eventing.NewEvent(aggregateID, "User", "UserUpdated", 2, nil)
+	event1 := eventing.NewEvent[int64](aggregateID, "User", "UserCreated", 1, nil)
+	event2 := eventing.NewEvent[int64](aggregateID, "User", "UserUpdated", 2, nil)
 
-	events := []eventing.IStorableEvent{event1, event2}
+	events := []eventing.IStorableEvent[int64]{event1, event2}
 	_ = cachedStore.AppendEvents(ctx, aggregateID, events, 0)
 
 	// 按类型加载
@@ -238,7 +238,7 @@ func TestCachedEventStore_LoadWithVersion(t *testing.T) {
 	aggregateID := int64(700)
 
 	// 写入多个版本的事件
-	events := []eventing.Event{
+	events := []eventing.Event[int64]{
 		makeTestEvent(aggregateID, "Event1", 1),
 		makeTestEvent(aggregateID, "Event2", 2),
 		makeTestEvent(aggregateID, "Event3", 3),
@@ -265,7 +265,7 @@ func TestCachedEventStore_StreamEvents(t *testing.T) {
 
 	// 写入多个聚合的事件
 	for i := 1; i <= 3; i++ {
-		events := []eventing.Event{makeTestEvent(int64(i), "Event1", 1)}
+		events := []eventing.Event[int64]{makeTestEvent(int64(i), "Event1", 1)}
 		_ = cachedStore.AppendEvents(ctx, int64(i), toStorableEvents(events), 0)
 	}
 
@@ -284,7 +284,7 @@ func TestCachedEventStore_CacheStatistics(t *testing.T) {
 	ctx := context.Background()
 	aggregateID := int64(800)
 
-	events := []eventing.Event{makeTestEvent(aggregateID, "Event1", 1)}
+	events := []eventing.Event[int64]{makeTestEvent(aggregateID, "Event1", 1)}
 
 	// 写入事件
 	_ = cachedStore.AppendEvents(ctx, aggregateID, toStorableEvents(events), 0)
@@ -319,7 +319,7 @@ func TestCachedEventStore_ConcurrentCacheAccess(t *testing.T) {
 	ctx := context.Background()
 	aggregateID := int64(900)
 
-	events := []eventing.Event{makeTestEvent(aggregateID, "Event1", 1)}
+	events := []eventing.Event[int64]{makeTestEvent(aggregateID, "Event1", 1)}
 	_ = cachedStore.AppendEvents(ctx, aggregateID, toStorableEvents(events), 0)
 
 	// 并发读取缓存
@@ -356,7 +356,7 @@ func TestCachedEventStore_CleanupExpiredEntries(t *testing.T) {
 
 	// 写入多个聚合
 	for i := 1; i <= 5; i++ {
-		events := []eventing.Event{makeTestEvent(int64(i), "Event1", 1)}
+		events := []eventing.Event[int64]{makeTestEvent(int64(i), "Event1", 1)}
 		_ = cachedStore.AppendEvents(ctx, int64(i), toStorableEvents(events), 0)
 		_, _ = cachedStore.LoadEvents(ctx, int64(i), 0)
 	}
@@ -383,13 +383,13 @@ func TestCachedEventStore_GetEventStreamWithCursor_Filtered(t *testing.T) {
 	memStore := store.NewMemoryEventStore()
 	cached := NewCachedEventStore(memStore, nil)
 
-	e1 := eventing.NewEvent(1, "Agg", "TypeA", 1, nil)
-	e2 := eventing.NewEvent(1, "Agg", "TypeB", 2, nil)
+	e1 := eventing.NewEvent[int64](1, "Agg", "TypeA", 1, nil)
+	e2 := eventing.NewEvent[int64](1, "Agg", "TypeB", 2, nil)
 	now := time.Now()
 	e1.Timestamp = now
 	e2.Timestamp = now
 
-	require.NoError(t, memStore.AppendEvents(ctx, 1, []eventing.IStorableEvent{e1, e2}, 0))
+	require.NoError(t, memStore.AppendEvents(ctx, 1, []eventing.IStorableEvent[int64]{e1, e2}, 0))
 
 	res, err := cached.GetEventStreamWithCursor(ctx, &store.StreamOptions{
 		After: e1.ID,
@@ -411,7 +411,7 @@ func TestCachedEventStore_ClearCache(t *testing.T) {
 
 	// 写入多个聚合
 	for i := 1; i <= 5; i++ {
-		events := []eventing.Event{makeTestEvent(int64(i), "Event1", 1)}
+		events := []eventing.Event[int64]{makeTestEvent(int64(i), "Event1", 1)}
 		_ = cachedStore.AppendEvents(ctx, int64(i), toStorableEvents(events), 0)
 		_, _ = cachedStore.LoadEvents(ctx, int64(i), 0)
 	}

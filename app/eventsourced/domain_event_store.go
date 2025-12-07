@@ -19,41 +19,44 @@ import (
 // DomainEventStoreOptions 配置领域层 IEventStore 的基础设施适配。
 // 用于构造基于 eventing/store + Outbox + EventBus 的事件存储实现。
 //
-// 注意：当前实现固定使用 int64 作为聚合 ID 类型，因为底层 eventing 基础设施使用 int64。
-// 如需支持其他 ID 类型（如 string/UUID），请自行实现 deventsourced.IEventStore[ID] 接口。
-type DomainEventStoreOptions[T deventsourced.IEventSourcedAggregate[int64]] struct {
+// 设计目标：
+//   - 对领域层暴露为 deventsourced.IEventStore[ID]，ID 可以是任意可比较类型（如 int64/string/自定义类型）；
+//   - 在内部直接使用与领域层一致的 ID 类型贯通 eventing/store.IEventStore[ID]、SnapshotManager[ID] 与 Outbox 仓储。
+//
+// 注意：
+//   - 本仓库内置的事件存储与 Outbox/快照实现当前仍主要以 ID=int64 形式实例化；
+//   - 若业务需要使用非 int64 的聚合 ID（如 string/UUID），需要提供对应 ID 形态的 IEventStore[ID]、ISnapshotStore[ID] 与 IOutboxRepository[ID] 实现。
+type DomainEventStoreOptions[T deventsourced.IEventSourcedAggregate[ID], ID comparable] struct {
 	AggregateType   string
-	Factory         func(id int64) T
-	EventStore      store.IEventStore
-	SnapshotManager *snapshot.Manager
+	Factory         func(id ID) T
+	EventStore      store.IEventStore[ID]
+	SnapshotManager *snapshot.Manager[ID]
 	EventBus        bus.IEventBus
-	OutboxRepo      outbox.IOutboxRepository
+	OutboxRepo      outbox.IOutboxRepository[ID]
 	PublishEvents   bool
 	Logger          logging.ILogger
 }
 
 // Deprecated: 请使用 DomainEventStoreOptions。
-type EventStoreAdapterOptions[T deventsourced.IEventSourcedAggregate[int64]] = DomainEventStoreOptions[T]
+type EventStoreAdapterOptions[T deventsourced.IEventSourcedAggregate[ID], ID comparable] = DomainEventStoreOptions[T, ID]
 
-// DomainEventStore 将 eventing/store.IEventStore + Snapshot/Outbox/EventBus
-// 适配为领域层的 deventsourced.IEventStore[int64]。
-//
-// 注意：当前实现固定使用 int64 作为聚合 ID 类型，因为底层 eventing 基础设施使用 int64。
-type DomainEventStore[T deventsourced.IEventSourcedAggregate[int64]] struct {
+// DomainEventStore 将 eventing/store.IEventStore[ID] + Snapshot/Outbox/EventBus
+// 适配为领域层的 deventsourced.IEventStore[ID]。
+type DomainEventStore[T deventsourced.IEventSourcedAggregate[ID], ID comparable] struct {
 	aggregateType   string
-	factory         func(id int64) T
-	eventStore      store.IEventStore
-	snapshotManager *snapshot.Manager
+	factory         func(id ID) T
+	eventStore      store.IEventStore[ID]
+	snapshotManager *snapshot.Manager[ID]
 	eventBus        bus.IEventBus
-	outboxRepo      outbox.IOutboxRepository
+	outboxRepo      outbox.IOutboxRepository[ID]
 	publishEvents   bool
 	logger          logging.ILogger
 }
 
-// NewDomainEventStore 创建领域层 IEventStore[int64] 的基础设施实现。
-func NewDomainEventStore[T deventsourced.IEventSourcedAggregate[int64]](
-	opts DomainEventStoreOptions[T],
-) (deventsourced.IEventStore[int64], error) {
+// NewDomainEventStore 创建领域层 IEventStore[ID] 的基础设施实现。
+func NewDomainEventStore[T deventsourced.IEventSourcedAggregate[ID], ID comparable](
+	opts DomainEventStoreOptions[T, ID],
+) (deventsourced.IEventStore[ID], error) {
 	if opts.AggregateType == "" {
 		return nil, fmt.Errorf("aggregate type cannot be empty")
 	}
@@ -63,7 +66,7 @@ func NewDomainEventStore[T deventsourced.IEventSourcedAggregate[int64]](
 	if opts.EventStore == nil {
 		return nil, fmt.Errorf("event store cannot be nil")
 	}
-	adapter := &DomainEventStore[T]{
+	adapter := &DomainEventStore[T, ID]{
 		aggregateType:   opts.AggregateType,
 		factory:         opts.Factory,
 		eventStore:      opts.EventStore,
@@ -93,9 +96,9 @@ func NewDomainEventStore[T deventsourced.IEventSourcedAggregate[int64]](
 // NewEventStoreAdapter 为兼容旧用法保留的构造函数。
 //
 // Deprecated: 请使用 NewDomainEventStore。
-func NewEventStoreAdapter[T deventsourced.IEventSourcedAggregate[int64]](
-	opts DomainEventStoreOptions[T],
-) (deventsourced.IEventStore[int64], error) {
+func NewEventStoreAdapter[T deventsourced.IEventSourcedAggregate[ID], ID comparable](
+	opts DomainEventStoreOptions[T, ID],
+) (deventsourced.IEventStore[ID], error) {
 	return NewDomainEventStore(opts)
 }
 
@@ -117,13 +120,13 @@ func NewEventStoreAdapter[T deventsourced.IEventSourcedAggregate[int64]](
 //   - 需要额外补偿机制或通过重放/扫描来补发事件。
 //
 // 在生产环境强烈建议使用 Outbox 模式，以保证“最终一致”的语义。
-func (a *DomainEventStore[T]) AppendEvents(ctx context.Context, aggregateID int64, events []domain.IDomainEvent, expectedVersion uint64) error {
+func (a *DomainEventStore[T, ID]) AppendEvents(ctx context.Context, aggregateID ID, events []domain.IDomainEvent, expectedVersion uint64) error {
 	if len(events) == 0 {
 		return nil
 	}
 
 	currentVersion := expectedVersion
-	storableEvents := make([]eventing.Event, 0, len(events))
+	storableEvents := make([]eventing.Event[ID], 0, len(events))
 	publishedEvents := make([]eventing.IEvent, 0, len(events))
 
 	for i, de := range events {
@@ -147,11 +150,7 @@ func (a *DomainEventStore[T]) AppendEvents(ctx context.Context, aggregateID int6
 		}
 	} else {
 		// 直接写入 EventStore。
-		storable := make([]eventing.IStorableEvent, len(storableEvents))
-		for i := range storableEvents {
-			e := storableEvents[i]
-			storable[i] = &e
-		}
+		storable := eventing.ToStorable(storableEvents)
 		if err := a.eventStore.AppendEvents(ctx, aggregateID, storable, expectedVersion); err != nil {
 			return err
 		}
@@ -169,7 +168,7 @@ func (a *DomainEventStore[T]) AppendEvents(ctx context.Context, aggregateID int6
 }
 
 // RestoreAggregate 根据快照与事件流恢复聚合。
-func (a *DomainEventStore[T]) RestoreAggregate(ctx context.Context, aggregate deventsourced.IEventSourcedAggregate[int64]) (uint64, error) {
+func (a *DomainEventStore[T, ID]) RestoreAggregate(ctx context.Context, aggregate deventsourced.IEventSourcedAggregate[ID]) (uint64, error) {
 	if aggregate == nil {
 		return 0, fmt.Errorf("aggregate cannot be nil")
 	}
@@ -184,22 +183,22 @@ func (a *DomainEventStore[T]) RestoreAggregate(ctx context.Context, aggregate de
 		if err == nil && snap != nil {
 			fromVersion = snap.Version
 			a.logger.Debug(ctx, "aggregate restored from snapshot",
-				logging.Int64("aggregate_id", aggregate.GetID()),
+				logging.Any("aggregate_id", aggregate.GetID()),
 				logging.Uint64("snapshot_version", snap.Version))
 		} else if err != nil {
 			a.logger.Info(ctx, "snapshot load failed, falling back to full replay",
-				logging.Int64("aggregate_id", aggregate.GetID()),
+				logging.Any("aggregate_id", aggregate.GetID()),
 				logging.Error(err))
 		}
 	}
 
 	// 加载剩余事件并应用为领域事件。
 	var (
-		events []eventing.Event
+		events []eventing.Event[ID]
 		err    error
 	)
 
-	if typedStore, ok := a.eventStore.(store.ITypedEventStore); ok {
+	if typedStore, ok := a.eventStore.(store.ITypedEventStore[ID]); ok {
 		events, err = typedStore.LoadEventsByType(ctx, a.aggregateType, aggregate.GetID(), fromVersion)
 	} else {
 		events, err = a.eventStore.LoadEvents(ctx, aggregate.GetID(), fromVersion)
@@ -239,8 +238,8 @@ func (a *DomainEventStore[T]) RestoreAggregate(ctx context.Context, aggregate de
 }
 
 // Exists 检查聚合是否存在。
-func (a *DomainEventStore[T]) Exists(ctx context.Context, aggregateID int64) (bool, error) {
-	if inspector, ok := a.eventStore.(store.IAggregateInspector); ok {
+func (a *DomainEventStore[T, ID]) Exists(ctx context.Context, aggregateID ID) (bool, error) {
+	if inspector, ok := a.eventStore.(store.IAggregateInspector[ID]); ok {
 		return inspector.HasAggregate(ctx, aggregateID)
 	}
 	events, err := a.eventStore.LoadEvents(ctx, aggregateID, 0)
@@ -254,8 +253,8 @@ func (a *DomainEventStore[T]) Exists(ctx context.Context, aggregateID int64) (bo
 }
 
 // GetAggregateVersion 获取聚合当前版本。
-func (a *DomainEventStore[T]) GetAggregateVersion(ctx context.Context, aggregateID int64) (uint64, error) {
-	if inspector, ok := a.eventStore.(store.IAggregateInspector); ok {
+func (a *DomainEventStore[T, ID]) GetAggregateVersion(ctx context.Context, aggregateID ID) (uint64, error) {
+	if inspector, ok := a.eventStore.(store.IAggregateInspector[ID]); ok {
 		return inspector.GetAggregateVersion(ctx, aggregateID)
 	}
 	events, err := a.eventStore.LoadEvents(ctx, aggregateID, 0)

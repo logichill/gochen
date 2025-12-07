@@ -39,18 +39,18 @@ func setupTestDB(t *testing.T) db.IDatabase {
 	return db
 }
 
-func makeEvent(aggregateID int64, aggregateType, id string, version uint64, payload map[string]any) eventing.Event {
+func makeEvent(aggregateID int64, aggregateType, id string, version uint64, payload map[string]any) eventing.Event[int64] {
 	if payload == nil {
 		payload = make(map[string]any)
 	}
-	e := eventing.NewEvent(aggregateID, aggregateType, "TestEvent", version, payload)
+	e := eventing.NewEvent[int64](aggregateID, aggregateType, "TestEvent", version, payload)
 	e.ID = id
 	return *e
 }
 
-// 辅助函数：将 eventing.Event 切片转换为 IStorableEvent 切片
-func toStorableEvents(events []eventing.Event) []eventing.IStorableEvent {
-	storable := make([]eventing.IStorableEvent, len(events))
+// 辅助函数：将 eventing.Event[int64] 切片转换为 IStorableEvent[int64] 切片
+func toStorableEvents(events []eventing.Event[int64]) []eventing.IStorableEvent[int64] {
+	storable := make([]eventing.IStorableEvent[int64], len(events))
 	for i := range events {
 		storable[i] = &events[i]
 	}
@@ -64,7 +64,7 @@ func TestSQLEventStore_AppendEvents(t *testing.T) {
 	ctx := context.Background()
 	aggregateID := int64(123)
 
-	events := []eventing.Event{
+	events := []eventing.Event[int64]{
 		makeEvent(aggregateID, "TestAggregate", "event-1", 1, map[string]any{"value": 100}),
 		makeEvent(aggregateID, "TestAggregate", "event-2", 2, map[string]any{"value": 200}),
 	}
@@ -86,11 +86,11 @@ func TestSQLEventStore_VersionConflict(t *testing.T) {
 	ctx := context.Background()
 	aggregateID := int64(456)
 
-	events1 := []eventing.Event{makeEvent(aggregateID, "TestAggregate", "event-1", 1, nil)}
+	events1 := []eventing.Event[int64]{makeEvent(aggregateID, "TestAggregate", "event-1", 1, nil)}
 	err := store.AppendEvents(ctx, aggregateID, toStorableEvents(events1), 0)
 	assert.NoError(t, err)
 
-	events2 := []eventing.Event{makeEvent(aggregateID, "TestAggregate", "event-2", 2, nil)}
+	events2 := []eventing.Event[int64]{makeEvent(aggregateID, "TestAggregate", "event-2", 2, nil)}
 	err = store.AppendEvents(ctx, aggregateID, toStorableEvents(events2), 0) // 期望版本不匹配
 	assert.Error(t, err)
 }
@@ -102,7 +102,7 @@ func TestSQLEventStore_Idempotency(t *testing.T) {
 	ctx := context.Background()
 	aggregateID := int64(789)
 
-	events := []eventing.Event{makeEvent(aggregateID, "TestAggregate", "event-1", 1, nil)}
+	events := []eventing.Event[int64]{makeEvent(aggregateID, "TestAggregate", "event-1", 1, nil)}
 
 	err := store.AppendEvents(ctx, aggregateID, toStorableEvents(events), 0)
 	assert.NoError(t, err)
@@ -121,8 +121,8 @@ func TestSQLEventStore_LoadEventsByType(t *testing.T) {
 
 	ctx := context.Background()
 
-	events1 := []eventing.Event{makeEvent(1, "TypeA", "event-1", 1, nil)}
-	events2 := []eventing.Event{makeEvent(1, "TypeB", "event-2", 1, nil)}
+	events1 := []eventing.Event[int64]{makeEvent(1, "TypeA", "event-1", 1, nil)}
+	events2 := []eventing.Event[int64]{makeEvent(1, "TypeB", "event-2", 1, nil)}
 
 	assert.NoError(t, store.AppendEvents(ctx, 1, toStorableEvents(events1), 0))
 	assert.NoError(t, store.AppendEvents(ctx, 1, toStorableEvents(events2), 0))
@@ -145,7 +145,7 @@ func TestSQLEventStore_AppendEventsWithDB(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	events := []eventing.Event{makeEvent(aggregateID, "TestAggregate", "event-tx-1", 1, nil)}
+	events := []eventing.Event[int64]{makeEvent(aggregateID, "TestAggregate", "event-tx-1", 1, nil)}
 	err = store.AppendEventsWithDB(ctx, tx, aggregateID, toStorableEvents(events), 0)
 	assert.NoError(t, err)
 
@@ -172,7 +172,7 @@ func TestSQLEventStore_HasAggregate(t *testing.T) {
 	assert.False(t, exists)
 
 	// 添加事件
-	events := []eventing.Event{makeEvent(aggregateID, "TestAggregate", "event-1", 1, nil)}
+	events := []eventing.Event[int64]{makeEvent(aggregateID, "TestAggregate", "event-1", 1, nil)}
 	err = store.AppendEvents(ctx, aggregateID, toStorableEvents(events), 0)
 	require.NoError(t, err)
 
@@ -195,7 +195,7 @@ func TestSQLEventStore_GetAggregateVersion(t *testing.T) {
 	assert.Equal(t, uint64(0), version)
 
 	// 添加多个事件
-	events := []eventing.Event{
+	events := []eventing.Event[int64]{
 		makeEvent(aggregateID, "TestAggregate", "event-1", 1, nil),
 		makeEvent(aggregateID, "TestAggregate", "event-2", 2, nil),
 		makeEvent(aggregateID, "TestAggregate", "event-3", 3, nil),
@@ -216,11 +216,11 @@ func TestSQLEventStore_StreamEvents(t *testing.T) {
 	ctx := context.Background()
 
 	// 添加事件（不同时间）
-	events1 := []eventing.Event{makeEvent(1, "TypeA", "event-1", 1, nil)}
+	events1 := []eventing.Event[int64]{makeEvent(1, "TypeA", "event-1", 1, nil)}
 	err := store.AppendEvents(ctx, 1, toStorableEvents(events1), 0)
 	require.NoError(t, err)
 
-	events2 := []eventing.Event{makeEvent(2, "TypeB", "event-2", 1, nil)}
+	events2 := []eventing.Event[int64]{makeEvent(2, "TypeB", "event-2", 1, nil)}
 	err = store.AppendEvents(ctx, 2, toStorableEvents(events2), 0)
 	require.NoError(t, err)
 
@@ -238,7 +238,7 @@ func TestSQLEventStore_GetEventStreamWithCursor(t *testing.T) {
 
 	// 添加多个事件
 	for i := 1; i <= 5; i++ {
-		events := []eventing.Event{makeEvent(int64(i), "TestAggregate", fmt.Sprintf("event-%d", i), 1, nil)}
+		events := []eventing.Event[int64]{makeEvent(int64(i), "TestAggregate", fmt.Sprintf("event-%d", i), 1, nil)}
 		err := store.AppendEvents(ctx, int64(i), toStorableEvents(events), 0)
 		require.NoError(t, err)
 	}
@@ -290,7 +290,7 @@ func TestSQLEventStore_LoadEventsAfterVersion(t *testing.T) {
 	aggregateID := int64(400)
 
 	// 添加5个事件
-	events := []eventing.Event{
+	events := []eventing.Event[int64]{
 		makeEvent(aggregateID, "TestAggregate", "event-1", 1, nil),
 		makeEvent(aggregateID, "TestAggregate", "event-2", 2, nil),
 		makeEvent(aggregateID, "TestAggregate", "event-3", 3, nil),
@@ -316,7 +316,7 @@ func TestSQLEventStore_EmptyEvents(t *testing.T) {
 	aggregateID := int64(500)
 
 	// 添加空事件列表（应该无操作）
-	err := store.AppendEvents(ctx, aggregateID, []eventing.IStorableEvent{}, 0)
+	err := store.AppendEvents(ctx, aggregateID, []eventing.IStorableEvent[int64]{}, 0)
 	assert.NoError(t, err)
 
 	// 验证没有事件
@@ -333,7 +333,7 @@ func TestSQLEventStore_MixedAggregateTypes(t *testing.T) {
 	aggregateID := int64(600)
 
 	// 尝试在同一批次中添加不同聚合类型的事件（应该失败）
-	events := []eventing.Event{
+	events := []eventing.Event[int64]{
 		makeEvent(aggregateID, "TypeA", "event-1", 1, nil),
 		makeEvent(aggregateID, "TypeB", "event-2", 2, nil), // 不同类型
 	}
@@ -350,7 +350,7 @@ func TestSQLEventStore_VersionMismatch(t *testing.T) {
 	aggregateID := int64(700)
 
 	// 事件版本与期望版本不匹配
-	events := []eventing.Event{
+	events := []eventing.Event[int64]{
 		makeEvent(aggregateID, "TestAggregate", "event-1", 5, nil), // 版本5但期望从1开始
 	}
 	err := store.AppendEvents(ctx, aggregateID, toStorableEvents(events), 0)
@@ -378,7 +378,7 @@ func TestSQLEventStore_ComplexPayload(t *testing.T) {
 		"total": 99.99,
 	}
 
-	events := []eventing.Event{makeEvent(aggregateID, "OrderAggregate", "OrderCreated", 1, payload)}
+	events := []eventing.Event[int64]{makeEvent(aggregateID, "OrderAggregate", "OrderCreated", 1, payload)}
 	err := store.AppendEvents(ctx, aggregateID, toStorableEvents(events), 0)
 	assert.NoError(t, err)
 
@@ -419,7 +419,7 @@ func TestSQLEventStore_Stream(t *testing.T) {
 
 	// 添加多个事件
 	for i := 1; i <= 5; i++ {
-		events := []eventing.Event{makeEvent(int64(i), "TestAggregate", fmt.Sprintf("stream-event-%d", i), 1, nil)}
+		events := []eventing.Event[int64]{makeEvent(int64(i), "TestAggregate", fmt.Sprintf("stream-event-%d", i), 1, nil)}
 		err := store.AppendEvents(ctx, int64(i), toStorableEvents(events), 0)
 		require.NoError(t, err)
 	}
@@ -445,7 +445,7 @@ func TestSQLEventStore_GetEventStreamWithCursor_TimeFilters(t *testing.T) {
 		evt := makeEvent(int64(i), "TestAggregate", fmt.Sprintf("time-event-%d", i), 1, nil)
 		// 设置不同时间
 		evt.Timestamp = now.Add(time.Duration(i) * time.Second)
-		err := store.AppendEvents(ctx, int64(i), toStorableEvents([]eventing.Event{evt}), 0)
+		err := store.AppendEvents(ctx, int64(i), toStorableEvents([]eventing.Event[int64]{evt}), 0)
 		require.NoError(t, err)
 	}
 
@@ -485,14 +485,14 @@ func TestSQLEventStore_GetEventStreamWithCursor_TypeFilters(t *testing.T) {
 	ctx := context.Background()
 
 	// 添加不同类型的事件
-	events := []eventing.Event{
+	events := []eventing.Event[int64]{
 		makeEvent(1, "OrderAggregate", "order-1", 1, nil),
 		makeEvent(2, "UserAggregate", "user-1", 1, nil),
 		makeEvent(3, "ProductAggregate", "product-1", 1, nil),
 	}
 	for i, evt := range events {
 		evt.Type = fmt.Sprintf("Event%d", i+1)
-		err := store.AppendEvents(ctx, int64(i+1), toStorableEvents([]eventing.Event{evt}), 0)
+		err := store.AppendEvents(ctx, int64(i+1), toStorableEvents([]eventing.Event[int64]{evt}), 0)
 		require.NoError(t, err)
 	}
 
@@ -538,7 +538,7 @@ func TestSQLEventStore_GetEventStreamWithCursor_InvalidCursor(t *testing.T) {
 	ctx := context.Background()
 
 	// 添加事件
-	events := []eventing.Event{makeEvent(1, "TestAggregate", "event-1", 1, nil)}
+	events := []eventing.Event[int64]{makeEvent(1, "TestAggregate", "event-1", 1, nil)}
 	err := store.AppendEvents(ctx, 1, toStorableEvents(events), 0)
 	require.NoError(t, err)
 
@@ -567,12 +567,12 @@ func TestSQLEventStore_ConcurrencyConflict(t *testing.T) {
 	aggregateID := int64(999)
 
 	// 先添加一个事件
-	events1 := []eventing.Event{makeEvent(aggregateID, "TestAggregate", "event-1", 1, nil)}
+	events1 := []eventing.Event[int64]{makeEvent(aggregateID, "TestAggregate", "event-1", 1, nil)}
 	err := store.AppendEvents(ctx, aggregateID, toStorableEvents(events1), 0)
 	require.NoError(t, err)
 
 	// 尝试用错误的期望版本添加
-	events2 := []eventing.Event{makeEvent(aggregateID, "TestAggregate", "event-2", 2, nil)}
+	events2 := []eventing.Event[int64]{makeEvent(aggregateID, "TestAggregate", "event-2", 2, nil)}
 	err = store.AppendEvents(ctx, aggregateID, toStorableEvents(events2), 0) // 期望版本0但实际是1
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "concurrency")
@@ -586,12 +586,12 @@ func TestSQLEventStore_Stream_WithOptions(t *testing.T) {
 
 	// 添加多个聚合类型的事件
 	for i := 1; i <= 3; i++ {
-		events := []eventing.Event{makeEvent(int64(i), "TypeA", fmt.Sprintf("event-a-%d", i), 1, nil)}
+		events := []eventing.Event[int64]{makeEvent(int64(i), "TypeA", fmt.Sprintf("event-a-%d", i), 1, nil)}
 		err := store.AppendEvents(ctx, int64(i), toStorableEvents(events), 0)
 		require.NoError(t, err)
 	}
 	for i := 4; i <= 6; i++ {
-		events := []eventing.Event{makeEvent(int64(i), "TypeB", fmt.Sprintf("event-b-%d", i), 1, nil)}
+		events := []eventing.Event[int64]{makeEvent(int64(i), "TypeB", fmt.Sprintf("event-b-%d", i), 1, nil)}
 		err := store.AppendEvents(ctx, int64(i), toStorableEvents(events), 0)
 		require.NoError(t, err)
 	}
@@ -629,7 +629,7 @@ func BenchmarkSQLEventStore_AppendEvents(b *testing.B) {
 	require.NoError(b, err)
 
 	store := NewSQLEventStore(db, "event_store")
-	events := []eventing.Event{makeEvent(1, "TestAggregate", "event-1", 1, nil)}
+	events := []eventing.Event[int64]{makeEvent(1, "TestAggregate", "event-1", 1, nil)}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

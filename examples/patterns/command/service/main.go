@@ -58,7 +58,7 @@ func main() {
 
 	// 事件存储（内存） + ES 仓储
 	store := estore.NewMemoryEventStore()
-	storeAdapter, err := eventsourced.NewDomainEventStore[*Counter](eventsourced.DomainEventStoreOptions[*Counter]{
+	storeAdapter, err := eventsourced.NewDomainEventStore(eventsourced.DomainEventStoreOptions[*Counter, int64]{
 		AggregateType: "Counter",
 		Factory:       NewCounter,
 		EventStore:    store,
@@ -89,7 +89,11 @@ func main() {
 
 	// 订阅打印事件
 	_ = eventBus.SubscribeEvent(ctx, "*", ebus.EventHandlerFunc(func(ctx context.Context, evt eventing.IEvent) error {
-		log.Printf("事件: %s v%d -> agg=%d payload=%#v", evt.GetType(), evt.GetVersion(), evt.GetAggregateID(), evt.GetPayload())
+		aggID := int64(0)
+		if typed, ok := evt.(eventing.ITypedEvent[int64]); ok {
+			aggID = typed.GetAggregateID()
+		}
+		log.Printf("事件: %s v%d -> agg=%d payload=%#v", evt.GetType(), evt.GetVersion(), aggID, evt.GetPayload())
 		return nil
 	}))
 

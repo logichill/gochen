@@ -14,9 +14,9 @@ import (
 // CachedEventStore 带缓存的事件存储装饰器
 // 使用缓存提升事件读取性能，适合读多写少的场景
 type CachedEventStore struct {
-	store store.IEventStore // 底层事件存储
-	cache *EventCache       // 缓存层
-	stats *CacheStats       // 缓存统计
+	store store.IEventStore[int64] // 底层事件存储（当前实现针对 int64 聚合 ID）
+	cache *EventCache              // 缓存层
+	stats *CacheStats              // 缓存统计
 
 	stopCh chan struct{}
 	// 关闭标识用于避免重复关闭
@@ -33,10 +33,10 @@ type EventCache struct {
 
 // CachedAggregate 缓存的聚合数据
 type CachedAggregate struct {
-	Events     []eventing.Event // 事件列表
-	Version    uint64           // 当前版本
-	LastAccess time.Time        // 最后访问时间
-	CreatedAt  time.Time        // 创建时间
+	Events     []eventing.Event[int64] // 事件列表
+	Version    uint64                 // 当前版本
+	LastAccess time.Time              // 最后访问时间
+	CreatedAt  time.Time              // 创建时间
 }
 
 func cacheKey(aggregateType string, aggregateID int64) string {
@@ -68,8 +68,8 @@ func DefaultConfig() *Config {
 	}
 }
 
-// NewCachedEventStore 创建带缓存的事件存储
-func NewCachedEventStore(store store.IEventStore, config *Config) *CachedEventStore {
+// NewCachedEventStore 创建带缓存的事件存储（当前针对 int64 聚合 ID 的 IEventStore[int64]）
+func NewCachedEventStore(store store.IEventStore[int64], config *Config) *CachedEventStore {
 	if config == nil {
 		config = DefaultConfig()
 	}
@@ -94,7 +94,7 @@ func NewCachedEventStore(store store.IEventStore, config *Config) *CachedEventSt
 }
 
 // AppendEvents 保存事件并失效缓存
-func (s *CachedEventStore) AppendEvents(ctx context.Context, aggregateID int64, events []eventing.IStorableEvent, expectedVersion uint64) error {
+func (s *CachedEventStore) AppendEvents(ctx context.Context, aggregateID int64, events []eventing.IStorableEvent[int64], expectedVersion uint64) error {
 	// 写入底层存储
 	if err := s.store.AppendEvents(ctx, aggregateID, events, expectedVersion); err != nil {
 		return err
@@ -112,7 +112,7 @@ func (s *CachedEventStore) AppendEvents(ctx context.Context, aggregateID int64, 
 }
 
 // LoadEvents 加载聚合的事件（优先从缓存）
-func (s *CachedEventStore) LoadEvents(ctx context.Context, aggregateID int64, afterVersion uint64) ([]eventing.Event, error) {
+func (s *CachedEventStore) LoadEvents(ctx context.Context, aggregateID int64, afterVersion uint64) ([]eventing.Event[int64], error) {
 	// 尝试从缓存获取
 	if cached := s.getCachedEvents(cacheKey("", aggregateID), afterVersion); cached != nil {
 		s.recordHit()
@@ -136,7 +136,7 @@ func (s *CachedEventStore) LoadEvents(ctx context.Context, aggregateID int64, af
 }
 
 // LoadEventsByType 加载指定聚合类型的事件（优先从缓存）
-func (s *CachedEventStore) LoadEventsByType(ctx context.Context, aggregateType string, aggregateID int64, afterVersion uint64) ([]eventing.Event, error) {
+func (s *CachedEventStore) LoadEventsByType(ctx context.Context, aggregateType string, aggregateID int64, afterVersion uint64) ([]eventing.Event[int64], error) {
 	key := cacheKey(aggregateType, aggregateID)
 	if cached := s.getCachedEvents(key, afterVersion); cached != nil {
 		s.recordHit()
@@ -146,10 +146,10 @@ func (s *CachedEventStore) LoadEventsByType(ctx context.Context, aggregateType s
 	s.recordMiss()
 
 	var (
-		events []eventing.Event
+		events []eventing.Event[int64]
 		err    error
 	)
-	if typedStore, ok := s.store.(store.ITypedEventStore); ok {
+	if typedStore, ok := s.store.(store.ITypedEventStore[int64]); ok {
 		events, err = typedStore.LoadEventsByType(ctx, aggregateType, aggregateID, afterVersion)
 	} else {
 		// 回退到通用加载并按类型过滤
@@ -176,13 +176,13 @@ func (s *CachedEventStore) LoadEventsByType(ctx context.Context, aggregateType s
 }
 
 // StreamEvents 获取事件流（不缓存）
-func (s *CachedEventStore) StreamEvents(ctx context.Context, fromTimestamp time.Time) ([]eventing.Event, error) {
+func (s *CachedEventStore) StreamEvents(ctx context.Context, fromTimestamp time.Time) ([]eventing.Event[int64], error) {
 	return s.store.StreamEvents(ctx, fromTimestamp)
 }
 
 // GetEventStreamWithCursor 基于游标/类型过滤读取事件流（如底层支持则委托，否则回退过滤）
-func (s *CachedEventStore) GetEventStreamWithCursor(ctx context.Context, opts *store.StreamOptions) (*store.StreamResult, error) {
-	if extended, ok := s.store.(store.IEventStoreExtended); ok {
+func (s *CachedEventStore) GetEventStreamWithCursor(ctx context.Context, opts *store.StreamOptions) (*store.StreamResult[int64], error) {
+	if extended, ok := s.store.(store.IEventStoreExtended[int64]); ok {
 		return extended.GetEventStreamWithCursor(ctx, opts)
 	}
 
@@ -190,12 +190,12 @@ func (s *CachedEventStore) GetEventStreamWithCursor(ctx context.Context, opts *s
 	if err != nil {
 		return nil, err
 	}
-	result := store.FilterEventsWithOptions(events, opts)
+	result := store.FilterEventsWithOptions[int64](events, opts)
 	return result, nil
 }
 
 // getCachedEvents 从缓存获取事件
-func (s *CachedEventStore) getCachedEvents(key string, fromVersion uint64) []eventing.Event {
+func (s *CachedEventStore) getCachedEvents(key string, fromVersion uint64) []eventing.Event[int64] {
 	s.cache.mutex.RLock()
 	cached, exists := s.cache.aggregateCache[key]
 	if !exists || s.isExpired(cached) {
@@ -204,9 +204,9 @@ func (s *CachedEventStore) getCachedEvents(key string, fromVersion uint64) []eve
 	}
 
 	// 在读锁下复制事件数据，避免与写操作竞争
-	var result []eventing.Event
+	var result []eventing.Event[int64]
 	if fromVersion == 0 {
-		result = make([]eventing.Event, len(cached.Events))
+		result = make([]eventing.Event[int64], len(cached.Events))
 		copy(result, cached.Events)
 	} else {
 		for _, evt := range cached.Events {
@@ -228,7 +228,7 @@ func (s *CachedEventStore) getCachedEvents(key string, fromVersion uint64) []eve
 }
 
 // cacheAggregate 缓存聚合事件
-func (s *CachedEventStore) cacheAggregate(key string, events []eventing.Event) {
+func (s *CachedEventStore) cacheAggregate(key string, events []eventing.Event[int64]) {
 	if len(events) == 0 {
 		return
 	}
@@ -245,7 +245,7 @@ func (s *CachedEventStore) cacheAggregate(key string, events []eventing.Event) {
 	latestVersion := events[len(events)-1].Version
 
 	// 创建缓存副本
-	cachedEvents := make([]eventing.Event, len(events))
+	cachedEvents := make([]eventing.Event[int64], len(events))
 	copy(cachedEvents, events)
 
 	s.cache.aggregateCache[key] = &CachedAggregate{
@@ -438,4 +438,4 @@ func (s *CachedEventStore) Close() error {
 }
 
 // 接口断言
-var _ store.IEventStoreExtended = (*CachedEventStore)(nil)
+var _ store.IEventStoreExtended[int64] = (*CachedEventStore)(nil)

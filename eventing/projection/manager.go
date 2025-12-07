@@ -30,7 +30,7 @@ type IProjection interface {
 	GetSupportedEventTypes() []string
 
 	// 重建投影
-	Rebuild(ctx context.Context, events []eventing.Event) error
+	Rebuild(ctx context.Context, events []eventing.Event[int64]) error
 
 	// 获取投影状态
 	GetStatus() ProjectionStatus
@@ -66,7 +66,7 @@ type ProjectionConfig struct {
 
 	// DeadLetterFunc 死信处理函数（重试失败后调用）
 	// 可用于记录日志、发送告警或将事件发送到死信队列
-	DeadLetterFunc func(err error, event eventing.Event, projection string)
+	DeadLetterFunc func(err error, event eventing.Event[int64], projection string)
 }
 
 // DefaultProjectionConfig 默认投影配置
@@ -74,7 +74,7 @@ func DefaultProjectionConfig() *ProjectionConfig {
 	return &ProjectionConfig{
 		MaxRetries:   3,
 		RetryBackoff: 1 * time.Second,
-		DeadLetterFunc: func(err error, event eventing.Event, projection string) {
+		DeadLetterFunc: func(err error, event eventing.Event[int64], projection string) {
 			projectionLogger().Error(context.Background(), "event processing failed after max retries", logging.Error(err),
 				logging.String("projection", projection),
 				logging.String("event_id", event.ID),
@@ -86,7 +86,7 @@ func DefaultProjectionConfig() *ProjectionConfig {
 
 type ProjectionManager struct {
 	projections     map[string]IProjection
-	eventStore      store.IEventStore
+	eventStore      store.IEventStore[int64]
 	eventBus        bus.IEventBus
 	statuses        map[string]*ProjectionStatus
 	handlers        map[string]map[string]*projectionEventHandler
@@ -99,12 +99,12 @@ type ProjectionManager struct {
 const replayBatchLimit = 1000 // 单次回放批量上限，避免一次性加载过多事件
 
 // NewProjectionManager 创建投影管理器
-func NewProjectionManager(eventStore store.IEventStore, eventBus bus.IEventBus) *ProjectionManager {
+func NewProjectionManager(eventStore store.IEventStore[int64], eventBus bus.IEventBus) *ProjectionManager {
 	return NewProjectionManagerWithConfig(eventStore, eventBus, nil)
 }
 
 // NewProjectionManagerWithConfig 创建带配置的投影管理器
-func NewProjectionManagerWithConfig(eventStore store.IEventStore, eventBus bus.IEventBus, config *ProjectionConfig) *ProjectionManager {
+func NewProjectionManagerWithConfig(eventStore store.IEventStore[int64], eventBus bus.IEventBus, config *ProjectionConfig) *ProjectionManager {
 	if config == nil {
 		config = DefaultProjectionConfig()
 	}
@@ -275,8 +275,8 @@ func (pm *ProjectionManager) replayProjectionFromCheckpoint(ctx context.Context,
 	return replayed, nil
 }
 
-func (pm *ProjectionManager) fetchEventsForReplay(ctx context.Context, after string, fromTime time.Time, supportedTypes []string) ([]eventing.Event, bool, error) {
-	if extended, ok := pm.eventStore.(store.IEventStoreExtended); ok {
+func (pm *ProjectionManager) fetchEventsForReplay(ctx context.Context, after string, fromTime time.Time, supportedTypes []string) ([]eventing.Event[int64], bool, error) {
+	if extended, ok := pm.eventStore.(store.IEventStoreExtended[int64]); ok {
 		stream, err := extended.GetEventStreamWithCursor(ctx, &store.StreamOptions{
 			After:    after,
 			FromTime: fromTime,
@@ -292,12 +292,12 @@ func (pm *ProjectionManager) fetchEventsForReplay(ctx context.Context, after str
 		return stream.Events, stream.HasMore, nil
 	}
 
-	events, err := pm.eventStore.StreamEvents(ctx, fromTime)
+		events, err := pm.eventStore.StreamEvents(ctx, fromTime)
 	if err != nil {
 		return nil, false, err
 	}
 
-	filtered := store.FilterEventsWithOptions(events, &store.StreamOptions{
+	filtered := store.FilterEventsWithOptions[int64](events, &store.StreamOptions{
 		After:    after,
 		FromTime: fromTime,
 		Types:    supportedTypes,
@@ -615,7 +615,7 @@ func (pm *ProjectionManager) GetAllProjectionStatuses() map[string]*ProjectionSt
 }
 
 // RebuildProjection 重建投影
-func (pm *ProjectionManager) RebuildProjection(ctx context.Context, name string, events []eventing.Event) error {
+func (pm *ProjectionManager) RebuildProjection(ctx context.Context, name string, events []eventing.Event[int64]) error {
 	pm.mutex.Lock()
 	checkpointStore := pm.checkpointStore
 	projection, exists := pm.projections[name]
@@ -747,8 +747,8 @@ func (h *projectionEventHandler) HandleEvent(ctx context.Context, event eventing
 	h.manager.mutex.Unlock()
 
 	if err != nil {
-		// 如果 event 是 eventing.Event 类型，则传递给 DeadLetterFunc
-		if e, ok := event.(*eventing.Event); ok {
+		// 如果 event 是 *eventing.Event[int64] 类型，则传递给 DeadLetterFunc
+		if e, ok := event.(*eventing.Event[int64]); ok {
 			h.manager.config.DeadLetterFunc(err, *e, name)
 		}
 

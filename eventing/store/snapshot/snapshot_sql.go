@@ -33,7 +33,7 @@ func NewSQLStore(db db.IDatabase, tableName string) *SQLStore {
 }
 
 // SaveSnapshot 保存或更新聚合快照
-func (s *SQLStore) SaveSnapshot(ctx context.Context, snapshot Snapshot) error {
+func (s *SQLStore) SaveSnapshot(ctx context.Context, snapshot Snapshot[int64]) error {
 	if s.db == nil {
 		return fmt.Errorf("snapshot SQLStore database is nil")
 	}
@@ -103,7 +103,7 @@ func (s *SQLStore) SaveSnapshot(ctx context.Context, snapshot Snapshot) error {
 }
 
 // GetSnapshot 获取指定聚合的最新快照
-func (s *SQLStore) GetSnapshot(ctx context.Context, aggregateType string, aggregateID int64) (*Snapshot, error) {
+func (s *SQLStore) GetSnapshot(ctx context.Context, aggregateType string, aggregateID int64) (*Snapshot[int64], error) {
 	if s.db == nil {
 		return nil, fmt.Errorf("snapshot SQLStore database is nil")
 	}
@@ -113,7 +113,7 @@ func (s *SQLStore) GetSnapshot(ctx context.Context, aggregateType string, aggreg
 		WHERE aggregate_type = ? AND aggregate_id = ?`, s.tableName)
 
 	row := s.db.QueryRow(ctx, query, aggregateType, aggregateID)
-	var snap Snapshot
+	var snap Snapshot[int64]
 	var versionInt int64
 	var ts time.Time
 	var metaStr sql.NullString
@@ -164,7 +164,7 @@ func (s *SQLStore) DeleteSnapshot(ctx context.Context, aggregateType string, agg
 }
 
 // GetSnapshots 获取快照列表（可按聚合类型和数量限制）
-func (s *SQLStore) GetSnapshots(ctx context.Context, aggregateType string, limit int) ([]Snapshot, error) {
+func (s *SQLStore) GetSnapshots(ctx context.Context, aggregateType string, limit int) ([]Snapshot[int64], error) {
 	if s.db == nil {
 		return nil, fmt.Errorf("snapshot SQLStore database is nil")
 	}
@@ -192,9 +192,9 @@ func (s *SQLStore) GetSnapshots(ctx context.Context, aggregateType string, limit
 	}
 	defer rows.Close()
 
-	var result []Snapshot
+	var result []Snapshot[int64]
 	for rows.Next() {
-		var snap Snapshot
+		var snap Snapshot[int64]
 		var versionInt int64
 		var ts time.Time
 		var metaStr sql.NullString
@@ -249,5 +249,5 @@ func (s *SQLStore) CleanupSnapshots(ctx context.Context, retentionPeriod time.Du
 	return nil
 }
 
-// 确保 SQLStore 实现 ISnapshotStore 接口
-var _ ISnapshotStore = (*SQLStore)(nil)
+// 确保 SQLStore 实现 ISnapshotStore[int64] 接口
+var _ ISnapshotStore[int64] = (*SQLStore)(nil)

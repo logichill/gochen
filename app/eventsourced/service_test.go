@@ -49,7 +49,7 @@ func TestEventSourcedService_ExecuteCommand_Success(t *testing.T) {
 	ctx := context.Background()
 
 	eventStore := store.NewMemoryEventStore()
-	adapter, err := NewDomainEventStore[*serviceAggregate](DomainEventStoreOptions[*serviceAggregate]{
+	adapter, err := NewDomainEventStore(DomainEventStoreOptions[*serviceAggregate, int64]{
 		AggregateType: "ServiceAggregate",
 		Factory:       newServiceAggregate,
 		EventStore:    eventStore,
@@ -79,7 +79,7 @@ func TestEventSourcedService_AsCommandMessageHandler(t *testing.T) {
 	ctx := context.Background()
 
 	eventStore := store.NewMemoryEventStore()
-	adapter, err := NewDomainEventStore[*serviceAggregate](DomainEventStoreOptions[*serviceAggregate]{
+	adapter, err := NewDomainEventStore(DomainEventStoreOptions[*serviceAggregate, int64]{
 		AggregateType: "ServiceAggregate",
 		Factory:       newServiceAggregate,
 		EventStore:    eventStore,

@@ -15,9 +15,9 @@ import (
 type EventSourcedProjectionOption[T any] struct {
 	Name       string
 	EventTypes []string
-	Decoder    func(event eventing.Event) (T, error)
+	Decoder    func(event eventing.IEvent) (T, error)
 	Handle     func(ctx context.Context, payload T) error
-	Rebuild    func(ctx context.Context, events []eventing.Event) error
+	Rebuild    func(ctx context.Context, events []eventing.Event[int64]) error
 	Logger     logging.ILogger
 }
 
@@ -25,9 +25,9 @@ type EventSourcedProjectionOption[T any] struct {
 type EventSourcedProjection[T any] struct {
 	name       string
 	eventTypes []string
-	decoder    func(event eventing.Event) (T, error)
+	decoder    func(event eventing.IEvent) (T, error)
 	handle     func(ctx context.Context, payload T) error
-	rebuild    func(ctx context.Context, events []eventing.Event) error
+	rebuild    func(ctx context.Context, events []eventing.Event[int64]) error
 	logger     logging.ILogger
 
 	statusMu sync.RWMutex
@@ -48,11 +48,15 @@ func NewEventSourcedProjection[T any](opt EventSourcedProjectionOption[T]) (*Eve
 
 	decoder := opt.Decoder
 	if decoder == nil {
-		decoder = func(evt eventing.Event) (T, error) {
-			payload, ok := evt.Payload.(T)
+		decoder = func(evt eventing.IEvent) (T, error) {
+			if evt == nil {
+				var zero T
+				return zero, fmt.Errorf("event cannot be nil")
+			}
+			payload, ok := evt.GetPayload().(T)
 			if !ok {
 				var zero T
-				return zero, fmt.Errorf("payload type mismatch: %T", evt.Payload)
+				return zero, fmt.Errorf("payload type mismatch: %T", evt.GetPayload())
 			}
 			return payload, nil
 		}
@@ -86,27 +90,26 @@ func (p *EventSourcedProjection[T]) GetName() string {
 
 // Handle 处理事件。
 func (p *EventSourcedProjection[T]) Handle(ctx context.Context, evt eventing.IEvent) error {
-	domainEvent, ok := evt.(*eventing.Event)
-	if !ok {
-		return fmt.Errorf("projection expects *eventing.Event, got %T", evt)
+	if evt == nil {
+		return fmt.Errorf("event cannot be nil")
 	}
-	payload, err := p.decoder(*domainEvent)
+	payload, err := p.decoder(evt)
 	if err != nil {
 		p.logger.Error(ctx, "failed to decode event",
 			logging.Error(err),
-			logging.String("event_id", domainEvent.ID),
-			logging.String("event_type", domainEvent.Type))
+			logging.String("event_id", evt.GetID()),
+			logging.String("event_type", evt.GetType()))
 		return err
 	}
 	if err := p.handle(ctx, payload); err != nil {
 		p.logger.Error(ctx, "projection handle failed",
 			logging.Error(err),
-			logging.String("event_id", domainEvent.ID),
-			logging.String("event_type", domainEvent.Type))
-		p.updateStatusError(domainEvent, err)
+			logging.String("event_id", evt.GetID()),
+			logging.String("event_type", evt.GetType()))
+		p.updateStatusError(evt, err)
 		return err
 	}
-	p.updateStatusSuccess(domainEvent)
+	p.updateStatusSuccess(evt)
 	return nil
 }
 
@@ -116,7 +119,7 @@ func (p *EventSourcedProjection[T]) GetSupportedEventTypes() []string {
 }
 
 // Rebuild 重建投影。
-func (p *EventSourcedProjection[T]) Rebuild(ctx context.Context, events []eventing.Event) error {
+func (p *EventSourcedProjection[T]) Rebuild(ctx context.Context, events []eventing.Event[int64]) error {
 	if p.rebuild != nil {
 		return p.rebuild(ctx, events)
 	}
@@ -135,22 +138,22 @@ func (p *EventSourcedProjection[T]) GetStatus() projection.ProjectionStatus {
 	return p.status
 }
 
-func (p *EventSourcedProjection[T]) updateStatusSuccess(evt *eventing.Event) {
+func (p *EventSourcedProjection[T]) updateStatusSuccess(evt eventing.IEvent) {
 	p.statusMu.Lock()
 	defer p.statusMu.Unlock()
-	p.status.LastEventID = evt.ID
-	p.status.LastEventTime = evt.Timestamp
+	p.status.LastEventID = evt.GetID()
+	p.status.LastEventTime = evt.GetTimestamp()
 	p.status.ProcessedEvents++
 	p.status.Status = "running"
 	p.status.LastError = ""
 	p.status.UpdatedAt = time.Now()
 }
 
-func (p *EventSourcedProjection[T]) updateStatusError(evt *eventing.Event, err error) {
+func (p *EventSourcedProjection[T]) updateStatusError(evt eventing.IEvent, err error) {
 	p.statusMu.Lock()
 	defer p.statusMu.Unlock()
-	p.status.LastEventID = evt.ID
-	p.status.LastEventTime = evt.Timestamp
+	p.status.LastEventID = evt.GetID()
+	p.status.LastEventTime = evt.GetTimestamp()
 	p.status.FailedEvents++
 	p.status.Status = "error"
 	p.status.LastError = err.Error()
@@ -159,4 +162,3 @@ func (p *EventSourcedProjection[T]) updateStatusError(evt *eventing.Event, err e
 
 // Ensure interface compliance.
 var _ projection.IProjection = (*EventSourcedProjection[any])(nil)
-

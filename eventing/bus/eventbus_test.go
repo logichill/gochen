@@ -48,7 +48,7 @@ func TestEventBus_PublishSubscribe(t *testing.T) {
 		t.Fatalf("subscribe: %v", err)
 	}
 
-	evt := &eventing.Event{
+	evt := &eventing.Event[int64]{
 		Message: msg.Message{
 			ID:        "evt-1",
 			Type:      "TestEvt",

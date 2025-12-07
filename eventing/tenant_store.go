@@ -33,17 +33,17 @@ import (
 //	// 只返回 tenant_id = "tenant-123" 的事件
 type TenantAwareEventStore struct {
 	store interface {
-		AppendEvents(ctx context.Context, aggregateID int64, events []IStorableEvent, expectedVersion uint64) error
-		LoadEvents(ctx context.Context, aggregateID int64, afterVersion uint64) ([]Event, error)
-		StreamEvents(ctx context.Context, fromTime time.Time) ([]Event, error)
+		AppendEvents(ctx context.Context, aggregateID int64, events []IStorableEvent[int64], expectedVersion uint64) error
+		LoadEvents(ctx context.Context, aggregateID int64, afterVersion uint64) ([]Event[int64], error)
+		StreamEvents(ctx context.Context, fromTime time.Time) ([]Event[int64], error)
 	}
 }
 
 // NewTenantAwareEventStore 创建租户感知的事件存储
 func NewTenantAwareEventStore(store interface {
-	AppendEvents(ctx context.Context, aggregateID int64, events []IStorableEvent, expectedVersion uint64) error
-	LoadEvents(ctx context.Context, aggregateID int64, afterVersion uint64) ([]Event, error)
-	StreamEvents(ctx context.Context, fromTime time.Time) ([]Event, error)
+	AppendEvents(ctx context.Context, aggregateID int64, events []IStorableEvent[int64], expectedVersion uint64) error
+	LoadEvents(ctx context.Context, aggregateID int64, afterVersion uint64) ([]Event[int64], error)
+	StreamEvents(ctx context.Context, fromTime time.Time) ([]Event[int64], error)
 }) *TenantAwareEventStore {
 	return &TenantAwareEventStore{
 		store: store,
@@ -51,7 +51,7 @@ func NewTenantAwareEventStore(store interface {
 }
 
 // AppendEvents 追加事件（自动注入租户 ID）
-func (s *TenantAwareEventStore) AppendEvents(ctx context.Context, aggregateID int64, events []IStorableEvent, expectedVersion uint64) error {
+func (s *TenantAwareEventStore) AppendEvents(ctx context.Context, aggregateID int64, events []IStorableEvent[int64], expectedVersion uint64) error {
 	// 自动注入租户 ID 到所有事件
 	tenantID := httpx.GetTenantID(ctx)
 	if tenantID != "" {
@@ -64,7 +64,7 @@ func (s *TenantAwareEventStore) AppendEvents(ctx context.Context, aggregateID in
 }
 
 // LoadEvents 加载事件（自动过滤租户）
-func (s *TenantAwareEventStore) LoadEvents(ctx context.Context, aggregateID int64, afterVersion uint64) ([]Event, error) {
+func (s *TenantAwareEventStore) LoadEvents(ctx context.Context, aggregateID int64, afterVersion uint64) ([]Event[int64], error) {
 	events, err := s.store.LoadEvents(ctx, aggregateID, afterVersion)
 	if err != nil {
 		return nil, err
@@ -75,7 +75,7 @@ func (s *TenantAwareEventStore) LoadEvents(ctx context.Context, aggregateID int6
 }
 
 // StreamEvents 流式读取事件（自动过滤租户）
-func (s *TenantAwareEventStore) StreamEvents(ctx context.Context, fromTime time.Time) ([]Event, error) {
+func (s *TenantAwareEventStore) StreamEvents(ctx context.Context, fromTime time.Time) ([]Event[int64], error) {
 	events, err := s.store.StreamEvents(ctx, fromTime)
 	if err != nil {
 		return nil, err
@@ -86,8 +86,8 @@ func (s *TenantAwareEventStore) StreamEvents(ctx context.Context, fromTime time.
 }
 
 // injectTenantID 注入租户 ID 到事件
-func (s *TenantAwareEventStore) injectTenantID(tenantID string, event IStorableEvent) {
-	if e, ok := event.(*Event); ok {
+func (s *TenantAwareEventStore) injectTenantID(tenantID string, event IStorableEvent[int64]) {
+	if e, ok := event.(*Event[int64]); ok {
 		if e.Metadata == nil {
 			e.Metadata = make(map[string]any)
 		}
@@ -96,7 +96,7 @@ func (s *TenantAwareEventStore) injectTenantID(tenantID string, event IStorableE
 }
 
 // filterEventsByTenant 按租户过滤事件
-func (s *TenantAwareEventStore) filterEventsByTenant(ctx context.Context, events []Event) []Event {
+func (s *TenantAwareEventStore) filterEventsByTenant(ctx context.Context, events []Event[int64]) []Event[int64] {
 	// 提取当前租户 ID
 	tenantID := httpx.GetTenantID(ctx)
 	if tenantID == "" {
@@ -105,7 +105,7 @@ func (s *TenantAwareEventStore) filterEventsByTenant(ctx context.Context, events
 	}
 
 	// 过滤事件
-	filtered := make([]Event, 0, len(events))
+	filtered := make([]Event[int64], 0, len(events))
 	for _, event := range events {
 		eventTenantID, _ := event.Metadata["tenant_id"].(string)
 		if eventTenantID == tenantID {

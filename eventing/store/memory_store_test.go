@@ -14,9 +14,9 @@ func TestMemoryEventStore_GetEventStreamWithCursor_FilterByAfterAndType(t *testi
 	ctx := context.Background()
 	store := NewMemoryEventStore()
 
-	e1 := eventing.NewEvent(1, "Agg", "TypeA", 1, nil)
-	e2 := eventing.NewEvent(1, "Agg", "TypeB", 2, nil)
-	e3 := eventing.NewEvent(1, "Agg", "TypeA", 3, nil)
+	e1 := eventing.NewEvent[int64](1, "Agg", "TypeA", 1, nil)
+	e2 := eventing.NewEvent[int64](1, "Agg", "TypeB", 2, nil)
+	e3 := eventing.NewEvent[int64](1, "Agg", "TypeA", 3, nil)
 
 	// 统一时间戳，验证同时间戳下的 ID 游标过滤
 	now := time.Now()
@@ -24,7 +24,7 @@ func TestMemoryEventStore_GetEventStreamWithCursor_FilterByAfterAndType(t *testi
 	e2.Timestamp = now
 	e3.Timestamp = now
 
-	require.NoError(t, store.AppendEvents(ctx, 1, []eventing.IStorableEvent{e1, e2, e3}, 0))
+	require.NoError(t, store.AppendEvents(ctx, 1, []eventing.IStorableEvent[int64]{e1, e2, e3}, 0))
 
 	result, err := store.GetEventStreamWithCursor(ctx, &StreamOptions{
 		After: e1.ID,

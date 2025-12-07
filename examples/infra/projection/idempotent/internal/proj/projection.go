@@ -31,9 +31,12 @@ func NewIdempotentProjection(sink *idemp.Sink) (projection.IProjection, error) {
 	return eventsourced.NewEventSourcedProjection[*ItemAddedEnvelope](eventsourced.EventSourcedProjectionOption[*ItemAddedEnvelope]{
 		Name:       "stock_projection",
 		EventTypes: []string{"ItemAdded"},
-		Decoder: func(evt eventing.Event) (*ItemAddedEnvelope, error) {
-			if p, ok := evt.Payload.(*ItemAdded); ok {
-				return &ItemAddedEnvelope{E: p, ID: evt.ID}, nil
+		Decoder: func(evt eventing.IEvent) (*ItemAddedEnvelope, error) {
+			if evt == nil {
+				return nil, nil
+			}
+			if p, ok := evt.GetPayload().(*ItemAdded); ok {
+				return &ItemAddedEnvelope{E: p, ID: evt.GetID()}, nil
 			}
 			return nil, nil
 		},
