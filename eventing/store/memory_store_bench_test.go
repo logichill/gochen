@@ -13,7 +13,7 @@ func BenchmarkMemoryEventStore_AppendEvents(b *testing.B) {
 
 	b.Run("Single Event", func(b *testing.B) {
 		store := NewMemoryEventStore()
-		// 预先构造事件，避免测量到构造开销
+		// 构造简单测试事件，主要关注 AppendEvents 的存储开销
 		createEvent := func(aggregateID int64) eventing.IStorableEvent[int64] {
 			return eventing.NewEvent(
 				aggregateID,
@@ -37,7 +37,7 @@ func BenchmarkMemoryEventStore_AppendEvents(b *testing.B) {
 
 	b.Run("10 Events", func(b *testing.B) {
 		store := NewMemoryEventStore()
-		// 预先构造事件
+		// 构造简单测试事件，主要关注 AppendEvents 的存储开销
 		createEvents := func(aggregateID int64, count int) []eventing.IStorableEvent[int64] {
 			events := make([]eventing.IStorableEvent[int64], count)
 			for i := 0; i < count; i++ {

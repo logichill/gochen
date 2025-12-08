@@ -97,7 +97,11 @@ type rowScanner interface {
 }
 
 func (s *SQLEventStore) scanEvents(rows rowScanner) ([]eventing.Event[int64], error) {
-	var events []eventing.Event[int64]
+	// 性能优化：预分配切片容量
+	// 典型场景下聚合包含 10-100 个事件，预分配可避免多次扩容
+	// 即使实际数量较少，也只是多分配少量内存（可被GC回收）
+	events := make([]eventing.Event[int64], 0, 64)
+
 	for rows.Next() {
 		var (
 			id, typ      string
@@ -126,6 +130,7 @@ func (s *SQLEventStore) scanEvents(rows rowScanner) ([]eventing.Event[int64], er
 				return nil, fmt.Errorf("failed to unmarshal event metadata for id=%s, type=%s: %w", id, typ, err)
 			}
 		}
+
 		events = append(events, eventing.Event[int64]{
 			Message: messaging.Message{
 				ID:        id,
@@ -173,6 +178,4 @@ func (s *SQLEventStore) GetAggregateVersion(ctx context.Context, aggregateID int
 var (
 	_ store.IEventStore[int64]       = (*SQLEventStore)(nil)
 	_ store.IEventStreamStore[int64] = (*SQLEventStore)(nil)
-	_ store.IEventStreamStore[int64] = (*SQLEventStore)(nil)
-	_ store.IEventStreamStore[int64]    = (*SQLEventStore)(nil)
 )

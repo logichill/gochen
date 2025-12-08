@@ -54,7 +54,7 @@ func (m *MemoryEventStore) AppendEvents(ctx context.Context, aggregateID int64, 
 	// 性能优化：预先在锁外进行验证和类型转换，减少临界区范围
 	// 这些操作不依赖共享状态，可以安全地在锁外执行
 	aggregateType := events[0].GetAggregateType()
-	convertedEvents := make([]eventing.Event[int64], 0, len(events))
+	convertedEvents := make([]eventing.Event[int64], len(events))
 
 	for i, e := range events {
 		// 验证事件（锁外）
@@ -74,7 +74,7 @@ func (m *MemoryEventStore) AppendEvents(ctx context.Context, aggregateID int64, 
 			return fmt.Errorf("event version not sequential: expected %d, got %d", expectedEventVersion, event.GetVersion())
 		}
 
-		convertedEvents = append(convertedEvents, *event)
+		convertedEvents[i] = *event
 	}
 
 	// 性能优化：缩小锁范围，只在真正修改共享状态时持锁

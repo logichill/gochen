@@ -13,6 +13,18 @@ import (
 	log "gochen/logging"
 )
 
+// preparedEvent 预处理的事件数据（用于批量插入优化）
+type preparedEvent struct {
+	id            string
+	typ           string
+	aggregateType string
+	version       uint64
+	schemaVersion int
+	timestamp     time.Time
+	payloadJSON   string
+	metadataJSON  string
+}
+
 func (s *SQLEventStore) AppendEvents(ctx context.Context, aggregateID int64, events []eventing.IStorableEvent[int64], expectedVersion uint64) error {
 	if len(events) == 0 {
 		return nil
@@ -36,6 +48,8 @@ func (s *SQLEventStore) AppendEventsWithDB(ctx context.Context, db db.IDatabase,
 	if len(events) == 0 {
 		return nil
 	}
+
+	// 第一步：确定聚合类型
 	aggregateType := ""
 	for _, evt := range events {
 		if evt.GetAggregateType() != "" {
@@ -43,6 +57,8 @@ func (s *SQLEventStore) AppendEventsWithDB(ctx context.Context, db db.IDatabase,
 			break
 		}
 	}
+
+	// 第二步：版本检查（必须在事务内）
 	currentVersion, err := s.getCurrentVersion(ctx, db, aggregateID, aggregateType)
 	if err != nil {
 		return eventing.NewStoreFailedError("query current version failed", err)
@@ -51,10 +67,14 @@ func (s *SQLEventStore) AppendEventsWithDB(ctx context.Context, db db.IDatabase,
 		return eventing.NewConcurrencyError(aggregateID, expectedVersion, currentVersion)
 	}
 
-	insertSQL := fmt.Sprintf(`INSERT INTO %s (id, type, aggregate_id, aggregate_type, version, schema_version, timestamp, payload, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, s.tableName)
+	// 第三步：性能优化 - 预先验证和序列化所有事件（减少数据库往返）
+	// 这一步在版本检查后、插入前执行，避免无效写入
+	prepared := make([]preparedEvent, 0, len(events))
 	start := time.Now()
-	for idx := range events {
-		evt := events[idx] // 直接使用，不取地址
+
+	for idx, evt := range events {
+
+		// 聚合类型处理
 		if evt.GetAggregateType() == "" {
 			evt.SetAggregateType(aggregateType)
 		} else if aggregateType == "" {
@@ -62,35 +82,120 @@ func (s *SQLEventStore) AppendEventsWithDB(ctx context.Context, db db.IDatabase,
 		} else if evt.GetAggregateType() != aggregateType {
 			return eventing.NewInvalidEventError(evt.GetID(), evt.GetType(), "mixed aggregate types in append batch")
 		}
+
+		// 版本校验
 		expectedEventVersion := expectedVersion + uint64(idx) + 1
 		if evt.GetVersion() != expectedEventVersion {
 			return eventing.NewInvalidEventError(evt.GetID(), evt.GetType(), fmt.Sprintf("event version mismatch: expected %d, got %d", expectedEventVersion, evt.GetVersion()))
 		}
+
+		// 事件验证
 		if err := evt.Validate(); err != nil {
 			return eventing.NewInvalidEventErrorWithCause(evt.GetID(), evt.GetType(), "event validation failed", err)
 		}
+
+		// 序列化（CPU密集，但避免了数据库往返）
 		payloadJSON, err := json.Marshal(evt.GetPayload())
 		if err != nil {
 			return &eventing.EventStoreError{Code: eventing.ErrCodeSerializePayload, Message: "serialize payload failed", Cause: err, EventID: evt.GetID(), EventType: evt.GetType()}
 		}
+
 		metadataJSON, err := json.Marshal(evt.GetMetadata())
 		if err != nil {
 			return &eventing.EventStoreError{Code: eventing.ErrCodeSerializeMetadata, Message: "serialize metadata failed", Cause: err, EventID: evt.GetID(), EventType: evt.GetType()}
 		}
-		_, err = db.Exec(ctx, insertSQL, evt.GetID(), evt.GetType(), aggregateID, evt.GetAggregateType(), evt.GetVersion(), evt.GetSchemaVersion(), evt.GetTimestamp(), string(payloadJSON), string(metadataJSON))
+
+		// 使用 append 而非索引赋值，更健壮且语义更清晰
+		prepared = append(prepared, preparedEvent{
+			id:            evt.GetID(),
+			typ:           evt.GetType(),
+			aggregateType: evt.GetAggregateType(),
+			version:       evt.GetVersion(),
+			schemaVersion: evt.GetSchemaVersion(),
+			timestamp:     evt.GetTimestamp(),
+			payloadJSON:   string(payloadJSON),
+			metadataJSON:  string(metadataJSON),
+		})
+	}
+
+	// 第四步：性能优化 - 批量INSERT
+	// 构建批量插入SQL: INSERT INTO table VALUES (?, ...), (?, ...), ...
+	// 这将N次数据库往返降低到1次
+	if len(prepared) == 1 {
+		// 单个事件：使用简单INSERT（更易读的错误信息）
+		p := prepared[0]
+		insertSQL := fmt.Sprintf(`INSERT INTO %s (id, type, aggregate_id, aggregate_type, version, schema_version, timestamp, payload, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, s.tableName)
+		_, err = db.Exec(ctx, insertSQL, p.id, p.typ, aggregateID, p.aggregateType, p.version, p.schemaVersion, p.timestamp, p.payloadJSON, p.metadataJSON)
 		if err != nil {
 			if isDuplicateKeyError(err) {
-				if s.isSameEvent(ctx, db, evt.GetID(), evt.GetVersion(), aggregateID) {
-					continue
+				if s.isSameEvent(ctx, db, p.id, p.version, aggregateID) {
+					// 幂等性：相同事件已存在
+					duration := time.Since(start)
+					monitoring.GlobalMetrics().RecordEventSaved(len(events), duration)
+					return nil
 				}
-				return eventing.NewEventAlreadyExistsError(evt.GetID(), aggregateID, evt.GetVersion())
+				return eventing.NewEventAlreadyExistsError(p.id, aggregateID, p.version)
 			}
-			return eventing.NewStoreFailedErrorWithEvent("insert event failed", err, evt.GetID(), evt.GetType())
+			return eventing.NewStoreFailedErrorWithEvent("insert event failed", err, p.id, p.typ)
+		}
+	} else {
+		// 多个事件：使用批量INSERT
+		placeholders := make([]string, len(prepared))
+		args := make([]interface{}, 0, len(prepared)*9)
+
+		for i, p := range prepared {
+			placeholders[i] = "(?, ?, ?, ?, ?, ?, ?, ?, ?)"
+			args = append(args,
+				p.id, p.typ, aggregateID, p.aggregateType,
+				p.version, p.schemaVersion, p.timestamp,
+				p.payloadJSON, p.metadataJSON,
+			)
+		}
+
+		batchSQL := fmt.Sprintf(
+			"INSERT INTO %s (id, type, aggregate_id, aggregate_type, version, schema_version, timestamp, payload, metadata) VALUES %s",
+			s.tableName,
+			strings.Join(placeholders, ","),
+		)
+
+		_, err = db.Exec(ctx, batchSQL, args...)
+		if err != nil {
+			// 批量插入失败：可能是部分事件重复
+			// 降级策略：回退到逐个插入以获得更好的错误处理
+			if isDuplicateKeyError(err) {
+				log.GetLogger().Debug(ctx, "batch insert failed with duplicate key, falling back to individual inserts", log.Int("event_count", len(prepared)))
+				return s.appendEventsIndividually(ctx, db, aggregateID, prepared, start)
+			}
+			return eventing.NewStoreFailedError("batch insert events failed", err)
 		}
 	}
+
 	duration := time.Since(start)
 	monitoring.GlobalMetrics().RecordEventSaved(len(events), duration)
 	log.GetLogger().Debug(ctx, "append batch done", log.Int64("aggregate_id", aggregateID), log.Int("written", len(events)), log.Int64("ms", duration.Milliseconds()))
+	return nil
+}
+
+// appendEventsIndividually 降级策略：逐个插入事件（仅在批量插入失败时使用）
+func (s *SQLEventStore) appendEventsIndividually(ctx context.Context, db db.IDatabase, aggregateID int64, prepared []preparedEvent, start time.Time) error {
+	insertSQL := fmt.Sprintf(`INSERT INTO %s (id, type, aggregate_id, aggregate_type, version, schema_version, timestamp, payload, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, s.tableName)
+
+	for _, p := range prepared {
+		_, err := db.Exec(ctx, insertSQL, p.id, p.typ, aggregateID, p.aggregateType, p.version, p.schemaVersion, p.timestamp, p.payloadJSON, p.metadataJSON)
+		if err != nil {
+			if isDuplicateKeyError(err) {
+				// 检查幂等性
+				if s.isSameEvent(ctx, db, p.id, p.version, aggregateID) {
+					continue // 跳过重复事件
+				}
+				return eventing.NewEventAlreadyExistsError(p.id, aggregateID, p.version)
+			}
+			return eventing.NewStoreFailedErrorWithEvent("insert event failed", err, p.id, p.typ)
+		}
+	}
+
+	duration := time.Since(start)
+	monitoring.GlobalMetrics().RecordEventSaved(len(prepared), duration)
 	return nil
 }
 
