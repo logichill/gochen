@@ -50,10 +50,39 @@ func (m *MemoryEventStore) AppendEvents(ctx context.Context, aggregateID int64, 
 	if len(events) == 0 {
 		return nil
 	}
+
+	// 性能优化：预先在锁外进行验证和类型转换，减少临界区范围
+	// 这些操作不依赖共享状态，可以安全地在锁外执行
+	aggregateType := events[0].GetAggregateType()
+	convertedEvents := make([]eventing.Event[int64], 0, len(events))
+
+	for i, e := range events {
+		// 验证事件（锁外）
+		if err := e.Validate(); err != nil {
+			return err
+		}
+
+		// 类型转换（锁外）
+		event, ok := e.(*eventing.Event[int64])
+		if !ok {
+			return fmt.Errorf("unsupported event type: %T, expected *eventing.Event", e)
+		}
+
+		// 版本校验（锁外）
+		expectedEventVersion := expectedVersion + uint64(i) + 1
+		if event.GetVersion() != expectedEventVersion {
+			return fmt.Errorf("event version not sequential: expected %d, got %d", expectedEventVersion, event.GetVersion())
+		}
+
+		convertedEvents = append(convertedEvents, *event)
+	}
+
+	// 性能优化：缩小锁范围，只在真正修改共享状态时持锁
+	// 锁持有时间从 O(n*验证时间) 降低到 O(n*append操作)
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	aggregateType := ""
-	aggregateType = events[0].GetAggregateType()
+
+	// 版本检查（必须在锁内，确保原子性）
 	key := eventAggregateKey(aggregateType, aggregateID)
 	currentVersion, err := m.getAggregateVersionUnsafe(key)
 	if err != nil {
@@ -62,32 +91,19 @@ func (m *MemoryEventStore) AppendEvents(ctx context.Context, aggregateID int64, 
 	if currentVersion != expectedVersion {
 		return eventing.NewConcurrencyError(aggregateID, expectedVersion, currentVersion)
 	}
-	for i, e := range events {
-		if err := e.Validate(); err != nil {
-			return err
-		}
-		expectedEventVersion := expectedVersion + uint64(i) + 1
-		if e.GetVersion() != expectedEventVersion {
-			return fmt.Errorf("event version not sequential: expected %d, got %d", expectedEventVersion, e.GetVersion())
-		}
-	}
+
+	// 初始化存储（如果需要）
 	if m.events[key] == nil {
-		m.events[key] = make([]eventing.Event[int64], 0, len(events))
+		m.events[key] = make([]eventing.Event[int64], 0, len(convertedEvents))
 	}
 	if m.eventsByID[aggregateID] == nil {
-		m.eventsByID[aggregateID] = make([]eventing.Event[int64], 0, len(events))
+		m.eventsByID[aggregateID] = make([]eventing.Event[int64], 0, len(convertedEvents))
 	}
 
-	// basic validation and append in order
-	for _, e := range events {
-		// 安全类型转换：从 IStorableEvent 到 Event
-		event, ok := e.(*eventing.Event[int64])
-		if !ok {
-			return fmt.Errorf("unsupported event type: %T, expected *eventing.Event", e)
-		}
-		m.events[key] = append(m.events[key], *event)
-		m.eventsByID[aggregateID] = append(m.eventsByID[aggregateID], *event)
-	}
+	// 快速写入（已转换好的事件）
+	m.events[key] = append(m.events[key], convertedEvents...)
+	m.eventsByID[aggregateID] = append(m.eventsByID[aggregateID], convertedEvents...)
+
 	return nil
 }
 
@@ -99,14 +115,20 @@ func (m *MemoryEventStore) LoadEvents(ctx context.Context, aggregateID int64, af
 	if !ok || len(aggregateEvents) == 0 {
 		return []eventing.Event[int64]{}, nil
 	}
-	sort.SliceStable(aggregateEvents, func(i, j int) bool { return aggregateEvents[i].GetVersion() < aggregateEvents[j].GetVersion() })
-	res := make([]eventing.Event[int64], 0, len(aggregateEvents))
-	for _, e := range aggregateEvents {
-		if e.GetVersion() > afterVersion {
-			res = append(res, e)
-		}
+
+	// 性能优化：事件在插入时已保证按版本有序，使用二分查找替代线性扫描
+	// 时间复杂度从 O(n) 降低到 O(log n)，内存分配从 O(n) 降低到 O(1)
+	startIdx := sort.Search(len(aggregateEvents), func(i int) bool {
+		return aggregateEvents[i].GetVersion() > afterVersion
+	})
+
+	if startIdx >= len(aggregateEvents) {
+		return []eventing.Event[int64]{}, nil
 	}
-	return res, nil
+
+	// 直接返回切片引用，避免额外的内存分配和拷贝
+	// 注意：调用方不应修改返回的切片
+	return aggregateEvents[startIdx:], nil
 }
 
 // LoadEventsByType 加载指定聚合类型的事件（可选接口）
