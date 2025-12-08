@@ -79,8 +79,12 @@ func main() {
 
 	// 构造聚合与事件
 	w := NewWallet(7001)
-	_ = w.ApplyAndRecord(&Deposited{Amount: 100})
-	_ = w.ApplyAndRecord(&Deposited{Amount: 50})
+	if err := w.ApplyAndRecord(&Deposited{Amount: 100}); err != nil {
+		log.Fatal(err)
+	}
+	if err := w.ApplyAndRecord(&Deposited{Amount: 50}); err != nil {
+		log.Fatal(err)
+	}
 
 	// 保存：同事务写事件与 Outbox（示例为 mock 打印）
 	if err := repo.Save(ctx, w); err != nil {

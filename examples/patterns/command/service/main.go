@@ -88,18 +88,18 @@ func main() {
 	must(messageBus.Subscribe(ctx, messaging.MessageTypeCommand, handler))
 
 	// 订阅打印事件
-	_ = eventBus.SubscribeEvent(ctx, "*", ebus.EventHandlerFunc(func(ctx context.Context, evt eventing.IEvent) error {
+	must(eventBus.SubscribeEvent(ctx, "*", ebus.EventHandlerFunc(func(ctx context.Context, evt eventing.IEvent) error {
 		aggID := int64(0)
 		if typed, ok := evt.(eventing.ITypedEvent[int64]); ok {
 			aggID = typed.GetAggregateID()
 		}
 		log.Printf("事件: %s v%d -> agg=%d payload=%#v", evt.GetType(), evt.GetVersion(), aggID, evt.GetPayload())
 		return nil
-	}))
+	})))
 
 	// 分发命令
 	aggID := int64(5001)
-	_ = messageBus.Publish(ctx, cmd.NewCommand("cmd-1", "SetValue", aggID, "Counter", 42))
+	must(messageBus.Publish(ctx, cmd.NewCommand("cmd-1", "SetValue", aggID, "Counter", 42)))
 
 	// 等待异步处理
 	time.Sleep(200 * time.Millisecond)

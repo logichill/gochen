@@ -211,3 +211,121 @@ publisher := outbox.NewPublisher(repo, eventBus, cfg, noop)
 - 完整的注入能力（组件级、组合根级）；
 - 明确的分层边界（领域/应用/模式/基础设施）；
 - 对旧代码的向后兼容（未注入时继续使用全局 Logger）。
+
+## 5. 日志级别与字段规范
+
+### 5.1 日志级别选择
+
+- `Debug`：
+  - 仅用于调试与本地开发场景；
+  - 典型内容：重建聚合时的事件遍历、投影重放进度、上下文注入等高频但非关键信息。
+- `Info`：
+  - 用于记录正常但重要的业务/系统事件；
+  - 典型内容：组件启动/关闭、快照恢复命中、Outbox 发布批次完成、关键配置生效等。
+- `Warn`：
+  - 表示操作发生异常但可以自动降级或回退，当前请求不一定失败；
+  - 典型内容：快照加载失败后回退到全量重放、未知 Transport 类型导致的保守告警、非致命的配置不一致等；
+  - 约定：Warn 日志应携带足够上下文（如 aggregate_id / command_type / saga_id），便于后续排查。
+- `Error`：
+  - 表示当前操作失败且对调用方可见，通常伴随错误返回值；
+  - 典型内容：Outbox 写入失败、事件升级过程中 payload 损坏、命令处理器返回不可恢复错误等；
+  - 约定：Error 日志应尽量与返回的错误对象一致，并附带 `error_code`（若存在）与关键 ID。
+
+### 5.2 字段命名规范
+
+- 核心维度字段：
+  - `component`：组件名，统一采用“包名.组件名”形式，例如 `eventing.outbox.publisher`、`messaging.command.bus`；
+  - `event`：可选事件名，用于标识当前日志对应的内部事件，例如 `event="append_failed"`、`event="snapshot_load_failed"`。
+- 常用业务字段（推荐）：
+  - `aggregate_type` / `aggregate_id`：事件溯源与投影相关日志；
+  - `command_type` / `command_id`：命令总线与 Saga/Workflow 相关日志；
+  - `saga_id` / `step_name`：Saga 编排相关日志；
+  - `error_code`：当错误已被规范化为 `errors.AppError` 或模块错误类型时，附加对应错误码；
+  - `retry_count` / `next_retry_at`：Outbox 与重试相关日志。
+- 其他字段：
+  - 优先使用小写下划线风格的 key（如 `snapshot_version`、`cursor_after`），避免在同一模块内混用多种命名方式；
+  - 对于 time.Duration 类型，优先使用 `Duration` 辅助函数创建字段（例如 `logging.Duration("elapsed", elapsed)`）。
+
+### 5.3 关键路径约定
+
+- Outbox 与事件存储：
+  - 关键错误（写入失败/反序列化失败/移动到 DLQ 失败等）一律使用 `Error` 级别，并附带 `aggregate_type`、`aggregate_id`、`error_code` 等字段；
+  - 非致命降级（例如扫描游标缺失而回退全量扫描）使用 `Warn` 级别，并在 message 中明确说明降级行为。
+- 投影与命令总线：
+  - 投影恢复/重放失败使用 `Error` 级别，并记录 projection 名称与事件范围；
+  - CommandBus 在无法探测 Transport 类型或探测到非预期实现时，应记录一次性 `Warn` 日志，带上 `transport_type` 字段，帮助排查错误语义问题。
+
+通过统一日志级别与字段命名，调用方可以更容易地在日志/监控系统中集中检索"关键错误路径"，并将框架日志与业务日志统一纳入观测体系。
+
+## 6. 文档与示例中的错误处理
+
+### 6.1 Demo 代码的快速失败模式
+
+在 `examples/*` 和文档中的代码片段，推荐使用 `must(err)` 或 `log.Fatal(err)` 来简化错误处理：
+
+```go
+// 示例代码推荐写法
+agg, err := repo.GetByID(ctx, id)
+must(err)  // 失败时立即终止程序
+
+func must(err error) {
+    if err != nil {
+        log.Fatal(err)
+    }
+}
+```
+
+**为什么在 demo 中使用 `must(err)`**：
+- 让读者专注核心流程，避免错误处理细节淹没主线逻辑
+- 明确表达"这里失败就不应该继续"，比用 `_` 掩盖错误更诚实
+- 避免初学者误以为"忽略错误是合理做法"
+
+### 6.2 生产代码的错误返回模式
+
+**生产代码不应使用 `must` 或 `panic`**，而是应该返回错误，让调用方决定处理策略：
+
+```go
+// 生产代码推荐写法
+func (s *Service) DoSomething(ctx context.Context, id int64) error {
+    agg, err := s.repo.GetByID(ctx, id)
+    if err != nil {
+        return fmt.Errorf("get aggregate %d: %w", id, err)
+    }
+    
+    // ... 业务逻辑
+    
+    if err := s.repo.Save(ctx, agg); err != nil {
+        // 记录结构化日志
+        s.logger.Error(ctx, "failed to save aggregate",
+            logging.Int64("aggregate_id", id),
+            logging.Error(err),
+        )
+        return fmt.Errorf("save aggregate %d: %w", id, err)
+    }
+    
+    return nil
+}
+```
+
+**生产代码的错误处理策略**：
+1. **在业务边界统一处理**：通过 `errors.Normalize` 将领域/仓储/事件错误转换为 `AppError`
+2. **根据错误码决定策略**：
+   - 版本冲突（`VERSION_CONFLICT`）：重试或拒绝
+   - 实体不存在（`ENTITY_NOT_FOUND`）：返回 404 或触发降级逻辑
+   - 存储失败：记录 Error 级别日志并上报监控
+3. **记录结构化日志**：Error 级别日志应包含 `error_code`、`aggregate_id` 等关键字段
+
+### 6.3 特殊场景的显式标注
+
+若业务逻辑中存在"预期失败"的场景（如 Saga 补偿、幂等检测），必须用注释明确说明：
+
+```go
+// 预期失败场景：Credit 在 false 参数下会故意失败，触发 Saga 补偿逻辑
+if err := orch.Credit(ctx, id, false); err != nil {
+    log.Printf("Credit failed as expected (triggering compensation): %v", err)
+}
+```
+
+**关键点**：
+- 不要用裸的 `_` 掩盖错误，即使在 demo 中也要让意图清晰可见
+- 通过注释说明"为什么这里不 panic"，让读者理解这是业务设计而非编码疏忽

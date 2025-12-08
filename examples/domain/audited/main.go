@@ -70,9 +70,11 @@ func main() {
 	svc := NewArticleService(repo)
 	router := mocks.NewMockRouter()
 	// 使用审计路由构建器注册标准 + 审计扩展接口
-	_ = api.NewAuditedApiBuilder(svc, mocks.NewNoopValidator()).
+	if err := api.NewAuditedApiBuilder(svc, mocks.NewNoopValidator()).
 		Route(func(rc *api.RouteConfig) { rc.BasePath = "/api/articles" }).
-		Build(router)
+		Build(router); err != nil {
+		log.Fatalf("注册审计路由失败: %v", err)
+	}
 	// 扩展业务方法：发布文章（示例）
 	router.POST("/api/articles/:id/publish", func(ctx httpx.IHttpContext) error { return svc.Publish(context.Background(), 1, "system") })
 	router.PrintRoutes()

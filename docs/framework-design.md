@@ -502,3 +502,72 @@ gochen 在错误设计上采用“**错误码 + 结构化错误类型 + 哨兵 +
 - 传输层（如 `messaging/transport/memory`）提供 `Stats` 方法查看队列深度、处理器数量、worker 数等运行状态。
 
 这些监控点可以集成到 Prometheus 或其他监控系统，用于观测 EventStore、Outbox、投影和消息总线的健康状况。
+
+### 8.4 各模块错误使用约定（Error Usage Guidelines）
+
+在统一错误模型（`gochen/errors` + 各模块局部错误类型）的基础上，不同模块在“如何创建/返回/规范化错误”上有各自的约定。本小节给出简要指引，帮助调用方正确使用。
+
+#### 8.4.1 根级错误包（`gochen/errors`）
+
+- **用途**：在 API 边界与日志/监控中统一错误码与载荷。
+- **创建方式**：
+  - 在应用入口或 HTTP 层优先使用 `errors.NewError` / `NewErrorWithCause` / `NewXxxError` 工厂函数创建 `AppError` 实例；
+  - 内部模块（domain/eventing/messaging 等）优先使用各自模块错误类型（如 `RepositoryError`、`EventStoreError`），由 HTTP 层通过 `errors.Normalize` 统一映射为 `AppError`。
+- **判定方式**：
+  - 使用 `errors.Is(err, errors.ErrNotFound())` / `errors.IsValidation(err)` 等工具函数做错误类别判断；
+  - 需要细粒度信息时使用 `errors.As(err, *errors.AppError)` 提取结构化错误。
+
+#### 8.4.2 领域层（`domain/*`）
+
+- **错误类型**：`domain/errors.go` 中的 `RepositoryError` + `ErrorCode`（实体不存在、已存在、ID 无效、版本冲突等），以及少量审计/软删场景的状态错误码。
+- **使用约定**：
+  - 仓储实现应在“实体不存在/已存在/版本冲突”等场景下返回对应的 `RepositoryError`，并携带实体 ID、预期/实际版本等上下文；
+  - 领域服务在边界处原样透传 `RepositoryError`，由上层进行归类与规范化，而不是在领域层直接拼装 HTTP 状态码；
+  - 调用方判断领域错误时使用 `errors.Is(err, domain.ErrEntityNotFound())` 等形式，避免直接比较字符串消息。
+
+#### 8.4.3 事件层（`eventing/*`）
+
+- **错误类型**：`eventing/errors.go` 中的 `EventStoreError`（`AGGREGATE_NOT_FOUND`、`EVENT_ALREADY_EXISTS`、`INVALID_EVENT` 等）以及 SQL 实现中的包装错误。
+- **使用约定**：
+  - EventStore 实现（内存/SQL）在遇到并发冲突、事件重复、聚合不存在等情况时，优先返回对应的 `EventStoreError`，并在 Details 中附带 AggregateID/EventID 等信息；
+  - 调用方在判断“聚合不存在”时统一使用 `errors.Is(err, eventing.ErrAggregateNotFound())`，避免通过 `len(events)==0` 自行推断；
+  - 在 `DomainEventStore.RestoreAggregate` 与 `Exists` 内部，底层 `ErrAggregateNotFound` 会被转换为“聚合不存在且非错误”（返回版本 0 或 false），调用方无需再做一次错误码分支判断。
+
+#### 8.4.4 消息系统（`messaging/*`）
+
+- **错误来源**：
+  - 订阅/退订相关错误：由底层 `IMessageBus` 或 `ITransport` 返回，通常为配置错误或传输层故障；
+  - 处理器错误：由业务 handler 返回，语义上属于“业务错误”，CommandBus 在同步 Transport 下会透传 handler 错误。
+- **使用约定**：
+  - 注册 handler 失败（Subscribe/Unsubscribe 返回错误）应视为装配阶段错误，调用方应立即 fail-fast（例如在 `main` 中 log.Fatal 或 panic），避免带着部分注册的总线继续运行；
+  - CommandBus/MessageBus 不对 handler 错误做重试或吞噬，调用方应在 handler 内部或中间件中根据业务需要将错误转换为 `gochen/errors.AppError` 或记录监控指标；
+  - 对于需要幂等或有副作用的命令，推荐结合幂等中间件与领域层的 ErrorCode（例如“版本冲突”）做重试/告警。
+
+#### 8.4.5 应用层与 HTTP 抽象（`app/*`、`http/*`）
+
+- **应用层（`app/application`、`app/eventsourced`）**：
+  - Application/DomainEventStore 等组件在持久化失败、事件发布失败等场景下应返回结构化错误，并保留底层 `cause`，避免只返回裸字符串；
+  - 在 Outbox 模式下，DomainEventStore 将 Outbox 仓储错误原样向上返回，由调用方决定是否重试或降级；
+  - 构造函数（如 `NewDomainEventStore`）在配置缺失或组合不安全（例如 `PublishEvents=true` 但未配置 OutboxRepo）时必须直接返回错误，阻止应用在“危险配置”下启动。
+
+- **HTTP 抽象（`http/basic`）**：
+  - `HttpUtils.WriteErrorResponse` 统一通过 `errors.Normalize` 将任意错误映射为 `AppError`，并据此选择 HTTP 状态码；
+  - Handler 内部推荐只关注业务错误（领域/事件/验证），不直接拼装 HTTP 响应；异常情况交由 HttpUtils/中间件统一处理；
+  - 若在 handler 中确实需要提前写出响应，应通过 `ctx.Set("response_written", true)` 标记，避免重复输出。
+
+#### 8.4.6 模式层（`patterns/*`）与示例代码（`examples/*`）
+
+- **模式层（Saga/Workflow/Retry）**：
+  - Saga/Workflow 等组件应在 orchestrator 或 manager 层集中将内部错误包装为各自模块的错误类型（如 `SagaError`），并携带必要上下文（SagaID/StepName 等）；
+  - 调用方在边界处可以选择直接暴露模式层错误，也可以在 API 层通过 `errors.Normalize` 统一为 `AppError`。
+
+- **示例代码与 README**：
+  - 示例与 README 中若为了简化演示而忽略错误，必须显式标注注释，例如：
+
+    ```go
+    // demo only: 为简化示例省略错误处理，生产环境请检查并根据错误码处理返回值
+    _ = repo.Save(ctx, aggregate)
+    ```
+
+  - 核心示例推荐使用 `must(err)` 或 `if err != nil { log.Fatal(err) }` 等方式显式处理错误，保持与生产实践一致；
+  - 在文档中使用的代码片段应尽量展示推荐的错误处理模式，而不是依赖读者自行补全。

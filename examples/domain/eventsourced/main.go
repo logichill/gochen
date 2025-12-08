@@ -92,26 +92,41 @@ func main() {
 	}
 
 	// 订阅打印事件
-	_ = bus.SubscribeEvent(context.Background(), "*", ebus.EventHandlerFunc(func(ctx context.Context, evt eventing.IEvent) error {
+	if err := bus.SubscribeEvent(context.Background(), "*", ebus.EventHandlerFunc(func(ctx context.Context, evt eventing.IEvent) error {
 		aggID := int64(0)
 		if typed, ok := evt.(eventing.ITypedEvent[int64]); ok {
 			aggID = typed.GetAggregateID()
 		}
 		log.Printf("事件: %s v%d -> agg=%d", evt.GetType(), evt.GetVersion(), aggID)
 		return nil
-	}))
+	})); err != nil {
+		panic(err)
+	}
 
 	// 打开并操作账户
 	acc := NewAccount(1001)
-	_ = acc.Open(100)
-	_ = acc.Deposit(50)
-	_ = repo.Save(context.Background(), acc)
+	if err := acc.Open(100); err != nil {
+		panic(err)
+	}
+	if err := acc.Deposit(50); err != nil {
+		panic(err)
+	}
+	if err := repo.Save(context.Background(), acc); err != nil {
+		panic(err)
+	}
 
 	// 追加更多事件
-	_ = acc.Withdraw(30)
-	_ = repo.Save(context.Background(), acc)
+	if err := acc.Withdraw(30); err != nil {
+		panic(err)
+	}
+	if err := repo.Save(context.Background(), acc); err != nil {
+		panic(err)
+	}
 
 	// 重建读取
-	loaded, _ := repo.GetByID(context.Background(), 1001)
+	loaded, err := repo.GetByID(context.Background(), 1001)
+	if err != nil {
+		panic(err)
+	}
 	log.Printf("账户余额: %d, 版本: %d", loaded.Balance, loaded.GetVersion())
 }

@@ -93,9 +93,17 @@ func main() {
 	router.PrintRoutes()
 
 	// 4) 演示创建/查询/分页
-	_ = svc.Create(context.Background(), &User{Name: "张三", Email: "zhangsan@example.com"})
-	got, _ := svc.Get(context.Background(), 1)
+	if err := svc.Create(context.Background(), &User{Name: "张三", Email: "zhangsan@example.com"}); err != nil {
+		log.Fatalf("创建用户失败: %v", err)
+	}
+	got, err := svc.Get(context.Background(), 1)
+	if err != nil {
+		log.Fatalf("查询用户失败: %v", err)
+	}
 	log.Printf("查询用户: %+v", got)
-	page, _ := svc.ListPage(context.Background(), &application.PaginationOptions{Page: 1, Size: 10})
+	page, err := svc.ListPage(context.Background(), &application.PaginationOptions{Page: 1, Size: 10})
+	if err != nil {
+		log.Fatalf("分页查询失败: %v", err)
+	}
 	log.Printf("分页: total=%d, items=%d", page.Total, len(page.Data))
 }

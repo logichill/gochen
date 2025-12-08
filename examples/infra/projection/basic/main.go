@@ -39,7 +39,8 @@ func main() {
 	time.Sleep(200 * time.Millisecond)
 
 	// 查看投影状态与读模型
-	st, _ := pm.GetProjectionStatus(p.GetName())
+	st, err := pm.GetProjectionStatus(p.GetName())
+	must(err)
 	fmt.Printf("Projection=%s Processed=%d TotalAmount=%d\n", st.Name, st.ProcessedEvents, proj.GetTotal())
 
 	// 模拟“重启后追赶”
@@ -50,7 +51,8 @@ func main() {
 		must(bus.PublishEvent(ctx, evt))
 	}
 	time.Sleep(200 * time.Millisecond)
-	st, _ = pm.GetProjectionStatus(p.GetName())
+	st, err = pm.GetProjectionStatus(p.GetName())
+	must(err)
 	fmt.Printf("After resume -> Processed=%d TotalAmount=%d\n", st.ProcessedEvents, proj.GetTotal())
 }
 

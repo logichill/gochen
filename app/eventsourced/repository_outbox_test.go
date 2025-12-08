@@ -2,6 +2,7 @@ package eventsourced
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -71,6 +72,8 @@ func (m *mockOutboxRepo) DeletePublished(ctx context.Context, olderThan time.Tim
 }
 
 func TestOutboxAwareRepository_Save_UsesOutboxAndMarksCommitted(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	baseStore := store.NewMemoryEventStore()
@@ -97,4 +100,33 @@ func TestOutboxAwareRepository_Save_UsesOutboxAndMarksCommitted(t *testing.T) {
 	require.Len(t, mox.savedEvents, 1)
 	require.Equal(t, "ValueSet", mox.savedEvents[0].GetType())
 	require.Len(t, agg.GetUncommittedEvents(), 0)
+}
+
+func TestOutboxAwareRepository_Save_PropagatesOutboxError(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	baseStore := store.NewMemoryEventStore()
+	mox := &mockOutboxRepo{
+		saveErr: fmt.Errorf("outbox save failed"),
+	}
+
+	storeWithOutbox, err := NewDomainEventStore(DomainEventStoreOptions[*outboxAggregate, int64]{
+		AggregateType: "OutboxAggregate",
+		Factory:       newOutboxAggregate,
+		EventStore:    baseStore,
+		OutboxRepo:    mox,
+	})
+	require.NoError(t, err)
+
+	repo, err := deventsourced.NewEventSourcedRepository("OutboxAggregate", newOutboxAggregate, storeWithOutbox)
+	require.NoError(t, err)
+
+	agg := newOutboxAggregate(2002)
+	require.NoError(t, agg.ApplyAndRecord(&valueSetOutboxEvent{V: 1}))
+
+	err = repo.Save(ctx, agg)
+	require.Error(t, err)
+	require.Equal(t, 1, mox.calls)
 }

@@ -72,25 +72,24 @@ func main() {
 	base, err := deventsourced.NewEventSourcedRepository[*Account]("Account", NewAccount, storeAdapter)
 	must(err)
 	repo := base
-	must(err)
 
 	// 4) 产生并保存事件（原子写入事件与 Outbox）
 	acc := NewAccount(9001)
-	_ = acc.ApplyAndRecord(&Opened{Initial: 100})
-	_ = acc.ApplyAndRecord(&Deposited{Amount: 50})
+	must(acc.ApplyAndRecord(&Opened{Initial: 100}))
+	must(acc.ApplyAndRecord(&Deposited{Amount: 50}))
 	must(repo.Save(ctx, acc))
 
 	// 5) 创建事件总线 + Publisher，一次性发布 Outbox 待处理记录
 	bus := ebus.NewEventBus(messaging.NewMessageBus(mtransport.NewMemoryTransport(1024, 2)))
 	// 订阅打印发布的事件
-	_ = bus.SubscribeEvent(ctx, "*", ebus.EventHandlerFunc(func(ctx context.Context, evt eventing.IEvent) error {
+	must(bus.SubscribeEvent(ctx, "*", ebus.EventHandlerFunc(func(ctx context.Context, evt eventing.IEvent) error {
 		aggID := int64(0)
 		if typed, ok := evt.(eventing.ITypedEvent[int64]); ok {
 			aggID = typed.GetAggregateID()
 		}
 		log.Printf("published event: %s v%d -> agg=%d", evt.GetType(), evt.GetVersion(), aggID)
 		return nil
-	}))
+	})))
 	cfg := outbox.DefaultOutboxConfig()
 	cfg.BatchSize = 100
 	publisher := outbox.NewPublisher(ob, bus, cfg, nil)

@@ -957,6 +957,7 @@ storeWithOutbox, _ := appeventsourced.NewDomainEventStore(
 repo, _ := deventsourced.NewEventSourcedRepository[*Account]("account", NewAccount, storeWithOutbox)
 
 // 保存：同事务写入事件与 Outbox；发布由 Publisher 异步完成
+// demo only: 为简化示例省略错误处理，生产环境请检查并根据错误码处理返回值
 _ = repo.Save(ctx, aggregate)
 ```
 

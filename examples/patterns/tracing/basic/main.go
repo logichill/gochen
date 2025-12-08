@@ -76,11 +76,11 @@ func main() {
 	}))
 
 	// 订阅事件，打印元数据中的 trace 字段
-	_ = eventBus.SubscribeEvent(ctx, "*", ebus.EventHandlerFunc(func(ctx context.Context, evt eventing.IEvent) error {
+	must(eventBus.SubscribeEvent(ctx, "*", ebus.EventHandlerFunc(func(ctx context.Context, evt eventing.IEvent) error {
 		md := evt.GetMetadata()
 		log.Printf("event=%s corr=%v caus=%v trace=%v", evt.GetType(), md[mmw.KeyCorrelationID], md[mmw.KeyCausationID], md[mmw.KeyTraceID])
 		return nil
-	}))
+	})))
 
 	// 将服务适配为命令处理器
 	handler := eventsourced.AsCommandMessageHandler[*Counter, int64](service, "SetValue", func(c *cmd.Command) (deventsourced.IEventSourcedCommand[int64], error) {
@@ -91,10 +91,11 @@ func main() {
 
 	// 分发命令；TracingMiddleware 会为命令注入 corr/caus/trace，并通过 Context 传给后续事件
 	aggID := int64(8080)
-	_ = messageBus.Publish(ctx, cmd.NewCommand("cmd-trace-1", "SetValue", aggID, "Counter", 99))
+	must(messageBus.Publish(ctx, cmd.NewCommand("cmd-trace-1", "SetValue", aggID, "Counter", 99)))
 	time.Sleep(200 * time.Millisecond)
 
-	loaded, _ := repo.GetByID(ctx, aggID)
+	loaded, err := repo.GetByID(ctx, aggID)
+	must(err)
 	fmt.Printf("Counter[%d] Value=%d\n", aggID, loaded.Value)
 }
 
