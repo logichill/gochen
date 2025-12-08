@@ -42,7 +42,7 @@ func (s *SQLEventStore) LoadEventsByType(ctx context.Context, aggregateType stri
 	return s.scanEvents(rows)
 }
 
-// StreamAggregate 按聚合顺序流式读取事件（实现 IAggregateEventStore[int64]，可选能力）
+// StreamAggregate 按聚合顺序流式读取事件（实现 IEventStreamStore[int64]，可选能力）
 func (s *SQLEventStore) StreamAggregate(ctx context.Context, opts *store.AggregateStreamOptions[int64]) (*store.AggregateStreamResult[int64], error) {
 	if opts == nil {
 		return nil, fmt.Errorf("AggregateStreamOptions cannot be nil")
@@ -168,3 +168,11 @@ func (s *SQLEventStore) GetAggregateVersion(ctx context.Context, aggregateID int
 
 	return version, nil
 }
+
+// 编译期断言：SQLEventStore 满足事件存储与聚合流接口约束。
+var (
+	_ store.IEventStore[int64]       = (*SQLEventStore)(nil)
+	_ store.IEventStreamStore[int64] = (*SQLEventStore)(nil)
+	_ store.IEventStreamStore[int64] = (*SQLEventStore)(nil)
+	_ store.IEventStreamStore[int64]    = (*SQLEventStore)(nil)
+)

@@ -8,14 +8,15 @@ import (
 	"gochen/eventing"
 )
 
-// AggregateExists 检查聚合是否存在（基于 int64 聚合 ID 的便捷方法）
-func AggregateExists(ctx context.Context, store IEventStore[int64], aggregateID int64) (bool, error) {
-	if inspector, ok := store.(IAggregateInspector[int64]); ok {
+// AggregateExists 检查聚合是否存在。
+//
+// 说明：
+//   - 优先使用 IAggregateInspector[ID]，否则退回到基于 Load 的检查；
+//   - 仅依赖聚合级 IEventStore[ID]，不要求实现全局流接口。
+func AggregateExists[ID comparable](ctx context.Context, store IEventStore[ID], aggregateID ID) (bool, error) {
+	if inspector, ok := store.(IAggregateInspector[ID]); ok {
 		return inspector.HasAggregate(ctx, aggregateID)
 	}
-	if typed, ok := store.(ITypedEventStore[int64]); ok {
-		return AggregateExistsWithType(ctx, typed, "", aggregateID)
-	}
 
 	events, err := store.LoadEvents(ctx, aggregateID, 0)
 	if err != nil {
@@ -24,23 +25,15 @@ func AggregateExists(ctx context.Context, store IEventStore[int64], aggregateID 
 	return len(events) > 0, nil
 }
 
-// AggregateExistsWithType 检查指定聚合类型是否存在事件（基于 int64 聚合 ID）
-func AggregateExistsWithType(ctx context.Context, store ITypedEventStore[int64], aggregateType string, aggregateID int64) (bool, error) {
-	events, err := store.LoadEventsByType(ctx, aggregateType, aggregateID, 0)
-	if err != nil {
-		return false, err
-	}
-	return len(events) > 0, nil
-}
-
-// GetCurrentVersion 获取聚合当前版本（基于 int64 聚合 ID）
-func GetCurrentVersion(ctx context.Context, store IEventStore[int64], aggregateID int64) (uint64, error) {
-	if inspector, ok := store.(IAggregateInspector[int64]); ok {
+// GetCurrentVersion 获取聚合当前版本。
+//
+// 说明：
+//   - 优先使用 IAggregateInspector[ID]，否则退回到基于 Load 的检查；
+//   - 当聚合不存在时返回 (0, nil)。
+func GetCurrentVersion[ID comparable](ctx context.Context, store IEventStore[ID], aggregateID ID) (uint64, error) {
+	if inspector, ok := store.(IAggregateInspector[ID]); ok {
 		return inspector.GetAggregateVersion(ctx, aggregateID)
 	}
-	if typed, ok := store.(ITypedEventStore[int64]); ok {
-		return GetCurrentVersionWithType(ctx, typed, "", aggregateID)
-	}
 
 	events, err := store.LoadEvents(ctx, aggregateID, 0)
 	if err != nil {
@@ -52,30 +45,18 @@ func GetCurrentVersion(ctx context.Context, store IEventStore[int64], aggregateI
 	return events[len(events)-1].GetVersion(), nil
 }
 
-// GetCurrentVersionWithType 获取指定聚合类型的版本（基于 int64 聚合 ID）
-func GetCurrentVersionWithType(ctx context.Context, store ITypedEventStore[int64], aggregateType string, aggregateID int64) (uint64, error) {
-	events, err := store.LoadEventsByType(ctx, aggregateType, aggregateID, 0)
-	if err != nil {
-		return 0, err
-	}
-	if len(events) == 0 {
-		return 0, nil
-	}
-	return events[len(events)-1].GetVersion(), nil
-}
-
-// LoadAllEvents 加载聚合所有事件（基于 int64 聚合 ID）
-func LoadAllEvents(ctx context.Context, store IEventStore[int64], aggregateID int64) ([]eventing.Event[int64], error) {
+// LoadAllEvents 加载聚合所有事件。
+func LoadAllEvents[ID comparable](ctx context.Context, store IEventStore[ID], aggregateID ID) ([]eventing.Event[ID], error) {
 	return store.LoadEvents(ctx, aggregateID, 0)
 }
 
-// LoadAggregatesHelper 并发加载多个聚合（基于 int64 聚合 ID）
-func LoadAggregatesHelper(ctx context.Context, store IEventStore[int64], aggregateIDs []int64, concurrency int) (map[int64][]eventing.Event[int64], error) {
+// LoadAggregatesHelper 并发加载多个聚合。
+func LoadAggregatesHelper[ID comparable](ctx context.Context, store IEventStore[ID], aggregateIDs []ID, concurrency int) (map[ID][]eventing.Event[ID], error) {
 	if concurrency <= 0 {
 		concurrency = 5
 	}
 
-	results := make(map[int64][]eventing.Event[int64])
+	results := make(map[ID][]eventing.Event[ID])
 	var mutex sync.Mutex
 	var wg sync.WaitGroup
 	errChan := make(chan error, len(aggregateIDs))
@@ -83,14 +64,14 @@ func LoadAggregatesHelper(ctx context.Context, store IEventStore[int64], aggrega
 
 	for _, aggregateID := range aggregateIDs {
 		wg.Add(1)
-		go func(id int64) {
+		go func(id ID) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
 			events, err := store.LoadEvents(ctx, id, 0)
 			if err != nil {
-				errChan <- fmt.Errorf("load aggregate %d failed: %w", id, err)
+				errChan <- fmt.Errorf("load aggregate %v failed: %w", id, err)
 				return
 			}
 

@@ -81,7 +81,7 @@ func main() {
 		// 该示例聚焦 ID 类型，不演示 EventBus/Outbox 组合
 	})
 	if err != nil {
-		log.Fatalf("failed to create DomainEventStore: %v", err)
+		log.Fatalf("failed to create DomainAggregateStore: %v", err)
 	}
 
 	// 3) 构造领域层仓储：IEventSourcedRepository[StringAccount, string]

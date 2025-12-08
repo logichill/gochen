@@ -132,7 +132,7 @@ func GetEventHistoryAfter(
 // GetEventHistoryPage 按页获取聚合的事件历史视图：
 //   - page 从 1 开始；pageSize > 0
 //   - mapper 负责将 IEvent → EventHistoryEntry；若为 nil，则使用默认映射
-//   - 当前实现优先使用 IAggregateEventStore + IAggregateInspector，其次回退为内存分页
+//   - 当前实现优先使用 IEventStreamStore + IAggregateInspector，其次回退为内存分页
 func GetEventHistoryPage(
 	ctx context.Context,
 	eventStore store.IEventStore[int64],
@@ -152,8 +152,8 @@ func GetEventHistoryPage(
 		mapper = defaultEventHistoryMapper
 	}
 
-	// 优先使用 IAggregateEventStore[int64] + IAggregateInspector[int64] 做基于版本的分页
-	if aggStore, ok := eventStore.(store.IAggregateEventStore[int64]); ok {
+	// 优先使用 IEventStreamStore[int64] + IAggregateInspector[int64] 做基于版本的分页
+	if aggStore, ok := eventStore.(store.IEventStreamStore[int64]); ok {
 		if inspector, ok2 := eventStore.(store.IAggregateInspector[int64]); ok2 {
 			// 版本即事件总数（按聚合内版本连续的假设）
 			totalVersion, err := inspector.GetAggregateVersion(ctx, id)

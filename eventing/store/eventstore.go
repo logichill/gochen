@@ -93,72 +93,87 @@ type ITypedEventStore[ID comparable] interface {
 	LoadEventsByType(ctx context.Context, aggregateType string, aggregateID ID, afterVersion uint64) ([]eventing.Event[ID], error)
 }
 
-// IEventStoreExtended 扩展事件存储接口，提供游标分页能力
+// IEventStreamStore 全局事件流存储接口。
 //
-// 支持高级查询功能，包括：
-//   - 游标分页：高效处理大量事件
-//   - 类型过滤：按事件类型或聚合类型筛选
-//   - 时间范围：指定时间窗口查询
-type IEventStoreExtended[ID comparable] interface {
+// 用途：
+// - 为投影管理器、历史查询、监控等需要全局扫描的场景提供流式访问能力；
+// - 支持游标分页和聚合顺序流两种扫描模式；
+// - 相比基础的 IEventStore，增加了高效的批量查询和流式处理能力。
+//
+// 设计原则：
+// - 聚合级操作（Append/Load）依赖基础 IEventStore[ID]；
+// - 全局流查询功能集中在本接口，避免概念混淆。
+type IEventStreamStore[ID comparable] interface {
 	IEventStore[ID]
 
-	// GetEventStreamWithCursor 使用游标获取事件流
+	// GetEventStreamWithCursor 使用游标获取全局事件流。
+	//
+	// 用途：
+	//   - 投影重建：按时间窗口批量加载事件
+	//   - 事件归档：分页导出历史事件
+	//   - 监控分析：按类型过滤事件流
 	//
 	// 参数：
 	//   - ctx: 上下文
-	//   - opts: 查询选项，包括游标、限制、过滤条件等
+	//   - opts: 查询选项（游标、限制、过滤条件等）
 	//
 	// 返回：
-	//   - *StreamResult: 查询结果，包含事件列表、下一页游标、是否有更多数据
+	//   - *StreamResult: 查询结果（事件列表、下一页游标、是否有更多数据）
 	//   - error: 查询失败时返回错误
 	GetEventStreamWithCursor(ctx context.Context, opts *StreamOptions) (*StreamResult[ID], error)
+
+	// StreamAggregate 按聚合顺序流式读取事件。
+	//
+	// 用途：
+	//   - 为上层 Repository/Service 提供更高效的"按版本片段读取"能力
+	//   - 避免在应用层一次性加载聚合全部事件再做内存分页
+	//
+	// 参数：
+	//   - ctx: 上下文
+	//   - opts: 聚合流查询选项（聚合标识 + 版本 + 限制）
+	//
+	// 返回：
+	//   - *AggregateStreamResult: 查询结果（事件列表、下一版本号、是否有更多数据）
+	//   - error: 查询失败时返回错误
+	//
+	// 注意：
+	//   - 该接口不关心业务分页语义（page/pageSize），仅提供基于版本的 limit/游标能力
+	//   - 业务分页应在仓储或 Service 层基于 NextVersion/HasMore 实现
+	StreamAggregate(ctx context.Context, opts *AggregateStreamOptions[ID]) (*AggregateStreamResult[ID], error)
 }
 
-// StreamOptions 事件流查询选项
+// StreamOptions 全局事件流查询选项。
 type StreamOptions struct {
-	After          string
-	Limit          int
-	Types          []string
-	FromTime       time.Time
-	ToTime         time.Time
-	AggregateTypes []string
+	After          string    // 游标，从该位置之后开始查询
+	Limit          int       // 限制返回数量
+	Types          []string  // 事件类型过滤
+	FromTime       time.Time // 起始时间（包含）
+	ToTime         time.Time // 结束时间（包含）
+	AggregateTypes []string  // 聚合类型过滤
 }
 
-// StreamResult 事件流查询结果
+// StreamResult 全局事件流查询结果。
 type StreamResult[ID comparable] struct {
-	Events     []eventing.Event[ID]
-	NextCursor string
-	HasMore    bool
+	Events     []eventing.Event[ID] // 事件列表
+	NextCursor string               // 下一页游标
+	HasMore    bool                 // 是否有更多数据
 }
 
-// AggregateStreamOptions 单个聚合事件流查询选项（可选扩展）
+// AggregateStreamOptions 单个聚合事件流查询选项。
 //
 // 设计原则：
-// - 仅包含与存储层紧密相关的技术字段（聚合标识 + 版本 + 限制）；
-// - 不承载任何业务分页语义（page/pageSize），避免 EventStore 被上层污染。
+// - 仅包含与存储层紧密相关的技术字段（聚合标识 + 版本 + 限制）
+// - 不承载任何业务分页语义（page/pageSize），避免 EventStore 被上层污染
 type AggregateStreamOptions[ID comparable] struct {
-	AggregateType string
-	AggregateID   ID
-	AfterVersion  uint64
-	Limit         int
+	AggregateType string // 聚合类型
+	AggregateID   ID     // 聚合ID
+	AfterVersion  uint64 // 起始版本号（不包含）
+	Limit         int    // 限制返回数量
 }
 
-// AggregateStreamResult 单个聚合事件流查询结果
+// AggregateStreamResult 单个聚合事件流查询结果。
 type AggregateStreamResult[ID comparable] struct {
-	Events      []eventing.Event[ID]
-	NextVersion uint64
-	HasMore     bool
-}
-
-// IAggregateEventStore 按聚合顺序流式读取事件的可选扩展接口
-//
-// 用途：
-// - 为上层 Repository/Service 提供更高效的“按版本片段读取”能力；
-// - 避免在应用层一次性加载聚合全部事件再做内存分页。
-//
-// 注意：
-// - 该接口不关心业务分页语义，仅提供基于版本的 limit/游标能力；
-// - page/pageSize 等应在仓储或 Service 层基于 NextVersion/HasMore 实现。
-type IAggregateEventStore[ID comparable] interface {
-	StreamAggregate(ctx context.Context, opts *AggregateStreamOptions[ID]) (*AggregateStreamResult[ID], error)
+	Events      []eventing.Event[ID] // 事件列表
+	NextVersion uint64               // 下一个版本号
+	HasMore     bool                 // 是否有更多数据
 }

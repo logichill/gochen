@@ -34,9 +34,9 @@ type EventCache struct {
 // CachedAggregate 缓存的聚合数据
 type CachedAggregate struct {
 	Events     []eventing.Event[int64] // 事件列表
-	Version    uint64                 // 当前版本
-	LastAccess time.Time              // 最后访问时间
-	CreatedAt  time.Time              // 创建时间
+	Version    uint64                  // 当前版本
+	LastAccess time.Time               // 最后访问时间
+	CreatedAt  time.Time               // 创建时间
 }
 
 func cacheKey(aggregateType string, aggregateID int64) string {
@@ -182,7 +182,7 @@ func (s *CachedEventStore) StreamEvents(ctx context.Context, fromTimestamp time.
 
 // GetEventStreamWithCursor 基于游标/类型过滤读取事件流（如底层支持则委托，否则回退过滤）
 func (s *CachedEventStore) GetEventStreamWithCursor(ctx context.Context, opts *store.StreamOptions) (*store.StreamResult[int64], error) {
-	if extended, ok := s.store.(store.IEventStoreExtended[int64]); ok {
+	if extended, ok := s.store.(store.IEventStreamStore[int64]); ok {
 		return extended.GetEventStreamWithCursor(ctx, opts)
 	}
 
@@ -192,6 +192,15 @@ func (s *CachedEventStore) GetEventStreamWithCursor(ctx context.Context, opts *s
 	}
 	result := store.FilterEventsWithOptions[int64](events, opts)
 	return result, nil
+}
+
+// StreamAggregate 按聚合顺序流式读取事件（委托到底层存储）
+func (s *CachedEventStore) StreamAggregate(ctx context.Context, opts *store.AggregateStreamOptions[int64]) (*store.AggregateStreamResult[int64], error) {
+	if streamStore, ok := s.store.(store.IEventStreamStore[int64]); ok {
+		return streamStore.StreamAggregate(ctx, opts)
+	}
+	// 底层不支持时返回错误
+	return nil, fmt.Errorf("underlying store does not support StreamAggregate")
 }
 
 // getCachedEvents 从缓存获取事件
@@ -438,4 +447,4 @@ func (s *CachedEventStore) Close() error {
 }
 
 // 接口断言
-var _ store.IEventStoreExtended[int64] = (*CachedEventStore)(nil)
+var _ store.IEventStreamStore[int64] = (*CachedEventStore)(nil)

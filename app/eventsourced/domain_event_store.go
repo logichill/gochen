@@ -17,19 +17,27 @@ import (
 )
 
 // DomainEventStoreOptions 配置领域层 IEventStore 的基础设施适配。
-// 用于构造基于 eventing/store + Outbox + EventBus 的事件存储实现。
 //
 // 设计目标：
+//   - 区分聚合级存储（AggregateStore）与全局事件流/游标存储（StreamStore）；
 //   - 对领域层暴露为 deventsourced.IEventStore[ID]，ID 可以是任意可比较类型（如 int64/string/自定义类型）；
-//   - 在内部直接使用与领域层一致的 ID 类型贯通 eventing/store.IEventStore[ID]、SnapshotManager[ID] 与 Outbox 仓储。
+//   - 在内部直接使用与领域层一致的 ID 类型贯通 eventing/store 接口、SnapshotManager[ID] 与 Outbox 仓储。
 //
 // 注意：
 //   - 本仓库内置的事件存储与 Outbox/快照实现当前仍主要以 ID=int64 形式实例化；
-//   - 若业务需要使用非 int64 的聚合 ID（如 string/UUID），需要提供对应 ID 形态的 IEventStore[ID]、ISnapshotStore[ID] 与 IOutboxRepository[ID] 实现。
+//   - 若业务需要使用非 int64 的聚合 ID（如 string/UUID），需要提供对应 ID 形态的实现。
 type DomainEventStoreOptions[T deventsourced.IEventSourcedAggregate[ID], ID comparable] struct {
-	AggregateType   string
-	Factory         func(id ID) T
-	EventStore      store.IEventStore[ID]
+	AggregateType string
+	Factory       func(id ID) T
+
+	// EventStore 聚合级事件存储（必填），负责 Append/Load/Exists/GetVersion。
+	EventStore store.IEventStore[ID]
+
+	// StreamStore 全局事件流存储（可选）。
+	// 专用于全局流查询（History/Projection）。
+	// 当前版本仅依赖 AggregateStore 处理聚合级操作，StreamStore 预留给后续扩展。
+	StreamStore store.IEventStreamStore[ID]
+
 	SnapshotManager *snapshot.Manager[ID]
 	EventBus        bus.IEventBus
 	OutboxRepo      outbox.IOutboxRepository[ID]
@@ -37,15 +45,13 @@ type DomainEventStoreOptions[T deventsourced.IEventSourcedAggregate[ID], ID comp
 	Logger          logging.ILogger
 }
 
-// Deprecated: 请使用 DomainEventStoreOptions。
-type EventStoreAdapterOptions[T deventsourced.IEventSourcedAggregate[ID], ID comparable] = DomainEventStoreOptions[T, ID]
-
-// DomainEventStore 将 eventing/store.IEventStore[ID] + Snapshot/Outbox/EventBus
+// DomainEventStore 将 eventing/store 接口 + Snapshot/Outbox/EventBus
 // 适配为领域层的 deventsourced.IEventStore[ID]。
 type DomainEventStore[T deventsourced.IEventSourcedAggregate[ID], ID comparable] struct {
 	aggregateType   string
 	factory         func(id ID) T
 	eventStore      store.IEventStore[ID]
+	streamStore     store.IEventStreamStore[ID]
 	snapshotManager *snapshot.Manager[ID]
 	eventBus        bus.IEventBus
 	outboxRepo      outbox.IOutboxRepository[ID]
@@ -54,6 +60,10 @@ type DomainEventStore[T deventsourced.IEventSourcedAggregate[ID], ID comparable]
 }
 
 // NewDomainEventStore 创建领域层 IEventStore[ID] 的基础设施实现。
+//
+// 说明：
+//   - AggregateStore 为必填项，负责 Append/Load/Exists/GetVersion；
+//   - StreamStore 为可选项，后续 History/Projection 等需要全局流时通过该字段扩展。
 func NewDomainEventStore[T deventsourced.IEventSourcedAggregate[ID], ID comparable](
 	opts DomainEventStoreOptions[T, ID],
 ) (deventsourced.IEventStore[ID], error) {
@@ -64,11 +74,11 @@ func NewDomainEventStore[T deventsourced.IEventSourcedAggregate[ID], ID comparab
 		return nil, fmt.Errorf("aggregate factory cannot be nil")
 	}
 	if opts.EventStore == nil {
-		return nil, fmt.Errorf("event store cannot be nil")
+		return nil, fmt.Errorf("aggregate event store cannot be nil")
 	}
 
 	// 强约束：当需要通过 EventBus 发布事件时，必须配置 OutboxRepo。
-	// 只要 PublishEvents=true 且提供了 EventBus，就视为“需要对外发布事件”，
+	// 只要 PublishEvents=true 且提供了 EventBus，就视为"需要对外发布事件"，
 	// 此时缺少 OutboxRepo 将被视为配置错误并在装配阶段直接失败。
 	if opts.PublishEvents && opts.EventBus != nil && opts.OutboxRepo == nil {
 		return nil, fmt.Errorf("event publishing requires outbox repository: PublishEvents=true and EventBus is configured but OutboxRepo is nil")
@@ -78,6 +88,7 @@ func NewDomainEventStore[T deventsourced.IEventSourcedAggregate[ID], ID comparab
 		aggregateType:   opts.AggregateType,
 		factory:         opts.Factory,
 		eventStore:      opts.EventStore,
+		streamStore:     opts.StreamStore,
 		snapshotManager: opts.SnapshotManager,
 		eventBus:        opts.EventBus,
 		outboxRepo:      opts.OutboxRepo,
@@ -90,15 +101,6 @@ func NewDomainEventStore[T deventsourced.IEventSourcedAggregate[ID], ID comparab
 	}
 
 	return adapter, nil
-}
-
-// NewEventStoreAdapter 为兼容旧用法保留的构造函数。
-//
-// Deprecated: 请使用 NewDomainEventStore。
-func NewEventStoreAdapter[T deventsourced.IEventSourcedAggregate[ID], ID comparable](
-	opts DomainEventStoreOptions[T, ID],
-) (deventsourced.IEventStore[ID], error) {
-	return NewDomainEventStore(opts)
 }
 
 // AppendEvents 将领域事件追加到事件存储中。

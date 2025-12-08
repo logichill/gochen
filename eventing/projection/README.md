@@ -139,7 +139,7 @@ func (p *UserViewProjection) Reset(ctx context.Context) error {
 
 ```go
 // 创建投影管理器（集成事件总线和事件存储）
-eventStore := store.NewMemoryEventStore()
+eventStore := store.NewMemoryEventStore()         // 实现 IEventStreamStore[int64]
 eventBus   := bus.NewInMemoryEventBus()
 
 projectionManager := projection.NewProjectionManager(eventStore, eventBus)

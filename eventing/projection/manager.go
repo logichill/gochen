@@ -86,7 +86,7 @@ func DefaultProjectionConfig() *ProjectionConfig {
 
 type ProjectionManager struct {
 	projections     map[string]IProjection
-	eventStore      store.IEventStore[int64]
+	eventStore      store.IEventStreamStore[int64]
 	eventBus        bus.IEventBus
 	statuses        map[string]*ProjectionStatus
 	handlers        map[string]map[string]*projectionEventHandler
@@ -99,12 +99,12 @@ type ProjectionManager struct {
 const replayBatchLimit = 1000 // 单次回放批量上限，避免一次性加载过多事件
 
 // NewProjectionManager 创建投影管理器
-func NewProjectionManager(eventStore store.IEventStore[int64], eventBus bus.IEventBus) *ProjectionManager {
+func NewProjectionManager(eventStore store.IEventStreamStore[int64], eventBus bus.IEventBus) *ProjectionManager {
 	return NewProjectionManagerWithConfig(eventStore, eventBus, nil)
 }
 
 // NewProjectionManagerWithConfig 创建带配置的投影管理器
-func NewProjectionManagerWithConfig(eventStore store.IEventStore[int64], eventBus bus.IEventBus, config *ProjectionConfig) *ProjectionManager {
+func NewProjectionManagerWithConfig(eventStore store.IEventStreamStore[int64], eventBus bus.IEventBus, config *ProjectionConfig) *ProjectionManager {
 	if config == nil {
 		config = DefaultProjectionConfig()
 	}
@@ -276,7 +276,7 @@ func (pm *ProjectionManager) replayProjectionFromCheckpoint(ctx context.Context,
 }
 
 func (pm *ProjectionManager) fetchEventsForReplay(ctx context.Context, after string, fromTime time.Time, supportedTypes []string) ([]eventing.Event[int64], bool, error) {
-	if extended, ok := pm.eventStore.(store.IEventStoreExtended[int64]); ok {
+	if extended, ok := pm.eventStore.(store.IEventStreamStore[int64]); ok {
 		stream, err := extended.GetEventStreamWithCursor(ctx, &store.StreamOptions{
 			After:    after,
 			FromTime: fromTime,

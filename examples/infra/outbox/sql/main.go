@@ -25,7 +25,7 @@ import (
 type Opened struct{ Initial int }
 type Deposited struct{ Amount int }
 
-func (e *Opened) EventType() string   { return "Opened" }
+func (e *Opened) EventType() string    { return "Opened" }
 func (e *Deposited) EventType() string { return "Deposited" }
 
 // 聚合

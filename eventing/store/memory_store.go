@@ -12,7 +12,7 @@ import (
 
 // MemoryEventStore 一个简单的内存实现，仅用于测试与示例
 //
-// 当前内置实现仍以 int64 作为聚合 ID 类型，对应 IEventStore[int64]。
+// 当前内置实现仍以 int64 作为聚合 ID 类型，对应 IEventStore[int64] 与 IEventStreamStore[int64]。
 // 如需自定义 ID 类型，可单独实现基于 IEventStore[ID] 的内存版本。
 type MemoryEventStore struct {
 	mu sync.RWMutex
@@ -27,6 +27,23 @@ func NewMemoryEventStore() *MemoryEventStore {
 		events:     make(map[string][]eventing.Event[int64]),
 		eventsByID: make(map[int64][]eventing.Event[int64]),
 	}
+}
+
+// NewMemoryAggregateStore 创建仅依赖聚合级接口的内存事件存储。
+//
+// 适用场景：
+//   - 仅需要 Append/Load/Exists/GetVersion 等聚合级操作；
+//   - 不关心全局游标流或聚合顺序流。
+func NewMemoryAggregateStore() IEventStore[int64] {
+	return NewMemoryEventStore()
+}
+
+// NewMemoryEventStreamStore 创建同时支持聚合级与全局流接口的内存事件存储。
+//
+// 适用场景：
+//   - 投影、History、监控等需要同时使用游标流与聚合顺序流的测试与示例。
+func NewMemoryEventStreamStore() IEventStreamStore[int64] {
+	return NewMemoryEventStore()
 }
 
 func (m *MemoryEventStore) AppendEvents(ctx context.Context, aggregateID int64, events []eventing.IStorableEvent[int64], expectedVersion uint64) error {
@@ -110,7 +127,7 @@ func (m *MemoryEventStore) LoadEventsByType(ctx context.Context, aggregateType s
 	return res, nil
 }
 
-// StreamAggregate 按聚合顺序流式读取事件（实现 IAggregateEventStore[int64]，可选能力）
+// StreamAggregate 按聚合顺序流式读取事件（实现 IEventStreamStore[int64]，可选能力）
 func (m *MemoryEventStore) StreamAggregate(ctx context.Context, opts *AggregateStreamOptions[int64]) (*AggregateStreamResult[int64], error) {
 	if opts == nil {
 		return nil, fmt.Errorf("AggregateStreamOptions cannot be nil")
@@ -179,7 +196,7 @@ func (m *MemoryEventStore) StreamEvents(ctx context.Context, from time.Time) ([]
 	return res, nil
 }
 
-// GetEventStreamWithCursor 基于游标/类型过滤读取事件流（实现 IEventStoreExtended[int64]）
+// GetEventStreamWithCursor 基于游标/类型过滤读取事件流（实现 IEventStreamStore[int64]）
 func (m *MemoryEventStore) GetEventStreamWithCursor(ctx context.Context, opts *StreamOptions) (*StreamResult[int64], error) {
 	m.mu.RLock()
 	var all []eventing.Event[int64]
@@ -223,5 +240,5 @@ func (m *MemoryEventStore) getAggregateVersionUnsafe(key string) (uint64, error)
 	return aggregateEvents[len(aggregateEvents)-1].GetVersion(), nil
 }
 
-// 确认实现拓展接口
-var _ IEventStoreExtended[int64] = (*MemoryEventStore)(nil)
+// 确认实现接口
+var _ IEventStreamStore[int64] = (*MemoryEventStore)(nil)

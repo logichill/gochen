@@ -63,7 +63,7 @@ func (m *MetricsEventStore) GetEventStreamWithCursor(ctx context.Context, opts *
 		res *estore.StreamResult[int64]
 		err error
 	)
-	if extended, ok := m.inner.(estore.IEventStoreExtended[int64]); ok {
+	if extended, ok := m.inner.(estore.IEventStreamStore[int64]); ok {
 		res, err = extended.GetEventStreamWithCursor(ctx, opts)
 	} else {
 		var evs []eventing.Event[int64]
@@ -83,5 +83,14 @@ func (m *MetricsEventStore) GetEventStreamWithCursor(ctx context.Context, opts *
 	return res, err
 }
 
+// StreamAggregate 按聚合顺序流式读取事件（委托到底层存储）
+func (m *MetricsEventStore) StreamAggregate(ctx context.Context, opts *estore.AggregateStreamOptions[int64]) (*estore.AggregateStreamResult[int64], error) {
+	if streamStore, ok := m.inner.(estore.IEventStreamStore[int64]); ok {
+		return streamStore.StreamAggregate(ctx, opts)
+	}
+	// 底层不支持时返回错误
+	return nil, nil
+}
+
 // 接口断言
-var _ estore.IEventStoreExtended[int64] = (*MetricsEventStore)(nil)
+var _ estore.IEventStreamStore[int64] = (*MetricsEventStore)(nil)

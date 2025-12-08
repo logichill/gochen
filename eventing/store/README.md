@@ -192,6 +192,22 @@ for _, event := range filtered.Events {
 
 ## 高级特性
 
+### 聚合级 helper 与泛型支持
+
+除了 `int64` 聚合 ID 的便捷函数外，store 包还提供了针对泛型 `ID` 的聚合级 helper：
+
+```go
+// 泛型版本：适用于任意 ID 形态的 IEventStore[ID]
+exists, err := store.AggregateExistsGeneric[string](ctx, stringEventStore, "ACC-1001")
+version, err := store.GetCurrentVersionGeneric[string](ctx, stringEventStore, "ACC-1001")
+```
+
+使用原则：
+- 事件存储实现若同时实现了 `IAggregateInspector[ID]`，helper 会优先调用 `HasAggregate` / `GetAggregateVersion`，避免全量回放；
+- 否则退回到 `LoadEvents(..., 0)` 的实现。
+
+针对 `int64` 的便捷函数（`AggregateExists`/`GetCurrentVersion` 等）会在内部延续当前行为，后续可以根据需要迁移到泛型版本。
+
 ### 游标与类型过滤（推荐）
 
 为避免在事件表上做全表扫描，可以优先使用 `IEventStoreExtended[int64].GetEventStreamWithCursor`：

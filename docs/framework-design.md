@@ -277,7 +277,7 @@ type Event[ID comparable] struct {
 
 ### 3.2 事件存储接口（`eventing/store`）
 
-核心接口：`IEventStore[ID]`（`eventing/store/eventstore.go`）：
+核心接口：聚合级 `IEventStore[ID]`（`eventing/store/eventstore.go`）：
 
 ```go
 // ID 为聚合根 ID 类型（如 int64/string/自定义类型）
@@ -292,14 +292,15 @@ type IEventStore[ID comparable] interface {
 
 - `IAggregateInspector[ID]`：检查聚合是否存在/当前版本；
 - `IEventStoreExtended[ID]`：基于游标的事件流分页；
-- `IAggregateEventStore[ID]`：按聚合顺序流式读取。
+- `IAggregateEventStore[ID]`：按聚合顺序流式读取；
+- `IEventStreamStore[ID]`：组合 `IEventStoreExtended[ID]` 与 `IAggregateEventStore[ID]`，既支持全局游标流，又支持基于版本的聚合顺序流（用于投影/History 场景）。
 
 内置实现（内存/SQL/缓存/指标）目前实例化为 `ID=int64` 的形式，例如：
 
 ```go
-memStore := store.NewMemoryEventStore()              // 实现 IEventStore[int64]
-sqlStore := sql.NewSQLEventStore(db, "event_store") // 实现 IEventStore[int64]
-cached   := cached.NewCachedEventStore(memStore, nil) // 实现 IEventStoreExtended[int64]
+memStore := store.NewMemoryEventStore()                // 实现 IEventStore[int64] + IEventStreamStore[int64]
+sqlStore := sql.NewSQLEventStore(db, "event_store")    // 实现 IEventStore[int64] + IEventStreamStore[int64]
+cached   := cached.NewCachedEventStore(memStore, nil)  // 实现 IEventStoreExtended[int64]
 ```
 
 SQL 实现基于 `data/db` 与 `data/db/sql.ISql`，位于 `eventing/store/sql`（此处仅说明抽象层，具体 schema 见迁移指南）。
