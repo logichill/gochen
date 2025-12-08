@@ -126,7 +126,14 @@ func (a *DomainEventStore[T, ID]) AppendEvents(ctx context.Context, aggregateID 
 
 	currentVersion := expectedVersion
 	storableEvents := make([]eventing.Event[ID], 0, len(events))
-	publishedEvents := make([]eventing.IEvent, 0, len(events))
+
+	// 仅在需要直接通过 EventBus 发布且未启用 Outbox 时才构建发布用切片，
+	// Outbox 模式下不再为 Publish 分配额外 slice，避免不必要的内存开销。
+	needDirectPublish := a.publishEvents && a.eventBus != nil && a.outboxRepo == nil
+	var publishedEvents []eventing.IEvent
+	if needDirectPublish {
+		publishedEvents = make([]eventing.IEvent, 0, len(events))
+	}
 
 	for i, de := range events {
 		if de == nil {
@@ -139,7 +146,9 @@ func (a *DomainEventStore[T, ID]) AppendEvents(ctx context.Context, aggregateID 
 		version := currentVersion + uint64(i) + 1
 		evt := eventing.NewDomainEvent(aggregateID, a.aggregateType, eventType, version, de)
 		storableEvents = append(storableEvents, *evt)
-		publishedEvents = append(publishedEvents, evt)
+		if needDirectPublish {
+			publishedEvents = append(publishedEvents, evt)
+		}
 	}
 
 	// Outbox 模式：通过 OutboxRepo 原子保存事件与 Outbox。
@@ -156,7 +165,7 @@ func (a *DomainEventStore[T, ID]) AppendEvents(ctx context.Context, aggregateID 
 	}
 
 	// 可选事件发布（仅在非 Outbox 模式下直接发布）。
-	if a.publishEvents && a.eventBus != nil && a.outboxRepo == nil {
+	if needDirectPublish {
 		if err := a.eventBus.PublishEvents(ctx, publishedEvents); err != nil {
 			// 发布失败视为可观测的业务失败，向上游返回错误并保留持久化结果
 			return appErrors.WrapError(err, appErrors.ErrCodeDependency, "failed to publish domain events")

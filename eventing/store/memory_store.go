@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -16,12 +15,18 @@ import (
 // 当前内置实现仍以 int64 作为聚合 ID 类型，对应 IEventStore[int64]。
 // 如需自定义 ID 类型，可单独实现基于 IEventStore[ID] 的内存版本。
 type MemoryEventStore struct {
-	mu     sync.RWMutex
+	mu sync.RWMutex
+	// events 按 aggregateType:aggregateID 维度组织，保留原有语义用于按类型查询与游标扫描。
 	events map[string][]eventing.Event[int64] // aggregateType:aggregateID -> ordered events
+	// eventsByID 按聚合 ID 维度组织，用于快速按聚合 ID 读取/检查版本，避免对 events 做 O(N) 级扫描。
+	eventsByID map[int64][]eventing.Event[int64] // aggregateID -> ordered events (跨类型聚合)
 }
 
 func NewMemoryEventStore() *MemoryEventStore {
-	return &MemoryEventStore{events: make(map[string][]eventing.Event[int64])}
+	return &MemoryEventStore{
+		events:     make(map[string][]eventing.Event[int64]),
+		eventsByID: make(map[int64][]eventing.Event[int64]),
+	}
 }
 
 func (m *MemoryEventStore) AppendEvents(ctx context.Context, aggregateID int64, events []eventing.IStorableEvent[int64], expectedVersion uint64) error {
@@ -52,6 +57,10 @@ func (m *MemoryEventStore) AppendEvents(ctx context.Context, aggregateID int64, 
 	if m.events[key] == nil {
 		m.events[key] = make([]eventing.Event[int64], 0, len(events))
 	}
+	if m.eventsByID[aggregateID] == nil {
+		m.eventsByID[aggregateID] = make([]eventing.Event[int64], 0, len(events))
+	}
+
 	// basic validation and append in order
 	for _, e := range events {
 		// 安全类型转换：从 IStorableEvent 到 Event
@@ -60,6 +69,7 @@ func (m *MemoryEventStore) AppendEvents(ctx context.Context, aggregateID int64, 
 			return fmt.Errorf("unsupported event type: %T, expected *eventing.Event", e)
 		}
 		m.events[key] = append(m.events[key], *event)
+		m.eventsByID[aggregateID] = append(m.eventsByID[aggregateID], *event)
 	}
 	return nil
 }
@@ -67,18 +77,9 @@ func (m *MemoryEventStore) AppendEvents(ctx context.Context, aggregateID int64, 
 func (m *MemoryEventStore) LoadEvents(ctx context.Context, aggregateID int64, afterVersion uint64) ([]eventing.Event[int64], error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	// 使用精确的后缀匹配：":aggregateID"
-	// 确保不会误匹配，例如 ":123" 不会匹配 ":1234"
-	suffix := fmt.Sprintf(":%d", aggregateID)
-	var aggregateEvents []eventing.Event[int64]
-	for key, evts := range m.events {
-		// 检查 key 是否以 suffix 结尾，且 suffix 前面是 aggregateType（不含冒号）
-		// key 格式为 "aggregateType:aggregateID"
-		if strings.HasSuffix(key, suffix) && (len(key) == len(suffix) || key[len(key)-len(suffix)-1] != ':') {
-			aggregateEvents = append(aggregateEvents, evts...)
-		}
-	}
-	if len(aggregateEvents) == 0 {
+
+	aggregateEvents, ok := m.eventsByID[aggregateID]
+	if !ok || len(aggregateEvents) == 0 {
 		return []eventing.Event[int64]{}, nil
 	}
 	sort.SliceStable(aggregateEvents, func(i, j int) bool { return aggregateEvents[i].GetVersion() < aggregateEvents[j].GetVersion() })
@@ -195,29 +196,19 @@ func (m *MemoryEventStore) GetEventStreamWithCursor(ctx context.Context, opts *S
 func (m *MemoryEventStore) HasAggregate(ctx context.Context, aggregateID int64) (bool, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	suffix := fmt.Sprintf(":%d", aggregateID)
-	for key, events := range m.events {
-		if strings.HasSuffix(key, suffix) && len(events) > 0 {
-			return true, nil
-		}
-	}
-	return false, nil
+	events, ok := m.eventsByID[aggregateID]
+	return ok && len(events) > 0, nil
 }
 
 // GetAggregateVersion 返回聚合当前版本
 func (m *MemoryEventStore) GetAggregateVersion(ctx context.Context, aggregateID int64) (uint64, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	suffix := fmt.Sprintf(":%d", aggregateID)
-	var latest uint64
-	for key, events := range m.events {
-		if strings.HasSuffix(key, suffix) && len(events) > 0 {
-			if v := events[len(events)-1].GetVersion(); v > latest {
-				latest = v
-			}
-		}
+	events, ok := m.eventsByID[aggregateID]
+	if !ok || len(events) == 0 {
+		return 0, nil
 	}
-	return latest, nil
+	return events[len(events)-1].GetVersion(), nil
 }
 
 func eventAggregateKey(aggregateType string, aggregateID int64) string {
