@@ -66,6 +66,14 @@ func NewDomainEventStore[T deventsourced.IEventSourcedAggregate[ID], ID comparab
 	if opts.EventStore == nil {
 		return nil, fmt.Errorf("event store cannot be nil")
 	}
+
+	// 强约束：当需要通过 EventBus 发布事件时，必须配置 OutboxRepo。
+	// 只要 PublishEvents=true 且提供了 EventBus，就视为“需要对外发布事件”，
+	// 此时缺少 OutboxRepo 将被视为配置错误并在装配阶段直接失败。
+	if opts.PublishEvents && opts.EventBus != nil && opts.OutboxRepo == nil {
+		return nil, fmt.Errorf("event publishing requires outbox repository: PublishEvents=true and EventBus is configured but OutboxRepo is nil")
+	}
+
 	adapter := &DomainEventStore[T, ID]{
 		aggregateType:   opts.AggregateType,
 		factory:         opts.Factory,
@@ -79,15 +87,6 @@ func NewDomainEventStore[T deventsourced.IEventSourcedAggregate[ID], ID comparab
 	if adapter.logger == nil {
 		adapter.logger = logging.ComponentLogger("app.eventsourced.domain_event_store").
 			WithField("aggregate_type", opts.AggregateType)
-	}
-
-	// 警告：未启用 Outbox 时的事件发布存在原子性风险。
-	// 若事件持久化成功而发布失败，可能导致事件丢失或重复处理。
-	if opts.PublishEvents && opts.EventBus != nil && opts.OutboxRepo == nil {
-		adapter.logger.Warn(context.Background(),
-			"Event publishing configured with atomicity risk: PublishEvents=true but OutboxRepo is nil. "+
-				"Event persistence and publishing are non-atomic operations. Publishing failures may cause event loss. "+
-				"Outbox pattern is strongly recommended for production to ensure eventual consistency.")
 	}
 
 	return adapter, nil
