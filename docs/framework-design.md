@@ -304,6 +304,49 @@ cached   := cached.NewCachedEventStore(memStore, nil) // 实现 IEventStoreExten
 
 SQL 实现基于 `data/db` 与 `data/db/sql.ISql`，位于 `eventing/store/sql`（此处仅说明抽象层，具体 schema 见迁移指南）。
 
+### 3.2.1 聚合 ID 类型策略
+
+事件存储接口在类型层已经完全泛型化（`IEventStore[ID]` / `Event[ID]`），但实际使用中仍需要根据业务与存储后端选择合适的 ID 形态。
+
+**默认推荐：`int64` 自增或雪花 ID**
+
+- 适用场景：
+  - 绝大多数基于关系型数据库的服务；
+  - 以 SQL 表作为主事件存储的场景（`eventing/store/sql.SQLEventStore`）。
+- 优点：
+  - 与现有 SQL 示例与索引结构（`aggregate_id INTEGER`）完全兼容；
+  - 与 `codegen/snowflake` 生成的 ID 组合良好；
+  - 性能与索引友好，易于排查。
+
+**字符串/UUID ID（`string`）**
+
+- 适用场景：
+  - 业务主键天然是字符串，且需要跨系统对齐（如账号号、业务单号）；
+  - 采用 UUID 作为主键，希望事件流中直接使用 UUID 而不是额外的数值映射。
+- 使用方式：
+  - 在业务仓库或示例中实现 `IEventStore[string]`（如 `examples/domain/eventsourced_stringid.StringMemoryEventStore`）；
+  - 通过 `app/eventsourced.DomainEventStore[T, string]` 适配到领域层 `IEventStore[string]`；
+  - 再通过 `domain/eventsourced.EventSourcedRepository[T, string]` 组合完成仓储；
+  - SQL 场景下，可将事件表中的 `aggregate_id` 列从 `INTEGER` 调整为 `TEXT`，并保持 `aggregate_type, aggregate_id, version` 的联合唯一索引（具体 DDL 见 `docs/migration-guide.md`）。
+- 注意事项：
+  - 为保持兼容性，框架内置的 SQL EventStore 仍以 `int64` 形态提供实现；使用字符串 ID 的团队需要在业务侧实现对应的 `IEventStore[string]` 或基于现有实现包装一层；
+  - 并发冲突错误类型（如 `eventing.ConcurrencyError`）仍以 `int64` 聚合 ID 为主，可在自定义实现中使用 `NewStoreFailedError` 或业务自定义错误类型表达冲突信息。
+
+**其他强类型 ID（自定义 struct）**
+
+- 适用场景：
+  - 希望通过强类型（如 `type OrderID struct{ Value string }`）约束 ID 使用；
+  - 对事件流的序列化/反序列化有定制需求。
+- 使用方式：
+  - 在事件载荷与 EventStore 实现中统一使用该强类型作为 `ID`；
+  - 保证该类型支持作为 map key（`comparable`），并在序列化时稳定映射为数据库中的字符串或数值列。
+
+**实践建议：**
+
+- 新项目若无特殊需求，仍推荐使用 `int64` 作为默认聚合 ID，以便直接复用当前 SQL EventStore 与 Outbox 实现；
+- 需要字符串/UUID ID 时，优先在业务仓库实现 `IEventStore[ID]` 并参考 `examples/domain/eventsourced_stringid` 的组合方式；
+- 多种 ID 策略可以在同一系统中并存，但建议在单个上下文（bounded context）内保持统一，以减少跨上下文迁移复杂度。
+
 ### 3.3 投影管理（`eventing/projection`）
 
 投影接口与管理器：

@@ -71,6 +71,20 @@ go run ./examples/domain/audited
 go run ./examples/domain/eventsourced
 ```
 
+#### 字符串 ID 事件溯源 (`domain/eventsourced_stringid`)
+
+**场景**: 需要使用字符串或 UUID 作为聚合 ID（例如跨系统对齐账户号/业务主键），同时希望沿用 gochen 的事件溯源与仓储模板。
+
+**要点**:
+- 在业务侧实现 `eventing/store.IEventStore[string]`（示例中的 `StringMemoryEventStore`）；
+- 通过 `app/eventsourced.DomainEventStore[T, string]` + `domain/eventsourced.EventSourcedRepository[T, string]` 组合，完整贯通“领域聚合 → 事件存储 → 重建”链路；
+- 示例仅演示内存存储与字符串 ID 的组合，生产环境可以参考迁移指南将 `aggregate_id` 列调整为 `TEXT` 或使用单独表承载字符串 ID 聚合。
+
+**运行示例**:
+```bash
+go run ./examples/domain/eventsourced_stringid
+```
+
 ---
 
 ## 📚 分组索引（按能力）

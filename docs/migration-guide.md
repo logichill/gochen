@@ -15,7 +15,7 @@ CREATE INDEX idx_domain_events_aggregate ON domain_events (aggregate_type, aggre
 - 按类型过滤：`type,timestamp` 减少回表
 - 聚合顺序：`aggregate_type,aggregate_id,version` 支持快速重放聚合
 
-基础表结构示例：
+基础表结构示例（`aggregate_id` 为整数 ID）：
 ```sql
 CREATE TABLE domain_events (
     id TEXT PRIMARY KEY,
@@ -30,6 +30,33 @@ CREATE TABLE domain_events (
     UNIQUE(aggregate_id, aggregate_type, version)
 );
 ```
+
+### 字符串/UUID 聚合 ID 场景
+
+对于需要使用字符串或 UUID 作为聚合 ID 的场景，可以在保持整体表结构不变的前提下，将 `aggregate_id` 列调整为 `TEXT`（或对应数据库中的变长字符串类型）：
+
+```sql
+CREATE TABLE domain_events (
+    id TEXT PRIMARY KEY,
+    type TEXT NOT NULL,
+    aggregate_id TEXT NOT NULL,
+    aggregate_type TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    schema_version INTEGER NOT NULL,
+    timestamp DATETIME NOT NULL,
+    payload TEXT NOT NULL,
+    metadata TEXT NOT NULL,
+    UNIQUE(aggregate_id, aggregate_type, version)
+);
+
+CREATE INDEX idx_domain_events_aggregate ON domain_events (aggregate_type, aggregate_id, version);
+```
+
+迁移建议：
+- 如需从 `INTEGER` ID 演进到字符串 ID，有两种常见路径：
+  - **新聚合使用新 ID 策略**：为新场景引入单独的事件表或使用不同的 `aggregate_type` 前缀，将历史数值 ID 聚合与新字符串 ID 聚合隔离；
+  - **一次性迁移**：在停机窗口内将旧的数值 ID 转换为字符串（例如 `CAST(id AS TEXT)` 或拼接前缀），并同步调整业务侧主键类型与代码中的 `ID` 泛型参数。
+- 不建议在同一聚合类型内部混用多种 ID 形态（例如部分为 int64，部分为字符串），否则会显著增加迁移与排查复杂度。
 
 ## Outbox（outbox）
 
