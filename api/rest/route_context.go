@@ -1,0 +1,86 @@
+package rest
+
+import (
+	"context"
+	"strings"
+
+	auth "gochen/auth"
+	"gochen/errors"
+	"gochen/httpx"
+)
+
+// serviceContext 从 HTTP 上下文构建服务层上下文。
+func (rb *RouteBuilder[T, ID]) serviceContext(c httpx.IContext) (context.Context, error) {
+	var ctx context.Context = c.RequestContext()
+	if rb.authzConfig() != nil {
+		cfg := rb.authzConfig()
+		if cfg.Consistency != auth.ConsistencyModeUnspecified {
+			derived, err := auth.WithConsistencyMode(ctx, cfg.Consistency)
+			if err != nil {
+				return nil, err
+			}
+			ctx = derived
+		}
+		if cfg.HighRisk {
+			derived, err := auth.WithHighRiskAuthorization(ctx)
+			if err != nil {
+				return nil, err
+			}
+			ctx = derived
+		}
+		bound, _, err := auth.BindAuthzEvalContextOrEmpty(ctx)
+		if err != nil {
+			return nil, err
+		}
+		ctx = rb.syncRequestContext(c, bound)
+	}
+	if rb.config == nil || rb.config.Audit.OperatorExtractor == nil {
+		return ctx, nil
+	}
+	operator, ok := rb.config.Audit.OperatorExtractor(c)
+	operator = strings.TrimSpace(operator)
+	if !ok || operator == "" {
+		return ctx, nil
+	}
+	derived, err := auth.WithOperator(ctx, operator)
+	if err != nil {
+		return nil, err
+	}
+	return derived, nil
+}
+
+// extractOperator 从请求中提取操作人。
+func (rb *RouteBuilder[T, ID]) extractOperator(c httpx.IContext) (string, bool) {
+	if rb.config == nil || rb.config.Audit.OperatorExtractor == nil {
+		return "", false
+	}
+	operator, ok := rb.config.Audit.OperatorExtractor(c)
+	operator = strings.TrimSpace(operator)
+	return operator, ok && operator != ""
+}
+
+// mustAuditedContext 构建审计上下文，operator 为必需。
+func (rb *RouteBuilder[T, ID]) mustAuditedContext(c httpx.IContext) (context.Context, string, error) {
+	operator, ok := rb.extractOperator(c)
+	if !ok || operator == "" {
+		return nil, "", errors.NewCode(errors.Validation, "missing operator")
+	}
+	ctx, err := auth.WithOperator(c.RequestContext(), operator)
+	if err != nil {
+		return nil, "", err
+	}
+	return ctx, operator, nil
+}
+
+// parseID 从路径参数解析 ID。
+func (rb *RouteBuilder[T, ID]) parseID(c httpx.IContext) (ID, error) {
+	var zero ID
+	if rb.config == nil || rb.config.Routing.IDCodec == nil {
+		return zero, errors.NewCode(errors.InvalidInput, "RouteConfig.Routing.IDCodec is required")
+	}
+	id, err := ParsePathWithCodec(c, "id", rb.config.Routing.IDCodec, "invalid ID format")
+	if err != nil {
+		return zero, errors.Wrap(err, errors.Validation, "invalid ID format")
+	}
+	return id, nil
+}

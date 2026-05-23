@@ -1,0 +1,30 @@
+bin
+tmp
+
+# 忽略所有点文件/目录，按需反忽略
+.*
+!.gitignore
+!.editorconfig
+!.github
+
+# 覆盖率报告
+coverage.out
+coverage.html
+*.coverprofile
+
+# 测试输出
+*.test
+test-output/
+
+# 临时文件
+*.tmp
+*.swp
+*.swo
+*~
+
+# 日志文件
+*.log
+
+# local review drafts (not part of library API)
+docs/review/
+scripts/comment_audit/main.go
