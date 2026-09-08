@@ -16,6 +16,7 @@ package scoped
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"gochen/auth/action"
@@ -112,12 +113,16 @@ func requireScopeDeclaration[T domain.IEntity[ID], ID comparable](
 	if !ok {
 		return errors.NewCode(errors.Unsupported,
 			"L3 scoped application requires a repository that consumes write constraints; "+
-				"repository does not implement scoped.IScopeDeclarationProbe")
+				"repository does not implement scoped.IScopeDeclarationProbe").
+			WithContext("entity_type", entityType).
+			WithContext("repository_type", fmt.Sprintf("%T", repo))
 	}
 	if !probe.HasScopeDeclaration() {
 		return errors.NewCode(errors.InvalidInput,
 			"L3 scoped application requires the repository to declare scope columns (e.g. ormrepo.WithScope); "+
-				"otherwise write constraints would be silently dropped")
+				"otherwise write constraints would be silently dropped").
+			WithContext("entity_type", entityType).
+			WithContext("repository_type", fmt.Sprintf("%T", repo))
 	}
 	// 约束按实体类型定向投放，装饰器与仓储必须用同一个标识，否则恒匹配不到。
 	kindProbe, ok := any(repo).(authscoped.IResourceKindProbe)

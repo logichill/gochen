@@ -7,8 +7,12 @@ import (
 
 // IStore 定义工作流定义（支持多版本）与实例的最小存储接口。
 //
-// 该接口只适用于测试或保证单进程访问的存储。生产环境和任何多实例部署必须实现
-// IOptimisticStore；Engine 的 keyed lock 不能替代跨进程并发控制。
+// 说明：
+//   - 版本化定义方法（GetDefinition/DeleteDefinition 指定 version > 0）由流程引擎在实例执行时
+//     按实例固化的 DefinitionVersion 读取，实现方不得只实现 version == 0 分支；
+//   - 上层应用/设计态通常默认操作最新版本（version == 0）；
+//   - 该接口只适用于测试或保证单进程访问的存储。生产环境和任何多实例部署必须实现
+//     IOptimisticStore；Engine 的 keyed lock 不能替代跨进程并发控制。
 type IStore interface {
 	// GetDefinition 按定义 ID 与版本号查询工作流定义。
 	// 当 version == 0 时返回该 ID 的最新版本；不存在时返回 nil。

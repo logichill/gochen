@@ -39,6 +39,8 @@
 - ../ems
 - ../erp
 
+核心三包为: gochen, gochen-runtime, gochen-contrib。
+
 `../gochen-workflow` 不是本项目下游测试目标；仅当下游本地 replace/workspace 需要时，可作为 workspace support 项参与临时 `go.work`。
 
 ## 架构约定（Core 模块）
@@ -48,24 +50,24 @@
 1. **顶级目录白名单**：`app auth cache clock codec contextx db domain errors eventing gen httpx internal messaging observe policy process testkit validate scripts examples`（`examples` 仅存放示例 `main` 包，生产代码禁止 import）。
 2. **能力域依赖矩阵**（生产代码只允许下列 gochen 内部依赖，标准库不受限）：
 
-   | 包 | 允许依赖（gochen 内部） |
-   |---|---|
-   | app（`app/security/*` 除外） | clock, codec, contextx, domain, errors, eventing, gen, internal, messaging, observe, policy, validate |
-   | app/security/* | 上行全部 + auth/{action, scoped} |
-   | auth（能力子包见 `auth/doc.go`） | clock, contextx, domain, errors, gen, internal, observe |
-   | cache | clock |
-   | clock / codec / gen / validate | errors（基础叶子，彼此禁止互相 import，协作用最小结构接口注入） |
-   | contextx | errors, gen |
-   | db | contextx, errors |
-   | domain | errors |
-   | errors | （无） |
-   | eventing | clock, codec, contextx, db, errors, gen, internal, messaging, observe, policy, process |
-   | httpx | contextx, errors |
-   | messaging | clock, contextx, errors, internal, observe, validate |
-   | observe | contextx |
-   | policy | clock, errors |
-   | process | clock, errors, eventing, gen, internal, messaging, observe, policy |
-   | testkit | app, contextx, db, domain, errors, httpx, gen |
+   | 包                               | 允许依赖（gochen 内部）                                                                               |
+   | -------------------------------- | ----------------------------------------------------------------------------------------------------- |
+   | app（`app/security/*` 除外）     | clock, codec, contextx, domain, errors, eventing, gen, internal, messaging, observe, policy, validate |
+   | app/security/*                   | 上行全部 + auth/{action, scoped}                                                                      |
+   | auth（能力子包见 `auth/doc.go`） | clock, contextx, domain, errors, gen, internal, observe                                               |
+   | cache                            | clock                                                                                                 |
+   | clock / codec / gen / validate   | errors（基础叶子，彼此禁止互相 import，协作用最小结构接口注入）                                       |
+   | contextx                         | errors, gen                                                                                           |
+   | db                               | contextx, errors                                                                                      |
+   | domain                           | errors                                                                                                |
+   | errors                           | （无）                                                                                                |
+   | eventing                         | clock, codec, contextx, db, errors, gen, internal, messaging, observe, policy, process                |
+   | httpx                            | contextx, errors                                                                                      |
+   | messaging                        | clock, contextx, errors, internal, observe, validate                                                  |
+   | observe                          | contextx                                                                                              |
+   | policy                           | clock, errors                                                                                         |
+   | process                          | clock, errors, eventing, gen, internal, messaging, observe, policy                                    |
+   | testkit                          | app, contextx, db, domain, errors, httpx, gen                                                         |
 
 3. **依赖地板**：`domain` 非测试代码只依赖标准库与 `gochen/errors`（及自身子树）；基础叶子（clock/codec/gen/validate）只依赖标准库、`gochen/errors` 与本包子树。
 4. **`app/security` 单向依赖 `auth`**：`app/security/*` 是应用层安全 PEP 装饰器，其职责即把 `auth` 的安全契约应用到 Application 编排中，故允许 `app/security → auth`。该边**严格单向**（`auth` 禁止 import 任何 `app` 包），且基础业务包 `app/crud` / `app/audited` / `app/eventsourced` 必须保持对 `auth` 零依赖。
