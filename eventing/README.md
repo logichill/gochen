@@ -1,81 +1,40 @@
-# Eventing（事件基础设施）
+# eventing：事件基础设施
 
-`eventing` 提供 Event Sourcing / CQRS 的事件基础设施：事件模型、事件存储（EventStore）、事件总线（EventBus）、Outbox、投影（Projection）、轮询订阅（Subscription）与监控导出（Monitoring）。
+`eventing` 提供事件模型、EventStore、EventBus、Outbox、Projection、轮询订阅与监控契约。Core 包含内存实现，SQL 持久化和 HTTP 监控适配在 `gochen-runtime` 仓库 `eventing/`。
 
-## 你需要记住的几个点
+## 能力导航
 
-- **Store 是事实来源**：事件写入与按聚合重建由 `eventing/store` 定义与承载。
-- **Bus 负责投递**：复用 `messaging` 的 Publish/Subscribe/中间件机制，把参数类型收敛为 `eventing.IEvent`。
-- **Outbox 保证可靠发布**：同事务写事件 + Outbox，事务外异步发布到 EventBus。
-- **Projection 负责读模型**：把全局事件流转换为读模型；可选 checkpoint 支持重启恢复与追赶。
-- **Subscription 是“没有消息总线时”的最小消费**：直接从全局事件流轮询读取并回调处理。
-- **Monitoring 提供统一导出端点**：聚合健康/指标/快照并以 HTTP handler 方式导出。
+| 包 | 职责 |
+| --- | --- |
+| 根包 | `Event[ID]`、`IEvent`、`IStorableEvent` 与事件构造 |
+| [store](store/README.md) | 追加、回放、事件流、快照与缓存 |
+| [bus](bus/README.md) | 基于 MessageBus 的事件发布和订阅 |
+| [outbox](outbox/README.md) | 事件与待发布记录原子写入、发布重试与死信 |
+| [projection](projection/README.md) | 读模型、checkpoint、恢复与重建 |
+| `registry` / `upcast` | 类型注册、载荷升级和强类型还原 |
+| `subscription` | 从事件流轮询消费，可配置持久游标 |
+| `monitoring` | 健康检查、指标、快照及路由模型 |
 
-## eventing 与 messaging 的关系
+## 事件与消息
 
-这两个包不是并列重复实现，而是**分层协作**：
+`IEvent` 扩展 `messaging.IMessage`，`Event[ID]` 复用消息信封。`eventing` 依赖 `messaging` 完成投递，后者不反向依赖事件层。外部队列接入 `messaging.ITransport`，EventBus 复用同一通道。
 
-- `messaging` 是消息机制内核：message envelope、MessageBus、Transport、中间件、DLQ。
-- `eventing` 是事件事实链路：事件模型、EventStore、Outbox、Projection、Subscription、Monitoring。
-- 设计上明确采用 **event is a specialized message**：`eventing.IEvent` 继承 `messaging.IMessage`，`eventing.Event[ID]` 复用 `messaging.Message` 作为信封层。
-- 依赖方向是单向的：`eventing` 可以复用 `messaging` 做投递与传输，`messaging` 不反向依赖 `eventing`。
-- 因此，NATS / Redis / Kafka 等异步通道应实现为 `messaging.ITransport`；`eventing` 通过 `eventing/bus` 走同一套消息基础设施，而不是再维护一套独立事件传输协议。
+事件 ID 通过 `NewEvent(generator, ...)` 显式生成，或由 `NewEventWithID(...)` 传入。聚合身份由 aggregate type 与 aggregate ID 共同定义，事件版本与 payload schema version 分别表达聚合顺序和载荷结构。
 
-## 入口（建议阅读顺序）
+## 消费边界
 
-- EventStore：`eventing/store/README.md`
-- Outbox：`eventing/outbox/README.md`
-- Projection：`eventing/projection/README.md`
-- Payload 升级与 hydration：`eventing/upcast`
-- Store 装饰器（tenant/tracing）：`eventing/store/decorators`
+组合根创建并注入 Registry 与 UpgraderRegistry。消费载荷使用 `upcast.HydrateEventPayload` 或 `DecodeEventPayload[T]`，统一读取事件的 `EventSchemaVersion()`，完成升级和强类型还原。
 
-## eventing 根包（最小核心）
+`subscription` 在处理成功后推进游标。配置 CursorStore 与 Name 可保存消费位置；配置重试上限与跳过策略时，只有 DeadLetterFunc 成功才跳过失败事件，死信回调失败则停止推进。
 
-`gochen/eventing` 根包只保留事件模型与最小接口：
+Outbox、事件重放与异步传输要求消费者幂等。投影的事务与恢复边界见 [Projection](projection/README.md)。
 
-- `eventing.Event[ID]` / `eventing.IEvent` / `eventing.IStorableEvent`
-- `eventing.NewEvent(generator, ...)` / `eventing.NewEventWithID(...)`：事件 ID 必须由组合根显式提供。
+## 监控
 
-其余能力（registry/upcast/decorators/monitoring/outbox/projection/store/...）都在子包中作为明确依赖引入，避免根包导入即带来大量概念与 API 表面积。
+Core `monitoring.NewRegistry` 聚合 provider，`Routes` / `HandleRoute` 生成路由描述和响应内容。组合根可显式注入 registry。
 
-## EventBus（事件语义层）
+Runtime `gochen-runtime/eventing/monitoring` 的包名为 `monitoringhttp`：`NewHandler` 导出 healthz / readyz，`NewHandlerWithRoutes` 可选择 FullRouteSet。metrics / snapshot 需由组合根明确启用并控制访问。
 
-`eventing/bus` 是对 `messaging.IMessageBus` 的“事件语义”包装：
+## 示例
 
-- `bus.NewEventBus(messageBus)`：组装 `IEventBus`
-- `SubscribeEvent(ctx, eventType, handler)`：按事件类型订阅；`eventType="*"` 订阅全部
-- 取消订阅：返回 `messaging.UnsubscribeFunc`（绑定订阅实例，推荐 `defer` 回收）
-- 它的职责是**收敛事件语义**，不是把 `eventing` 与 `messaging` 完全隔离成两套平行契约
-
-## Upcast / Hydration（事件消费边界）
-
-消费侧不要重复手写 `PayloadValue -> map/json -> UpgradeEventData -> DeserializeFromMap`。统一使用 `eventing/upcast`：
-
-- `upcast.HydrateEventPayload(reg, upgraders, evt)`：返回升级并反序列化后的强类型 payload。
-- `upcast.DecodeEventPayload[T](reg, upgraders, evt)`：在 hydration 后校验并返回目标类型。
-
-该入口会读取事件自身的 `EventSchemaVersion()`，避免消费侧错误回退到 schema version 1。
-
-## Subscription（轮询订阅）
-
-`eventing/subscription` 适用于不引入异步消息总线/传输时的最小消费模型：
-
-- at-least-once：handler 返回 error 时停止并返回错误
-- 可选 poison-event 出口：配置 `MaxHandlerRetries` + `SkipFailedAfterMaxRetries` 后，超过重试上限会调用 `DeadLetterFunc`；仅当回调返回 `nil` 时推进游标并继续消费，回调失败会阻止游标推进并从 `Run` 返回错误
-- 可选持久游标：配置 `CursorStore` + `Name` 后，启动时加载持久 cursor，单条事件处理成功并保存 cursor 后才推进内存游标；未配置时仅使用内存游标
-
-## Monitoring（监控导出）
-
-`eventing/monitoring` 提供框架侧统一导出端点：
-
-- `reg, err := monitoring.NewRegistry()` + `monitoring.SetDefaultRegistry(reg)`：注册全局默认 registry
-- 组合根/示例建议用 `must(err)` / `log.Fatal(err)` 显式快速失败（库层不再提供 `Must*` 版本）
-- `monitoring.NewHTTPHandler(reg)`：默认仅导出 `/healthz`、`/readyz`
-- `monitoring.NewHTTPHandlerWithRoutes(reg, monitoring.FullRouteSet())`：显式导出 `/healthz`、`/readyz`、`/metrics`、`/snapshot`
-- 可选汇总 Outbox/Snapshot/Cache 等统计信息到同一端点（以 provider 的方式注入）
-
-## 参考示例
-
-- 事件溯源（领域视角）：`examples/domain/eventsourced`、`examples/domain/eventsourced_stringid`
-- Outbox（SQL）：`examples/infra/outbox/sql`
-- Projection：`examples/infra/projection/*`
+完整链路见[事件溯源速查](../docs/reference/ddd-eventsourcing-quick-reference.md)。可运行 SQL 示例位于 `gochen-runtime` 仓库 `examples/domain/eventsourced`、`examples/infra/outbox/sql`、`examples/infra/projection/sql_checkpoint`。

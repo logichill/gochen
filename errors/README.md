@@ -8,7 +8,7 @@ gochen 的统一错误模型：错误码 + `*AppError` + 边界层 `Normalize` +
 - gochen 扩展能力统一围绕 `ErrorCode`、`AppError`、`Normalize`、HTTP 映射与结构化上下文展开。
 - `errors.ErrUnsupported` 会归一为 `errors.Unsupported`；它适合表达“调用方请求了当前不支持的能力”，不应用来掩盖服务端装配缺失或内部故障。
 
-架构背景与设计选型见 [docs/architecture/framework-design.md 第 8 章](../docs/architecture/framework-design.md#8-错误与日志)。本文档聚焦于 `errors` 包本身怎么用。
+模块边界见[框架架构](../docs/architecture/framework-design.md)。本文说明 `errors` 包的使用方式。
 
 ## 1. 快速使用
 
@@ -78,7 +78,7 @@ type IErrorCoder interface {
 
 ## 3. HTTP 映射
 
-错误码到 HTTP 状态码的映射以 `ToHTTPStatus` / `ErrorCodeToHTTPStatus` 为准。`api/rest.DefaultErrorHandler` 会先 `Normalize`，再按 `ErrorCode` 映射状态码；5xx 响应会使用安全 message，避免泄露内部细节。
+错误码到 HTTP 状态码的映射以 `ToHTTPStatus` / `ErrorCodeToHTTPStatus` 为准。`gochen-runtime/api/rest.DefaultErrorHandler` 会先 `Normalize`，再按 `ErrorCode` 映射状态码；5xx 响应会使用安全 message，避免泄露内部细节。
 
 ## 4. 调用栈（仅 5xx）
 
@@ -89,4 +89,4 @@ type IErrorCoder interface {
 
 ## 5. 常见陷阱
 
-**Details / Context 只放不可变值**。`WithContext` / `WithDetails` 建议只放 string / number / bool / time / `[]string` 这类可序列化、不可变的简单值；避免放 `map`、`slice`、指针对象，防止错误对象的 details 随时间变化。
+**Details / Context 使用不可变值**。`WithContext` / `WithDetails` 复制顶层 map，不深拷贝字段值。优先放 string / number / bool / time 等值；map、slice、指针等应先转换成独立快照，并在交付错误后保持不变。

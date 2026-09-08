@@ -1,6 +1,10 @@
-# gochen/examples：Core 契约与应用示例
+# Core 示例
 
-包含基于 `gochen` 模块（纯领域与应用契约，零第三方依赖）的示例演示：
+以下示例只依赖 Core 和标准库，在本仓库运行：
 
-- `messaging/deadletter`：死信队列处理演示
-- `task/policy`：弹性策略（重试/熔断/限流）与任务管理
+| 示例 | 内容 | 命令 |
+| --- | --- | --- |
+| [死信处理](messaging/deadletter/main.go) | 异步 handler 失败记录 | `GOWORK=off go run ./examples/messaging/deadletter` |
+| [任务与策略](task/policy/main.go) | 任务监督、重试、限流、熔断 | `GOWORK=off go run ./examples/task/policy` |
+
+SQL、REST、Host、Saga 与 Workflow 的配套示例位于 `gochen-runtime` 仓库 `examples/`，接入说明见[下游指南](../docs/guides/downstream-guide.md)。

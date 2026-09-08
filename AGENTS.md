@@ -1,6 +1,6 @@
 # AGENTS 准则（Gochen Core）
 
-本仓库为 Gochen Core（module `gochen`），是 Gochen 框架的契约层。Runtime 已拆分为独立仓库：
+本仓库为 Gochen Core（module `gochen`），是 Gochen 框架的契约层。配套 Runtime 位于独立仓库：
 
 - 本仓库 `gochen`（Core）：领域、应用、认证、事件、消息、策略、流程与 HTTP 抽象；规范见 `SPEC.md`
 - `../gochen-runtime`（Runtime，module `gochen-runtime`）：Core 的物理驱动层——SQL 实现、net/http server、config、host 容器、api/rest；局部约定见该仓库 `AGENTS.md`
@@ -16,13 +16,13 @@
 ## 命名铁律
 
 - **repo 名 = module path = 目录名**，三者必须一致（当前：`gochen` / `gochen-runtime`）。
-- module path **禁止使用 Go 标准库顶级包名**。新增 module 前必须核对 `go list std | grep -x '<候选名>'` 为空——历史上 module 名取 `runtime` 曾导致 `runtime/metrics` 等 7 个子包名永久不可用。
+- module path **禁止使用 Go 标准库顶级包名**，避免标准库与本地模块导入冲突。新增 module 前必须核对 `go list std | rg -x '<候选名>'` 为空。
 - 生态内 module 一律 `gochen` 或 `gochen-*` 前缀，平级 dotless。
 
 ## 模块边界与依赖
 
 - 依赖硬规则：只允许 `gochen-runtime → gochen` 单向依赖，禁止任何反向引用；Core 任何文件（含测试与示例）禁止 import `gochen-runtime`；SQL、配置加载、net/http server、Host/DI 属于 Runtime。
-- Core 生产与测试代码均实现零外部第三方依赖；`go.mod` 无任何直接或间接第三方 require 项，且不应存在 `go.sum`。门禁校验：在本仓库执行 `go list -m all` 输出必须只有 `gochen` 自身。
+- Core 生产与测试代码均实现零外部第三方依赖；`go.mod` 无任何直接或间接第三方 require 项，且不应存在 `go.sum`。门禁校验：在本仓库执行 `GOWORK=off go list -m all` 输出必须只有 `gochen` 自身。
 - Runtime 第三方依赖仅限物理驱动所需（sqlite/yaml/uuid/testify）。
 - 开发态由 workspace 级 `go.work`（位于两仓库的父目录）组合；Runtime 发布态必须改为真实 Core 版本，不依赖本地 replace。
 
@@ -45,7 +45,7 @@
 
 ## 架构约定（Core 模块）
 
-权威设计记录见 `docs/architecture/framework-design.md`。本项目不保留门禁测试代码，以下约束由代码评审执行；**新增顶级包或跨能力域依赖边，必须先修订本矩阵并说明架构理由，再写代码**。
+架构说明见 [框架架构](docs/architecture/framework-design.md)。本项目不保留门禁测试代码，以下约束由代码评审执行；**新增顶级包或跨能力域依赖边，必须先修订本矩阵并说明架构理由，再写代码**。
 
 1. **顶级目录白名单**：`app auth cache clock codec contextx db domain errors eventing gen httpx internal messaging observe policy process testkit validate scripts examples`（`examples` 仅存放示例 `main` 包，生产代码禁止 import）。
 2. **能力域依赖矩阵**（生产代码只允许下列 gochen 内部依赖，标准库不受限）：
@@ -71,4 +71,4 @@
 
 3. **依赖地板**：`domain` 非测试代码只依赖标准库与 `gochen/errors`（及自身子树）；基础叶子（clock/codec/gen/validate）只依赖标准库、`gochen/errors` 与本包子树。
 4. **`app/security` 单向依赖 `auth`**：`app/security/*` 是应用层安全 PEP 装饰器，其职责即把 `auth` 的安全契约应用到 Application 编排中，故允许 `app/security → auth`。该边**严格单向**（`auth` 禁止 import 任何 `app` 包），且基础业务包 `app/crud` / `app/audited` / `app/eventsourced` 必须保持对 `auth` 零依赖。
-5. **安全能力落点**：装饰器只用于接口宽的 Application 层；Repository 层（`domain/crud.IRepository` 仅 4 个方法，其余能力靠类型断言探测）一律用**构造期显式选项**表达安全约束，禁止包装 `IRepository`——否则可选能力接口会丢失或被假冒。理由与实证 D3。
+5. **安全能力落点**：装饰器只用于接口宽的 Application 层；Repository 层（`domain/crud.IRepository` 仅 4 个方法，其余能力靠类型断言探测）一律用**构造期显式选项**表达安全约束，禁止包装 `IRepository`——否则可选能力接口会丢失或被假冒。具体契约见[分层授权](docs/architecture/layered-authz.md)。

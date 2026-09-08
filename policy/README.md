@@ -1,90 +1,41 @@
-# policy（通用弹性与控制策略）
+# policy：重试、限流与熔断
 
-`gochen/policy` 属于 Core 模块，提供与具体业务无关的**调用级弹性控制策略**，可无缝嵌入在 HTTP 中间件、消息处理器、后台任务或远程 RPC 调用中。
+`gochen/policy` 提供调用级控制策略，可用于 HTTP、消息处理、后台任务和外部服务调用。策略实例由组合根创建和注入。
 
----
+## 接口与配置
 
-## 1. 子包概览
+| 子包 | 使用入口 | 关键配置 |
+| --- | --- | --- |
+| `policy/retry` | `retry.Do(ctx, op, cfg)` / `DoWithInfo(ctx, op, cfg)` | MaxAttempts、InitialDelay、BackoffFactor、MaxDelay、JitterRatio、RetryIf |
+| `policy/ratelimit` | `ratelimit.New(cfg).Allow(key)` | RequestsPerSecond、BurstSize、WindowSize |
+| `policy/circuit` | `circuit.New(cfg).Call(fn)` | MaxFailures、ResetTimeout；可选 WindowSize、FailureRateThreshold、MinimumRequests |
 
-| 子包 | 策略类型 | 核心能力 |
-|---|---|---|
-| **`policy/retry`** | 指数退避重试 | 支持最大尝试次数、初始与最大延迟、退避乘数、随机扰动（Jitter 防惊群）以及自定义错误判定（`RetryIf` / `IRetryableError`） |
-| **`policy/ratelimit`** | 令牌桶限流 | 支持全局限流与多 Key 细粒度限流（如按用户/IP）、突发容量控制与空闲 Bucket 回收 |
-| **`policy/circuit`** | 熔断器 | 经典三态状态机（Closed / Open / Half-Open），基于连续失败阈值熔断、冷却超时后试探恢复 |
+三个 Config 都支持注入 `clock.IClock`，便于确定性测试。
 
----
+## 重试
 
-## 2. 使用示例
+`retry.Operation` 为 `func(context.Context) error`，配置是 `Do` 的第三个参数。MaxAttempts 包含首次执行。`DefaultConfig()` 为两次尝试、2ms 初始延迟、2 倍退避、1s 最大延迟，默认不加 jitter。
 
-### 2.1 指数退避重试 (`policy/retry`)
+`RetryIf` 可定制错误判断；默认不重试 context 取消 / 超时与明确不可恢复的框架业务错误。重试可能再次调用业务逻辑，操作须满足幂等或可重入要求。
 
-```go
-import (
-    "context"
-    "time"
+## 限流
 
-    "gochen/policy/retry"
-)
+`Limiter.Allow(key string)` 使用 key 区分令牌桶。同一固定 key 可作为全局配额，用户 / IP 等 key 可用于细分配额。RequestsPerSecond 非正时不限流；WindowSize 控制空闲 key 回收。
 
-cfg := retry.Config{
-    MaxAttempts:   3,
-    InitialDelay:  100 * time.Millisecond,
-    BackoffFactor: 2.0,
-    MaxDelay:      2 * time.Second,
-    JitterRatio:   0.2, // 20% 随机抖动防惊群
-}
+复用同一 limiter 实例才能累计配额，不应为每次请求创建实例。
 
-err := retry.Do(ctx, cfg, func(execCtx context.Context) error {
-    return remoteClient.Call(execCtx)
-})
+## 熔断
+
+`Breaker.Call(func() error)` 在 closed / open / half-open 三态间转换。默认按连续失败次数触发；WindowSize 大于零时按滑动窗口失败率判断，MinimumRequests 控制最少样本数。
+
+open 时拒绝调用，ResetTimeout 后允许半开试探。回调需要的 context 由业务闭包传递。复用 breaker 实例以保留失败统计。
+
+## 示例与集成
+
+在 Core 仓库执行：
+
+```bash
+GOWORK=off go run ./examples/task/policy
 ```
 
-### 2.2 令牌桶限流 (`policy/ratelimit`)
-
-```go
-import "gochen/policy/ratelimit"
-
-limiter := ratelimit.New(ratelimit.Config{
-    RequestsPerSecond: 100, // 每秒 100 令牌
-    BurstSize:         20,  // 允许突发 20 令牌
-})
-
-// 全局判定
-if !limiter.Allow() {
-    return errors.NewCode(errors.RateLimit, "too many requests")
-}
-
-// 基于业务 Key（如 IP / 用户 ID）判定
-if !limiter.AllowKey(clientIP) {
-    return errors.NewCode(errors.RateLimit, "rate limit exceeded for client")
-}
-```
-
-### 2.3 熔断保护 (`policy/circuit`)
-
-```go
-import (
-    "context"
-    "time"
-
-    "gochen/policy/circuit"
-)
-
-breaker := circuit.New(circuit.Config{
-    FailureThreshold: 5,               // 连续 5 次失败触发熔断
-    CoolingTimeout:   10 * time.Second, // 熔断后冷却 10 秒进入半开状态
-    SuccessThreshold: 2,               // 半开状态连续 2 次成功恢复为闭合
-})
-
-err := breaker.Execute(ctx, func(execCtx context.Context) error {
-    return callUnstableService(execCtx)
-})
-```
-
----
-
-## 3. 在后台任务与中间件中的集成
-
-- **后台监督任务**：可结合 `gochen/process/task.TaskSupervisor` 为后台常驻协程注入重试与熔断保护；
-- **HTTP 服务防护**：`gochen-runtime/http/middleware` 中的 `RateLimit` 与 `CircuitBreaker` 中间件均直接基于本包构建。
-
+源码见[任务与策略示例](../examples/task/policy/main.go)。后台生命周期由 `process/task.TaskSupervisor` 管理；Runtime `http/middleware` 的限流与熔断中间件复用这些策略。

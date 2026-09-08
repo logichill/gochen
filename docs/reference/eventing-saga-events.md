@@ -1,64 +1,26 @@
-# Saga 事件与生命周期
+# Saga 生命周期事件
 
-SagaOrchestrator 在执行过程中会通过 EventBus 发布携带 `saga_id` 的生命周期事件，便于观测与追踪。
-
-`Resume(ctx, saga, state)` 会先发布 `SagaResumed`，随后继续沿用和 `Execute(...)` 相同的步骤成功/失败、补偿完成、Saga 完成/失败事件语义。
-
-生命周期事件是观测信号，发布路径不参与 Saga 状态持久化事务；若业务需要把这些事件作为可靠业务事实，应在命令/步骤侧使用 Outbox 或事件存储承载。
-
-当补偿命令已经全部执行完成，但补偿后的状态持久化失败时，事件流仍保留 `SagaCompensationCompleted` 语义；此时持久化故障会通过返回错误和事件扩展字段暴露，而不会被误报成 `SagaFailed`。
+SagaOrchestrator 在配置 EventBus 时发布生命周期事件，事件聚合类型为 Saga。事件用于诊断、日志和告警，不与 Saga 状态保存共享事务；需要可靠业务事实时，由步骤侧使用 EventStore / Outbox。
 
 ## 事件类型
 
-- `SagaStarted`
-- `SagaResumed`
-- `SagaStepCompleted`
-- `SagaStepFailed`
-- `SagaCompensationStarted`
-- `SagaCompensationStepCompleted`
-- `SagaCompensationStepFailed`
-- `SagaCompensationCompleted`
-- `SagaCompleted`
-- `SagaFailed`
+| 事件 | 含义 |
+| --- | --- |
+| SagaStarted / SagaResumed | 开始执行 / 恢复执行 |
+| SagaStepCompleted / SagaStepFailed | 正向步骤成功 / 失败 |
+| SagaCompensationStarted | 开始补偿 |
+| SagaCompensationStepCompleted / SagaCompensationStepFailed | 单个补偿步骤成功 / 失败 |
+| SagaCompensationCompleted | 补偿命令执行完成 |
+| SagaCompleted | Saga 完成 |
+| SagaCompletionFailed | 全部步骤成功但 OnComplete 失败，等待恢复完成回调 |
+| SagaFailed | Saga 执行失败 |
 
-## Payload 结构
+枚举定义见 [process/saga/events.go](../../process/saga/events.go)。Resume 首先发布 SagaResumed，后续事件与正常执行路径采用相同语义。补偿命令已完成但状态保存失败时仍可出现 SagaCompensationCompleted；须结合返回错误和扩展字段判断持久化结果。
 
-```json
-{
-  "saga_id": "saga-123",
-  "step": "ReserveInventory",
-  "status": "SagaStepCompleted",
-  "error": "",
-  "timestamp": "2025-11-20T23:23:00Z",
-  "extra": {
-    "step": "ReserveInventory",
-    "duration_ms": 12
-  }
-}
-```
+## 载荷
 
-元数据（Metadata）也包含 `saga_id`、`status`、`step` 便于订阅端过滤。
+载荷包含 `saga_id`、`step`、`status`、`error`、`timestamp`、`extra`。Metadata 也包含 saga_id、status、step。extra 可携带步骤耗时等诊断信息，字段取决于事件阶段。
 
-## 订阅示例
+订阅时使用 `eventBus.SubscribeEvent(ctx, saga.EventSagaCompletionFailed.String(), handler)` 等标准 EventBus 入口，并保存返回的 UnsubscribeFunc，在模块停止时取消订阅。handler 使用 `bus.EventHandlerFunc` 或实现 IEventHandler，处理时遵循[事件总线并发语义](../../eventing/bus/README.md)。
 
-```go
-handler := bus.EventHandlerFunc(func(ctx context.Context, evt eventing.IEvent) error {
-	// 在这里接入项目侧监控、告警或日志记录。
-	return nil
-})
-
-unsub1, err := eventBus.SubscribeEvent(ctx, saga.EventSagaStepFailed.String(), handler)
-if err != nil {
-	// 推荐在装配期 fail-fast（返回错误 / panic / 退出进程）
-	return err
-}
-unsub2, err := eventBus.SubscribeEvent(ctx, saga.EventSagaFailed.String(), handler)
-if err != nil {
-	_ = unsub1(ctx)
-	return err
-}
-defer func() { _ = unsub2(ctx) }()
-defer func() { _ = unsub1(ctx) }()
-```
-
-可在监控/日志中订阅失败类事件，或用于驱动告警。
+执行与恢复规则见 [Saga](../../process/saga/README.md)。

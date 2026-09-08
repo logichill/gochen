@@ -1,115 +1,47 @@
-# Saga（Orchestrator）
+# Saga
 
-`process/saga` 提供基于“编排器（Orchestrator）”模型的 Saga 实现，用于组织跨多个步骤的长事务：按顺序执行步骤，失败时自动按逆序执行补偿。
+`process/saga` 按顺序执行步骤，失败时对已完成且配置了补偿的步骤逆序执行补偿命令。执行与补偿结果都来自同步 `command.ICommandExecutor`。
 
-## 顶层概念
+## 定义与装配
 
-| 概念 | 责任 | 典型使用者 |
-|---|---|---|
-| `ISaga` | 提供 `ID()` 与 `Steps()`；可选回调 `OnComplete/OnFailed`（可嵌入 `BaseSaga`） | 业务编排定义 |
-| `SagaStep` | 一个步骤：`Command(ctx)` + 可选 `Compensation(ctx)`，以及步骤级回调 | 业务编排定义 |
-| `SagaOrchestrator` | 执行引擎：`Execute/Resume`、错误处理、补偿、事件发布 | 应用装配/运行时 |
-| `ISagaStateStore` | 状态持久化（可选）：保存进度用于重启恢复 | 基础设施层 |
-| `lock.ILockProvider` | 可选并发控制：保证同一 `sagaID` 的 `Execute/Resume` 串行 | 基础设施层 |
+| 入口 | 职责 |
+| --- | --- |
+| `ISaga` | ID、Steps、OnComplete、OnFailed |
+| `BaseSaga` | 为可选业务回调提供空实现 |
+| `SagaStep` / `NewSagaStep` | 正向命令、可选补偿、步骤成功 / 失败回调 |
+| `SagaOrchestrator` | Execute / Resume、状态保存、补偿与事件发布 |
+| `ISagaStateStore` | 保存实例进度，内存实现为 `NewMemorySagaStateStore` |
+| `WithLockProvider` | 配置同一 saga ID 的互斥执行 |
 
-## 执行语义（你需要知道的最少规则）
-- **步骤是命令**：每个 `SagaStep` 通过 `command.ICommandExecutor` 执行一个命令；失败时执行补偿命令。
-- **步骤定义必须稳定**：`SagaStep` 必须非 nil、名称非空且在同一 Saga 内唯一，`Command` 生成函数不能为空。
-- **自动补偿**：任一步骤失败，编排器会对“已完成的步骤”按逆序执行补偿（若该步骤定义了补偿命令）。
-- **状态持久化（可选）**：配置 `ISagaStateStore` 后会在关键节点 `Save/Update`；持久化失败视为严重一致性错误，会直接中止返回。
-- **初始状态创建**：`ISagaStateStore.Save` 语义是“创建初始状态”；同一 `sagaID` 已存在时应返回冲突，而不是覆盖既有进度。
-- **恢复执行**：进程重启后可读取持久化状态并调用 `Resume(ctx, saga, state)` 从 `CurrentStep` 继续。
-- **恢复前校验**：`Resume` 会校验 `state.SagaID`、`CurrentStep` 与 `CompletedSteps` 必须和当前 Saga 定义一致；`compensating` 中间态不能直接恢复，需要人工或专门的补偿恢复流程处理。
-- **恢复事件语义**：`Resume` 除了先发布 `EventSagaResumed` 外，后续步骤成功/失败、补偿完成、Saga 完成/失败事件与正常 `Execute` 路径保持一致。
-- **可观测性**：若注入了 `eventing/bus.IEventBus`，编排器会发布 Saga 生命周期事件（`EventSagaStarted/.../EventSagaFailed`），事件载荷为 `eventing.Event`（`AggregateType="Saga"`）。
+`NewSagaOrchestrator(commandExecutor, eventBus, stateStore, eventIDGenerator, logger)` 返回实例和 error；ID generator 与 logger 必须非空，eventBus 与 stateStore 可选。执行前须配置能够处理步骤命令的 CommandExecutor。
 
-## 与 Command / Transport 语义的关系
-Saga 依赖的是“命令是否执行失败”的信号，而不是“命令是否已经进入传输层”。
+同一 Saga 内步骤名称非空且唯一，步骤和 Command 生成函数不能为 nil。命令 ID 由业务明确生成，恢复时步骤定义须保持一致。
 
-因此：
+## 执行与恢复
 
-- `process/saga` 只依赖 `command.ICommandExecutor`
-- 默认推荐直接装配 `command.CommandExecutor`
-- 异步 Transport（memory/redisstreams/natsjetstream 等）只能表达“消息已投递”，不应直接拿来驱动需要即时补偿判断的 Saga
+- Execute 创建初始状态；Store.Save 对重复 saga ID 返回冲突，不能覆盖已有进度。
+- 步骤成功后保存进度；持久化失败中止执行并返回错误。
+- 步骤失败触发已完成步骤的补偿；补偿无法撤回任意外部副作用，业务需定义对应动作。
+- Resume 校验 SagaID、CurrentStep 与 CompletedSteps，发布 SagaResumed 后继续正常生命周期。
+- compensating 中间态不能直接 Resume，须由业务安排补偿恢复。
+- 全部步骤成功但 OnComplete 失败时进入 pending_completion，并发布 SagaCompletionFailed；Resume 重试完成回调。
 
-如果业务确实需要异步长流程，请改用显式状态推进模型（例如 operation/workflow/result event），而不是假设 `Dispatch()` 能返回最终业务结果。
+步骤、补偿和 OnComplete 都应幂等。框架保存成功完成回调的标记以避免恢复路径重复执行，但回调与持久化之间仍需考虑故障。
 
-## 最小示例
+## 并发与消息语义
 
-定义一个 Saga（示例仅展示形状；命令 ID/聚合类型按你的项目约定生成）：
+默认不为同一 saga ID 加锁。并发或多实例调度须注入合适的 `lock.ILockProvider` 或由外部调度串行化；租约失效时中止后续推进。
 
-```go
-package orders
+异步 Transport 的 Dispatch 只表示投递，不能为 Saga 提供即时成败判断。需要异步多步骤过程时，由业务通过状态或结果事件驱动后续推进。
 
-import (
-	"context"
+EventBus 发布的 Saga 生命周期事件用于观测，不与状态持久化共享事务。可靠业务事件由步骤侧的事件 Store / Outbox 承载，详见 [Saga 事件](../../docs/reference/eventing-saga-events.md)。
 
-	"gochen/messaging/command"
-	"gochen/process/saga"
-	"gochen/gen"
-	"gochen/observe/logging"
-)
+## 示例
 
-type CreateOrderSaga struct {
-	saga.BaseSaga
-	OrderID string
-}
+在 `gochen-runtime` 仓库执行：
 
-func (s *CreateOrderSaga) ID() string { return s.OrderID }
-
-func (s *CreateOrderSaga) Steps() []*saga.SagaStep {
-	return []*saga.SagaStep{
-		saga.NewSagaStep("ReserveInventory", func(ctx context.Context) (*command.Command, error) {
-			return command.NewCommand("cmd-1", "ReserveInventory", s.OrderID, "Inventory", &ReserveInventory{OrderID: s.OrderID}), nil
-		}).WithCompensation(func(ctx context.Context) (*command.Command, error) {
-			return command.NewCommand("cmd-2", "ReleaseInventory", s.OrderID, "Inventory", &ReleaseInventory{OrderID: s.OrderID}), nil
-		}),
-		saga.NewSagaStep("CreateOrder", func(ctx context.Context) (*command.Command, error) {
-			return command.NewCommand("cmd-3", "CreateOrder", s.OrderID, "Order", &CreateOrder{OrderID: s.OrderID}), nil
-		}),
-	}
-}
+```bash
+GOWORK=off go run ./examples/process/saga/basic
 ```
 
-装配并执行：
-
-```go
-import (
-	"context"
-
-	"gochen/eventing/bus"
-	"gochen/messaging/command"
-	"gochen/process/saga"
-)
-
-func run(ctx context.Context, evtBus bus.IEventBus) error {
-	stateStore := saga.NewMemorySagaStateStore() // 生产环境可替换为持久化实现
-	cmdExecutor := command.NewCommandExecutor()
-
-	if err := cmdExecutor.RegisterHandler("ReserveInventory", reserveInventoryHandler); err != nil {
-		return err
-	}
-	if err := cmdExecutor.RegisterHandler("ReleaseInventory", releaseInventoryHandler); err != nil {
-		return err
-	}
-	if err := cmdExecutor.RegisterHandler("CreateOrder", createOrderHandler); err != nil {
-		return err
-	}
-
-	orchestrator, err := saga.NewSagaOrchestrator(
-		cmdExecutor,
-		evtBus,
-		stateStore,
-		gen.NewUUIDGenerator(),
-		logging.NewStdLogger("order-service"),
-	)
-	if err != nil {
-		return err
-	}
-	return orchestrator.Execute(ctx, &CreateOrderSaga{OrderID: "order-123"})
-}
-```
-
-## 并发与幂等
-- **同一 `sagaID` 必须串行**：默认不对同一 `sagaID` 做加锁；多实例/多协程调度同一 `sagaID` 时，建议注入 `lock.ILockProvider` 或在外部队列化。
-- **步骤/补偿必须幂等**：至少一次投递 + 恢复执行都会带来重复执行的可能性。
+Core 单元测试位于本包，可运行 `GOWORK=off go test -count=1 ./process/saga`。

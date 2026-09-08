@@ -1,123 +1,82 @@
-# app/：应用层模板（Application Layer）
+# app：应用层模板
 
-`app/` 位于 gochen 分层架构的“应用层”：**把领域对象与基础设施能力编排成可复用的用例模板**，并为组合根提供“少样板、可替换”的装配入口。
+`app` 将领域对象、仓储与事件能力编排为可复用用例。依赖由组合根注入，HTTP 路由注册由 `gochen-runtime/api/rest` 承担。
 
-## 1. 在分层中的位置
+## 模块
 
-```
-domain/（领域抽象与规则）
-   ↑ 依赖接口
-app/（用例编排/模板）
-   ↑ 依赖实现
-eventing/、messaging/、db/、cache/、httpx/（基础设施）
-```
+| 包 | 职责 |
+| --- | --- |
+| `app/crud` | CRUD、校验、查询分页、批量操作与 Hooks |
+| `app/audited` | 审计轨迹、软删除、恢复与已删除查询 |
+| `app/eventsourced` | 领域事件持久化、事件溯源仓储与命令服务 |
+| `app/query` | Filter、QuerySchema、分页、排序与字段选择协议 |
+| `app/operation` | 写操作结果、状态跟踪与 SSE |
+| `app/security` | Action / Scoped 应用层保护 |
 
-关键边界：
+基础 `crud`、`audited`、`eventsourced` 模板不依赖 `auth`。安全策略通过 Application 装饰器装配，详见[分层授权](../docs/architecture/layered-authz.md)。
 
-- `app/` 可以依赖 `domain/` 与基础设施模块；
-- `domain/` 不反向依赖 `app/` 与基础设施；
-- “创建哪些实现、注入哪些依赖”由业务组合根决定（不要在库层隐式创建）。
+## CRUD 装配
 
-## 2. 子模块导航（你该看哪个）
+`crud.NewApplication(repository, validator, config)` 返回 `(*Application[T, ID], error)`。仓储是必需依赖，validator 与 config 可为空；查询、批量等可选仓储能力在使用前探测。
 
-| 子模块             | 解决的问题                                      | 推荐入口                                  |
-| ------------------ | ----------------------------------------------- | ----------------------------------------- |
-| `app/crud`         | 通用 CRUD 应用服务（校验/查询分页/批量/hooks）  | `crud.NewApplication`                     |
-| `app/audited`      | CRUD + 软删/审计/恢复能力组合                   | `audited.NewApplication`                  |
-| `app/eventsourced` | 事件溯源应用模板（DomainEventStore/History 等） | 示例优先：`examples/domain/eventsourced*` |
-
-HTTP API 构建器（接口适配层）已从 `app/api` 迁移到根级 `api/rest`，见：`api/rest/README.md`。
-
-## 3. 典型装配链路（保持链路不断）
-
-> 业务侧常见约束是：`application -> service -> repo -> entity` 链路不能断。gochen 的模板也按此路径组织。
-
-### 3.1 CRUD（最小闭环）
-
-```
-crud.IRepository[T,int64]
-   -> crud.IApplication[T,int64]  （用例模板）
-      -> rest.Register(...)     （HTTP 路由）
-```
-
-### 3.2 audited CRUD（额外依赖与约束）
-
-```
-audited entity（实现 audited.IAuditedEntity[int64]）
-   + auditStore（audited.IAuditStore，必需）
-   + repo 支持事务运行器（app/crud.ITransactional，必需，通过 `WithinTx` 保证业务写+审计写同事务提交）
-   + operator（由 API 从请求中提取并注入 ctx，必需）
-      -> audited.NewApplication(...)
-         -> rest.Register(...) 自动启用 audited 端点（fail-fast 校验）
-```
-
-### 3.3 事件溯源（核心领域）
-
-```
-domain/eventsourced 聚合（聚合根 + 领域事件）
-   -> app/eventsourced.DomainEventStore（依赖 eventing/store + snapshot + outbox + bus）
-      -> app/eventsourced.EventSourcedRepository（默认仓储实现）
-         -> app/eventsourced.EventSourcedService（命令执行模板）
-         -> projection/outbox/subscription（读模型与可靠发布）
-```
-
-## 4. 最小示例（只展示“入口与约束”）
-
-### 4.1 CRUD application（创建应用服务）
+以下函数展示给已有仓储配置 Hook 的完整写法：
 
 ```go
-repo := buildRepo() // crud.IRepository[*User,int64]
-validator := buildValidator()
+package example
 
-app, err := crud.NewApplication(repo, validator, nil)
-if err != nil {
-	// fail-fast：repository 为空等装配错误
-	return err
+import (
+	"context"
+	"strings"
+
+	"gochen/app/crud"
+	domcrud "gochen/domain/crud"
+	"gochen/errors"
+)
+
+type User struct {
+	domcrud.Entity[int64]
+	Name string
 }
-_ = app // 交给上层（例如 runtime/api/rest 的 rest.Register）做路由注册
+
+func NewUsers(repo domcrud.IRepository[*User, int64]) (*crud.Application[*User, int64], error) {
+	app, err := crud.NewApplication(repo, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	app.SetHooks(&crud.Hooks[*User, int64]{
+		BeforeCreate: func(ctx context.Context, user *User) error {
+			if strings.TrimSpace(user.Name) == "" {
+				return errors.NewCode(errors.Validation, "user name is required")
+			}
+			return nil
+		},
+	})
+	return app, nil
+}
 ```
 
-### 4.2 CRUD Hooks（推荐扩展点）
+## Hooks 与事务
 
-CRUD 写入扩展统一通过 `Hooks` 显式注入，不通过嵌入 `Application` 后覆写 `BeforeCreate` / `AfterCreate` 等方法。
+写入扩展统一通过 `SetHooks`、Runtime `rest.WithHooks` 或 builder 的 `Hooks` 注入。
 
-```go
-app, err := crud.NewApplication(userRepo, validator, nil)
-if err != nil {
-	return err
-}
-app.SetHooks(&crud.Hooks[*User, int64]{
-	BeforeCreate: func(ctx context.Context, user *User) error {
-		if strings.TrimSpace(user.Name) == "" {
-			return errors.NewCode(errors.Validation, "user name is required")
-		}
-		return nil
-	},
-})
-```
+| 阶段 | 执行位置 | 失败语义 |
+| --- | --- | --- |
+| `Before*` | 校验和写入之前 | 阻断后续写入 |
+| `After*` | 仓储写入后、事务提交前 | 在事务边界内回滚 |
+| `PostCommit*` | 事务提交之后 | 不回滚已提交写入 |
 
-阶段语义固定为：`Before*` 写入前执行，失败会阻断写入；`After*` 写入后、事务提交前执行，失败会回滚；`PostCommit*` 事务提交后执行，失败不回滚已提交写入。未配置的 hook 为 no-op。
+`PostCommit*` 要求仓储实现 `app/crud.ITransactional`。通知、外部同步等副作用应在提交后执行；需要回滚保证的 Hook 应使用事务仓储。
 
-### 4.3 audited application（必须提供 auditStore）
+## 审计型 CRUD
 
-```go
-repo := buildRepo()        // crud.IRepository[*User,int64]，且实现 app/crud.ITransactional（WithinTx）
-auditStore := buildStore() // audited.IAuditStore（必需）
+`audited.NewApplication(repo, validator, config, auditStore)` 在构造期要求实体实现 `domain/audited.IAuditedEntity`，仓储支持事务、包含软删读取与已删除列表，auditStore 非空。
 
-auditedApp, err := audited.NewApplication(repo, validator, nil, auditStore)
-if err != nil {
-	// fail-fast：类型不是 audited / auditStore 为空等
-}
-_ = auditedApp
-```
+业务写与审计写必须同库同事务。调用方根据已认证身份通过 `contextx` 注入 operator；缺失时在持久化前失败。REST 审计端点还需配置 `RouteConfig.Audit.OperatorExtractor`。审计时间使用真实墙钟。
 
-> 路由层会要求配置 `RouteConfig.Audit.OperatorExtractor`（写操作必须有 operator），详见 `api/rest/README.md`。
+## 事件溯源与写操作协议
 
-## 5. 进一步阅读
+事件溯源按 `DomainEventStore → EventSourcedRepository → EventSourcedService` 装配，详见[事件溯源速查](../docs/reference/ddd-eventsourcing-quick-reference.md)。
 
-- REST CRUD 路由注册：`api/rest/README.md`
-- 生命周期与组合根装配：`host/README.md`
-- 整体边界与装配说明：`docs/architecture/framework-design.md`
-- 下游项目接入与治理指南：`docs/guides/downstream-guide.md`
-- 事件溯源快速参考：`docs/reference/ddd-eventsourcing-quick-reference.md`
-- 事件溯源示例：`examples/domain/eventsourced`、`examples/domain/eventsourced_stringid`
+普通写入可直接返回业务结果；需要统一信封或延迟收敛跟踪时使用 [Operation](operation/README.md)。多步骤补偿与流程推进见 [process](../process/README.md)。
+
+完整 CRUD、审计与事件溯源示例位于 `gochen-runtime` 仓库 `examples/domain/`。

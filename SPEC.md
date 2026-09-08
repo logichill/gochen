@@ -26,7 +26,7 @@
    - **CRUD**: `Create`/`Add`, `Get`/`Find`/`List`, `Update`, `Delete`。
    - **布尔值**: 必须使用 `Is`, `Has`, `Can`, `Should` 前缀。
    - **Getter/Setter**: Getter 直接使用字段名（如 `Name()`），Setter 使用 `Set` 前缀（如 `SetName()`）。
-   - **例外（框架层基础接口）**：为避免歧义与与业务方法冲突，`gochen/domain` 等框架层基础接口统一采用 `GetXxx/SetXxx` 风格（如 `GetID()`、`GetCreatedAt()`）。
+   - **例外（框架层基础接口）**：为避免歧义与业务方法冲突，`gochen/domain` 等框架层基础接口统一采用 `GetXxx/SetXxx` 风格（如 `GetID()`、`GetCreatedAt()`）。
 
 4. **变量与常量**
 
@@ -91,12 +91,12 @@
 
 ## 4. 顶级包组织 (Package Organization)
 
-本节约束由 `AGENTS.md`《架构约定》承载、通过代码评审执行（本项目不保留门禁测试代码），权威设计记录见 `../docs/architecture/framework-design.md`。
+本节约束由 [AGENTS.md](AGENTS.md#架构约定core-模块) 承载、通过代码评审执行（本项目不保留门禁测试代码），架构说明见[框架架构](docs/architecture/framework-design.md)。
 
 1. **按能力内聚，不设包数量 KPI**：顶级包必须表达稳定能力，如 `clock`、`codec`、`eventing`；禁止仅为减少目录数量而建立 `common`、`foundation`、`data`、`util` 等收纳包。
 2. **依赖图不是伪造的线性阶梯**：`app/eventsourced` 是 eventing/messaging 之上的应用编排；eventing/process 也存在经过审计的协作边。生产代码必须满足 `AGENTS.md`《架构约定》中的显式允许矩阵，新增依赖边必须同步说明架构理由。
-3. **基础叶子隔离**：`clock`、`codec`、`gen`、`validate` 只允许依赖标准库、`gochen/errors`、必要的 uuid 以及本包子树；基础叶子之间禁止互相 import，协作使用最小结构接口。
+3. **基础叶子隔离**：`clock`、`codec`、`gen`、`validate` 只允许依赖标准库、`gochen/errors` 与本包子树；基础叶子之间禁止互相 import，协作使用最小结构接口。
 4. **领域地板**：`domain` 非测试代码只允许依赖标准库、`gochen/errors` 与自身子树。
-5. **模块边界**：Core 禁止依赖 `runtime`；SQL、配置加载、具体 net/http server 与 Host/DI 运行时装配属于 Runtime。
+5. **模块边界**：Core 禁止依赖 `gochen-runtime` 或 `gochen-contrib`；SQL、配置加载、具体 net/http server 与 Host/DI 运行时装配属于 Runtime。
 6. **内存能力属于 Core**：不引入物理驱动且用于无外部环境测试的内存实现（如 cache、MemoryEventStore、testkit）可以留在 Core。
 7. **发布边界**：开发态可用 `go.work` 与本地 replace；发布态必须使用真实模块版本，并在无 workspace、无本地 replace 的外部消费者中验证。

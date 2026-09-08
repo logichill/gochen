@@ -1,233 +1,84 @@
-# DB Schema Migration Guide（gochen）
+# 数据库 Schema 与迁移
 
-本文档用于补齐 gochen 文档中提到的“SQL schema / 迁移实践”的最小可用参考。
+Core `db` 定义数据库、方言和 ORM 契约。迁移执行器、schema 分析和 SQL 持久化位于 `gochen-runtime`；GORM 模型草稿和迁移 CLI 位于 `gochen-contrib`。
 
-> 注意：gochen 侧提供的是接口与参考实现；不同业务方会根据数据库方言、索引策略、分表分库等做调整。本文只覆盖与当前仓库实现强相关的表结构要点。
+## 迁移执行
 
----
+Runtime `db/migrate` 提供 FileSource / embed FS Source 与 Runner：
 
-## 0. Migration Runner 与 Schema Draft
+- 文件格式为 `000001.schema.name.up.sql` / `.down.sql`，type 可为 schema、seed、demo；短格式 `000001_name.up.sql` 默认属于 schema。
+- `NewFileSource` / `NewFS` 创建 source，`NewRunner(database, source, opts...)` 装配运行器。
+- Runner 支持 Up、Down、Steps、Migrate、Status、Version、Force，按 `WithMigrationType` 选择迁移链。
+- 状态表默认 `schema_migrations`，以 migration_type 为主键分别记录各链版本与 dirty 状态。
+- 单个 migration 文件默认在事务中执行；`WithoutTransaction` 用于不能处于事务中的语句，失败仍由 dirty 状态表达。
+- 同一状态表中的保留锁行 `__gochen_migration_lock` 承载租约；`WithLockTimeout` 控制等待，`WithLockStaleAfter` 控制失效锁回收，持锁期间续租。
+- `Runner.WithLock` 可复用迁移锁执行自定义逻辑，回调中重复调用同一 Runner 的迁移或状态方法会返回冲突。
 
-`db/migrate` 提供最小 SQL migration runner：
+SQL 分句支持常规 DDL / DML、引号、注释和 PostgreSQL dollar-quoted block。客户端命令如 `\copy` 不属于 Runner 执行范围。迁移状态表必须符合本实现的数据结构。
 
-- 文件命名：推荐显式 type 格式 `000001.schema.name.up.sql` / `000001.seed.name.up.sql` / `000001.demo.name.up.sql`；兼容短格式 `000001_name.up.sql` / `000001_name.down.sql`，短格式默认归属 `schema` type。
-- source：`migrate.NewFileSource(dir)` 或 `migrate.NewFS(embedFS, dir)`。
-- runner：`migrate.NewRunner(database, source)`，支持 `Up`、`Down`、`Steps`、`Migrate`、`Status`、`Version`、`Force`。
-- 状态表默认 `schema_migrations`。
-- 并发保护：`runner.WithLock(ctx, fn)` 使用 `schema_migrations` 中的保留锁行提供数据库级互斥，不再依赖独立锁表；进程异常退出后，超过 `migrate.WithLockStaleAfter(...)`（默认 15s）的 stale lock 会自动回收。保留 migration type `__gochen_migration_lock` 仅供锁行使用；`WithLock` 回调期间若再次调用同一个 `Runner` 的状态/迁移方法，会快速返回冲突错误而不是死锁。
-- 事务行为：默认按单个 migration 文件包裹事务；遇到不允许在事务内执行的方言语句时，可通过 `migrate.WithoutTransaction()` 禁用事务包装，由 dirty 状态记录失败版本。
-- 状态表按 migration type 分别记录版本，默认 type 为 `schema`；可用 `migrate.WithMigrationType("seed")` / `migrate.WithMigrationType("demo")` 分开管理 seed 数据、demo 数据等迁移版本。Runner 只执行与自身 type 匹配的 migration 文件。
-- gochen migration 不接管旧 `golang-migrate` 状态表；若目标库已有旧格式 `schema_migrations` / `demo_migrations`，需在切换前人工清理或重建目标库。
+## Schema 草稿
 
-`db/schema` 提供最小 schema AST、introspect、diff、render：
+Runtime `db/schema` 提供 Schema / Table / Column / Index AST，introspect、diff 与 render：
 
-- AST 当前只覆盖 `Schema/Table/Column/Index`。
-- `Schema.Warnings` 会携带 introspect 过程中发现的覆盖范围限制或被跳过的复杂结构提示。
-- `diff.Between(current, desired)` 只生成新增表、列、索引这类 additive 变更。
-- `diff.DetectDrifts(current, desired)` 会报告同名列/索引的类型、nullable、default、primary key、auto increment、unique、索引列等差异，也会报告当前库存在但 desired 未声明的表、列、索引；比较 default 时会对常见字符串字面量、Postgres 顶层 `::type` cast 与自增列底层 `nextval(...)` 做归一化，减少伪 drift；仍不会自动生成修改/删除 SQL。
-- `render.RenderSQL` 渲染 up SQL；`render.RenderDownSQL` 渲染反向 down 草稿。
-- MySQL 的非主键 `AUTO_INCREMENT` 列不会自动生成 SQL；当前 AST 不表达“列已是 key 但非主键”的安全前提，遇到这类字段会返回错误，需人工设计迁移步骤。
-- render 只接受安全数据库标识符（字母/数字/下划线和点分段），GORM tag 或手工 AST 中的复杂表达式不会被当作表/列/索引名渲染。
+- `diff.Between` 生成新增表、列、索引的操作；`DetectDrifts` 报告类型、nullable、默认值、主键、自增与索引差异及额外对象。
+- renderer 输出 up SQL 和反向 down 草稿，不自动执行修改或删除对象。
+- AST 不表达完整外键、check、表达式索引等结构；无法表示的对象应体现在 Warnings 中，不能视为已完整对齐。
+- 标识符仅接受安全名称；复杂 SQL 表达式不能充当表、列或索引名。
+- SQLite 已有表新增无默认值的 NOT NULL 列会被拒绝；MySQL 非主键 AUTO_INCREMENT 列不能由当前 AST 自动安全渲染。这类迁移须显式设计。
 
-下游 `gochen-contrib/data/orm/gorm` 的 migration draft 能把 GORM model 转成 `db/schema` AST，并串联：
+Contrib `data/orm/gorm.GenerateMigrationDraft` 从模型生成 AST 并比较当前数据库，`WriteMigrationDraft` 写入 SQL 文件。复杂场景可用带 options 的入口注入 current schema / introspector。
 
-```go
-draft, err := gormorm.GenerateMigrationDraft(ctx, database, &User{})
-files, err := gormorm.WriteMigrationDraft("db/migrate", 1, "create users", draft)
-```
+执行前检查 Warnings 和 SQL。生成的 down 草稿含 `ManualReviewGuardStatement`，Runner 在设置 dirty 前识别并拒绝该 guard；人工审核后才可解除。数据回填、收紧约束和破坏性 DDL 的影响由具体迁移方案承担。
 
-复杂项目可用 `GenerateMigrationDraftWithOptions` 注入已有 current schema 或自定义 introspector，用于覆盖项目内更完整的外键、约束、索引策略。
+## 事件存储
 
-生成的 down SQL 是反向草稿，可能包含 `DROP TABLE`、`DROP COLUMN`、`DROP INDEX`。down 文件会带 `migrate.ManualReviewGuardStatement` 保护语句，runner 在置 dirty 前识别该 guard 并拒绝执行；人工 review 后才可删除 guard。
+SQL 实现在 Runtime `eventing/store/sqlstore`。以 event_store 为例：
 
-MySQL/Postgres introspect 当前只覆盖基础表、列和“简单列索引”。外键、check、表达式索引、partial index、复杂约束不纳入 AST；SQLite partial/expression index 会跳过并写入 warning；MySQL prefix/descending 索引、Postgres INCLUDE/descending/复杂 key definition 也会跳过并写入 warning，而不是静默降级成普通列列表。Postgres 会通过 `pg_index.indexprs IS NULL` 排除表达式索引，GORM adapter 遇到表达式索引会跳过渲染并写入 warning。生成 draft 后必须 review `draft.Warnings` / 文件注释。
+| 字段 / 约束 | 语义 |
+| --- | --- |
+| `id` | string 事件 ID，唯一 |
+| `type` | 稳定事件类型 |
+| `aggregate_type` / `aggregate_id` | 共同标识聚合，ID 列类型须与 codec 一致 |
+| `version` | 聚合内版本；对 aggregate type + ID + version 建唯一约束 |
+| `schema_version` | payload 结构版本 |
+| `timestamp` | 事件时间 |
+| `payload` / `metadata` | 序列化事件载荷与元数据 |
+| `global_position` | 可选全局递增位置 |
 
-SQL splitter 支持常规 DDL/DML、注释、单/双引号、反引号和 PostgreSQL dollar-quoted block；更复杂的客户端命令（如 `\copy`）仍不属于 runner 执行范围。
+建有 global_position 时，还必须建立单列唯一索引及 `event_store_positions` 分配器表，并配置匹配事件表名的 store_name / next_position 行。位置在同一事务内分配，读取以连续高水位控制范围；缺少必需 schema 时写入失败，不在运行期补 DDL。
 
-SQLite 对已有表新增 `NOT NULL` 且无默认值的列时，`render.RenderSQL` 会直接返回错误，不生成草稿 SQL；需要补默认值、先新增 nullable 列后回填并收紧约束，或人工编写迁移。其他方言下生成的 draft 仍需人工 review 数据兼容性。
+不使用 global_position 时，全局扫描采用 timestamp / ID 顺序。按事件类型、聚合类型与时间过滤的读取可建立对应复合索引，结合数据库执行计划选择。
 
----
+int64、string 或强类型聚合 ID 须在 EventStore、Outbox、相关快照与 codec 中一致。使用 string ID 时，应选择匹配的文本列与带 codec 的 SQL store 构造入口。
 
-## 1. Event Store 表（`eventing/store/sql`）
+## Outbox
 
-gochen 的 `eventing/store/sql` 以如下字段为核心（以 `event_store` 为例）：
+SQL 实现在 Runtime `eventing/outbox/sqlstore`，默认表为 event_outbox：
 
-- `id`：事件唯一 ID（gochen 事件模型里是 string，因此推荐 `TEXT`/`VARCHAR`）。
-- `type`：事件类型（`event.GetType()`）。
-- `aggregate_id`：聚合 ID（类型随你的 ID 策略变化）。
-- `aggregate_type`：聚合类型（string）。
-- `version`：聚合内版本号（乐观锁关键字段）。
-- `schema_version`：事件 payload schema 版本（用于 upcast / 滚动升级）。
-- `global_position`：可选的全局递增位置；一旦建列，迁移必须同时创建唯一索引与 `event_store_positions` 分配器行，SQL store 写路径会校验该 schema 能力，缺失时 fail-fast，但不会在运行期自动执行 DDL。写入时在同一事务内从分配器表预留连续位置；订阅读取仍采用 high-water-mark 兜底，仅读到首个连续区段末位置（gap 之前）。
-- `timestamp`：事件时间戳。
-- `payload`：事件载荷 JSON（推荐 JSON 或 TEXT）。
-- `metadata`：事件元数据 JSON（推荐 JSON 或 TEXT）。
+- 标识与内容：id、aggregate_id、aggregate_type、event_id、event_type、event_data，event_id 唯一。
+- 状态与重试：status、retry_count、last_error、next_retry_at。
+- 占用与时间：claim_token、lease_until、created_at、published_at。
 
-聚合身份由 `(aggregate_type, aggregate_id)` 共同定义；不同聚合类型可以复用同一个 `aggregate_id`，版本号也分别在各自聚合内递增。
+为 pending、失败重试、租约到期 claim 及聚合查询设置索引。DLQ、指标和清理组件须与仓储使用同一组表名。状态、claim 与重投规则见 [Outbox](../../eventing/outbox/README.md)。
 
-### 1.1 SQLite（示例）
+事件表与 Outbox 的可执行 SQLite DDL 集中在 `gochen-runtime` 仓库 `examples/infra/outbox/sql/internal/schema/schema.go`；生产迁移按目标数据库方言和 ID 类型编写。
 
-```sql
-CREATE TABLE IF NOT EXISTS event_store (
-  id             TEXT    PRIMARY KEY,
-  type           TEXT    NOT NULL,
-  aggregate_id   INTEGER NOT NULL,   -- 若使用 string/UUID，改为 TEXT
-  aggregate_type TEXT    NOT NULL,
-  version        INTEGER NOT NULL,
-  schema_version INTEGER NOT NULL,
-  global_position INTEGER NULL,
-  timestamp      DATETIME NOT NULL,
-  payload        TEXT    NOT NULL,
-  metadata       TEXT    NOT NULL,
-  UNIQUE(aggregate_id, aggregate_type, version)
-);
+## 审计表
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_event_store_global_position_unique
-  ON event_store(global_position);
+Runtime `db/orm/repo.NewAuditStore(orm, table, idGenerator)` 要求已存在的审计表和非空 int64 ID generator。字段为 id、resource_kind、entity_id、operation、operator、timestamp、changes、metadata。
 
--- 事件流扫描索引建议：
--- - 投影/订阅的 StreamAggregate 按 timestamp,id 稳定排序，并用 type/aggregate_type/timestamp 做过滤；
--- - 无 global_position 时走 (timestamp,id) 排序，带过滤的流走对应复合索引；
--- - 启用 global_position 时，游标分页由上面的唯一索引支撑，但 type/aggregate_type 过滤仍可受益于复合索引；
--- - 生产库应结合方言与数据分布验证执行计划。
-CREATE INDEX IF NOT EXISTS idx_event_store_stream_time
-  ON event_store(timestamp, id);
-CREATE INDEX IF NOT EXISTS idx_event_store_stream_type
-  ON event_store(type, timestamp, id);
-CREATE INDEX IF NOT EXISTS idx_event_store_stream_aggregate_type
-  ON event_store(aggregate_type, timestamp, id);
+resource_kind 与 entity_id 共同定位业务资源，不能仅按实体 ID 混查不同类型。构造时检查 resource_kind 列；审计 ID 由生成器提供，entity_id 以字符串存储。审计写与业务写使用同一个 ORM 事务 session。
 
-CREATE TABLE IF NOT EXISTS event_store_positions (
-  store_name    TEXT PRIMARY KEY,
-  next_position INTEGER NOT NULL CHECK (next_position > 0)
-);
+## 投影检查点
 
-INSERT OR IGNORE INTO event_store_positions (store_name, next_position)
-  VALUES ('event_store', 1);
-```
+Runtime `eventing/projection/sqlstore` 的默认表为 projection_checkpoints：
 
-`store_name` 使用 SQL store 配置的事件表名；若配置为 `main.event_store` 这类限定名，分配器行也应使用同一个值。不需要全局流顺序时可以不建 `global_position` 列及 `event_store_positions`。stream horizon 冷启动会扫描唯一索引确认首个 gap；后续过期或本实例 append 失效时会保留上次单调 horizon，只从该位置向后增量检查。
+| 字段 | 语义 |
+| --- | --- |
+| `projection_name` | 主键，投影名称 |
+| `position` | 处理位置 |
+| `last_event_id` | 恢复游标 |
+| `last_event_time` | 最近事件时间 |
+| `updated_at` | 检查点保存时间 |
 
-### 1.2 从 `int64` 迁移到 `string/UUID`（要点）
-
-当你将事件存储从 `ID=int64` 迁移为 `ID=string`（或 UUID）时，最关键的是：
-
-- 将 `event_store.aggregate_id` 从 `INTEGER` 改为 `TEXT`（并同步调整相关索引/唯一约束）。
-- 在装配时显式传入 `codec.ICodec[string, any]`，并使用 `sqlstore.NewSQLEventStoreWithCodec[string](...)` 构造（避免不同 driver 的 Scan/Bind 返回类型差异）。
-
-> 提示：如果你的历史数据已经以整数存储，且新系统希望以 string/UUID 对外暴露，可以选择在业务侧做“映射层”（例如对外 string，对内仍 int64），从而避免数据库级迁移。
-
----
-
-## 2. Outbox 表（`eventing/outbox`）
-
-Outbox 的 SQL 仓储位于 `eventing/outbox/sqlstore`，默认使用 `event_outbox` 表（字段含义见 `eventing/outbox/sqlstore/sql_repository.go` 与测试用例）。
-
-### 2.1 SQLite（示例）
-
-```sql
-CREATE TABLE IF NOT EXISTS event_outbox (
-  id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  aggregate_id INTEGER NOT NULL,     -- 若使用 string/UUID，改为 TEXT
-  aggregate_type TEXT NOT NULL,
-  event_id     TEXT NOT NULL UNIQUE,
-  event_type   TEXT NOT NULL,
-  event_data   TEXT NOT NULL,        -- JSON string
-  status       TEXT NOT NULL DEFAULT 'pending',
-  claim_token  TEXT NOT NULL DEFAULT '',
-  created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  published_at DATETIME NULL,
-  retry_count  INTEGER NOT NULL DEFAULT 0,
-  last_error   TEXT NULL,
-  lease_until  DATETIME NULL,
-  next_retry_at DATETIME NULL
-);
-
--- 索引建议：
--- - 典型 Outbox 扫描会按 status 过滤，并按 next_retry_at/lease_until/created_at 做“可发布/可重新 claim”的时间窗口筛选；
--- - Claim 查询按 created_at, id 稳定排序；生产库应结合方言和数据分布验证执行计划。
-CREATE INDEX IF NOT EXISTS idx_event_outbox_pending_claim
-  ON event_outbox(status, created_at, id);
-CREATE INDEX IF NOT EXISTS idx_event_outbox_retry_claim
-  ON event_outbox(status, next_retry_at, created_at, id);
-CREATE INDEX IF NOT EXISTS idx_event_outbox_lease_claim
-  ON event_outbox(status, lease_until, created_at, id);
-CREATE INDEX IF NOT EXISTS idx_event_outbox_aggregate
-  ON event_outbox(aggregate_id, aggregate_type);
-```
-
-### 2.2 从 `int64` 迁移到 `string/UUID`（要点）
-
-与 Event Store 一致：将 `event_outbox.aggregate_id` 从 `INTEGER` 改为 `TEXT`，并在业务侧通过 `eventing/outbox/sqlstore` 为 Outbox 仓储提供对应 ID 形态的实现/构造方式（默认构造函数以 `int64` 为主）。
-
----
-
-## 3. Audit 表（`db/orm/repo.AuditStore`）
-
-`db/orm/repo.NewAuditStore(...)` 会在构造期检查 audit 表是否包含 `resource_kind` 列；缺失时直接返回 `InvalidInput`，不会在运行期自动加列。升级前必须先完成表结构迁移。
-
-核心字段：
-
-- `id`：审计记录 ID；构造 `db/orm/repo.AuditStore` 时必须显式传入 `gen.IGenerator[int64]`，框架不再读取包级默认生成器。
-- `resource_kind`：资源类型隔离字段；共享 audit 表按该列区分不同实体/资源。
-- `entity_id`：被审计实体 ID，统一按 string 存储。
-- `operation`：操作类型（create/update/delete/restore/purge 等）。
-- `operator`：操作者。
-- `timestamp`：审计时间。
-- `changes` / `metadata`：JSON 文本。
-
-### 3.1 SQLite（新增表示例）
-
-```sql
-CREATE TABLE IF NOT EXISTS audit_records (
-  id            INTEGER PRIMARY KEY,
-  resource_kind TEXT NOT NULL DEFAULT '',
-  entity_id     TEXT NOT NULL,
-  operation     TEXT NOT NULL,
-  operator      TEXT NOT NULL,
-  timestamp     DATETIME NOT NULL,
-  changes       TEXT NOT NULL DEFAULT '{}',
-  metadata      TEXT NOT NULL DEFAULT '{}'
-);
-
-CREATE INDEX IF NOT EXISTS idx_audit_records_resource_entity_time
-  ON audit_records(resource_kind, entity_id, timestamp DESC, id DESC);
-```
-
-### 3.2 旧表补列与回填
-
-旧表已有审计数据时，先补 nullable/default 列，再按业务资源回填：
-
-```sql
-ALTER TABLE audit_records
-  ADD COLUMN resource_kind TEXT NOT NULL DEFAULT '';
-
--- 若该 audit 表只承载一种实体，直接回填为固定资源类型。
-UPDATE audit_records
-SET resource_kind = 'User'
-WHERE resource_kind = '';
-
-CREATE INDEX IF NOT EXISTS idx_audit_records_resource_entity_time
-  ON audit_records(resource_kind, entity_id, timestamp DESC, id DESC);
-```
-
-若同一旧 audit 表混放多个资源类型，必须先用业务可验证规则把历史行拆分/回填到正确 `resource_kind`；不能可靠判定的历史数据应人工处理后再升级。升级后新写入会从 audited application 的 `ResourceKind()` / audit context 写入该字段，读路径也会按当前资源类型过滤，避免不同资源共用 `entity_id` 时串读。
-
----
-
-## 4. Projection Checkpoints 表（`eventing/projection`）
-
-投影检查点表默认名为 `projection_checkpoints`，推荐在装配期创建一个 `checkpointStore`，并调用 `checkpointStore.CreateTable(ctx)` 执行建表（该方法会按 dialect 选择兼容 DDL）。
-
-### 4.1 SQLite（示例）
-
-```sql
-CREATE TABLE IF NOT EXISTS projection_checkpoints (
-  projection_name TEXT PRIMARY KEY,
-  position INTEGER NOT NULL DEFAULT 0,
-  last_event_id TEXT NOT NULL DEFAULT '',
-  last_event_time DATETIME NULL,
-  updated_at DATETIME NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_projection_checkpoints_updated_at ON projection_checkpoints(updated_at);
-```
+SQLCheckpointStore 提供显式 CreateTable 入口；生产环境也可由迁移管理。Save 需要事务 session 并只推进位置，重建使用 ForceSave 对齐结果；投影写入须共享该事务。装配示例位于 `gochen-runtime` 仓库 `examples/infra/projection/sql_checkpoint`。

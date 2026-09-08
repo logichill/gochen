@@ -1,101 +1,45 @@
-# eventing/projection：投影与 ProjectionManager（CQRS 读模型）
+# Projection：读模型与检查点
 
-投影（Projection）负责把事件流转换为读模型；`ProjectionManager` 负责投影的运行、错误处理、重放与检查点（checkpoint）。
+`IProjection[ID]` 定义 Name、Handle、SupportedEventTypes、Rebuild 与 Status。`ProjectionManager` 负责订阅、处理、恢复、重建和状态记录。
 
-## 1. 顶层概念
+## 装配
 
-| 概念 | 对应类型 | 作用 |
-|---|---|---|
-| 投影 | `projection.IProjection[ID]` | 定义“如何处理事件/如何重建读模型” |
-| 投影管理器 | `projection.ProjectionManager` | 注册投影、订阅事件、分发处理、管理状态 |
-| 检查点 | `projection.ICheckpointStore` | 记录“处理到哪里”，用于恢复与追赶 |
-| 配置 | `projection.ProjectionConfig` | 重试、死信、检查点保存策略、游标缺失策略 |
+`NewProjectionManager[ID](eventStore, eventBus, registry, upgraders)` 与带 config 的构造函数均返回 manager 和 error。Registry / UpgraderRegistry 显式注入；投影的类型注册在启动前完成。
 
-## 2. 运行模型（你需要掌握的语义）
+- `RegisterProjection` / `RegisterProjectionWithContext` 注册投影。
+- `StartProjection` / `StopProjection` 控制运行。
+- `ResumeFromCheckpoint` 从持久位置恢复并启动。
+- `RebuildProjection` 重建读模型，完成后保持 stopped，须显式启动。
 
-- **订阅与分发**：`ProjectionManager` 会根据投影声明的 `SupportedEventTypes()` 在 `eventing/bus` 上订阅事件，并把事件分发给对应投影的 `Handle`。
-- **最终一致**：投影通常异步更新读模型；业务需要接受读写延迟。
-- **错误处理**：单事件失败支持重试；超过阈值进入死信回调（`DeadLetterFunc`）。
-- **检查点**：可选启用；用于“进程重启后从上次位置继续”，避免重复全量重放。
+配置入口为 `ProjectionConfig`；LowLatency、Balanced、HighThroughput 预设控制 checkpoint 保存频率等参数。
 
-## 3. 关键入口
+## 两种运行方式
 
-- 构造管理器：
-  - `projection.NewProjectionManager[ID](eventStore, eventBus, reg, upgraders)`
-  - `projection.NewProjectionManagerWithConfig[ID](eventStore, eventBus, reg, upgraders, cfg)`
-- 配置预设（checkpoint 保存频率）：
-  - `projection.ProjectionConfigPresets.LowLatency()`
-  - `projection.ProjectionConfigPresets.Balanced()`
-  - `projection.ProjectionConfigPresets.HighThroughput()`
-- 启用 checkpoint：
-  - `pm, err = pm.WithCheckpointStore(store)`（内存实现见 `projection.NewMemoryCheckpointStore`；SQL 实现见 `projection/sqlstore`）
-  - 启用后，投影必须实现 `ICheckpointingProjection`；manager 不再代投影做 best-effort checkpoint 保存
+| 方式 | 处理路径 | 恢复边界 |
+| --- | --- | --- |
+| 未启用 checkpoint | EventBus 回调交给投影 Handle | 同一投影不重入；不承诺崩溃恢复 |
+| 启用 checkpoint | 在线消息唤醒运行器，从 EventStore 按游标追赶 | 从持久 checkpoint 恢复 |
 
-## 4. 最小示例（骨架）
+通过 `WithCheckpointStore` 启用 checkpoint 时必须提供 `IEventStreamStore`。投影同时满足 `ICheckpointingProjection` 和 `IRebuildCheckpointingProjection`，确保增量与重建都能将读模型写入和 checkpoint 保存放在同一原子边界。
 
-```go
-import projsql "gochen/eventing/projection/sqlstore"
+普通投影可用 `NewCheckpointingProjector(inner, txRunner)` 包装。Runtime `eventing/projection/sqlstore.NewSQLCheckpointTxRunner(orm)` 提供 ORM 事务执行器，SQLCheckpointStore 读取同一 context 中的事务 session。投影的业务 SQL 也必须使用该事务 session，不能绕回独立连接。
 
-type UserViewProjection struct{}
+## 游标、幂等与错误
 
-func (p *UserViewProjection) Name() string { return "user_view" }
-func (p *UserViewProjection) SupportedEventTypes() []string { return []string{"UserCreated", "UserUpdated"} }
-func (p *UserViewProjection) Status() projection.ProjectionStatus { return projection.ProjectionStatus{Name: p.Name()} }
+- 同一投影的在线处理、追赶、恢复、重建串行执行；不同投影可并行。
+- 运行中使用内存 cursor 跨越尚未持久化的 checkpoint 批次；冷启动从持久位置读取。
+- 批量 checkpoint 窗口内崩溃可能重放已处理事件，处理器必须幂等；需要每条事件保存 checkpoint 时设 `CheckpointSaveCount=1`。
+- 普通 checkpoint 保存只允许位置前进；重建通过 ForceSave 或同事务重置将位置对齐到重建结果。
+- 单事件失败按配置重试，错误不能被当作已处理成功。checkpoint 保存失败应回滚对应事务。
+- 持久 cursor 不存在时恢复返回 `NotFound`，由调用方显式安排重建。
+- 重建失败后状态为 error，不会留在 rebuilding。
 
-func (p *UserViewProjection) Handle(ctx context.Context, evt eventing.IEvent) error {
-	// 这里写“增量更新读模型”的逻辑
-	return nil
-}
+## 示例与验证
 
-func (p *UserViewProjection) Rebuild(ctx context.Context, events []eventing.Event[int64]) error {
-	// 这里写“全量重建读模型”的逻辑（通常先清表/重置，再回放）
-	return nil
-}
+在 `gochen-runtime` 仓库执行：
 
-pm, err := projection.NewProjectionManagerWithConfig[int64](eventStore, eventBus, reg, upgraders, projection.ProjectionConfigPresets.Balanced())
-if err != nil {
-	return err
-}
-pm, err = pm.WithCheckpointStore(checkpointStore)
-if err != nil {
-	return err
-}
-
-txRunner, err := projsql.NewSQLCheckpointTxRunner(ormEngine)
-if err != nil {
-	return err
-}
-userView, err := projection.NewCheckpointingProjector[int64](&UserViewProjection{}, txRunner)
-if err != nil {
-	return err
-}
-
-_ = pm.RegisterProjection(userView)
-_ = pm.StartProjection("user_view")
-defer pm.StopProjection("user_view")
+```bash
+GOWORK=off go run ./examples/infra/projection/sql_checkpoint
 ```
 
-> 完整可运行示例建议直接看：`examples/infra/projection/*`。
-
-## 5. checkpoint 游标缺失（fail-fast）
-
-当启用 checkpoint 后，恢复逻辑会使用 `checkpoint.LastEventID` 去事件存储拉取“后续事件”。
-
-如果事件存储返回 `NotFound`（常见于事件被清理/归档），`ResumeFromCheckpoint` 会直接返回错误（fail-fast）。
-
-如需重建，请由调用方显式触发（例如：删除 checkpoint 后离线重建，或在业务侧调用 `RebuildProjection`）。
-
-## 6. 进一步阅读
-
-- 设计与边界：`docs/architecture/framework-design.md`
-- 示例：`examples/infra/projection/basic`、`examples/infra/projection/idempotent`、`examples/infra/projection/sql_checkpoint`
-
-## 并发与线程安全（契约）
-
-- `ProjectionManager` 以 per-projection runtime 管理投影注册表、状态、handler、checkpoint tracker 与内存 cursor；`Register/Unregister/Start/Stop/GetStatus*` 可并发调用，但推荐在“装配期”完成注册与配置。
-- 同一 projection 的在线处理、checkpoint 追赶、`ResumeFromCheckpoint` 与 `RebuildProjection` 串行执行；不同 projection 之间可并发。
-- checkpoint 模式下，在线 handler 仅在 projection 为 running 时唤醒 runtime 从 EventStore 按 checkpoint cursor 追赶，并优先使用 runtime 内存 cursor 跨越尚未持久化的批量 checkpoint 窗口；显式 `ResumeFromCheckpoint` 在运行期按 runtime/durable 较新游标继续，冷启动才只由 durable checkpoint 初始化；启用 checkpoint store 时必须配置 `IEventStreamStore`。批量 checkpoint 窗口内崩溃可能导致已处理事件再次回放，投影处理器必须幂等；需要单事件持久化边界时将 `CheckpointSaveCount` 设为 1。未启用 checkpoint 的 live-only 模式只保证同一 projection 不重入，不承诺崩溃恢复。
-- `RebuildProjection` 会把投影状态标记为 `rebuilding`，在线处理会等待同一 runtime 串行边界；重建完成后状态回到 `stopped`，需要显式 `StartProjection` 才会继续处理。
-- checkpoint rebuild 能力会在进入 `rebuilding` 前校验；进入后任何 rebuild/checkpoint 失败都会把状态收敛为 `error`，不会永久残留 `rebuilding`。
-
-相关竞态回归测试：`eventing/projection/manager_race_test.go`。
+SQL 表结构见[数据库 Schema 与迁移](../../docs/guides/db-schema-migration-guide.md#投影检查点)。Core 契约及并发测试位于本包，在 Core 仓库执行 `GOWORK=off go test -count=1 ./eventing/projection`。

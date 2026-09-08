@@ -1,132 +1,53 @@
-# httpx/：HTTP 接口契约与抽象
+# httpx：HTTP 契约与响应助手
 
-`gochen/httpx` 属于 Core 模块，提供**框架无关的 HTTP 核心抽象**（请求读取、响应写入、上下文存取、中间件签名与统一响应助手），使领域编排与应用层不绑定任何具体 Web 框架。
+Core `gochen/httpx` 提供请求读取、绑定、响应写入、上下文、路由和中间件契约。标准服务器与请求解析在 `gochen-runtime` 仓库 `http/`，Gin 适配器在 `gochen-contrib` 仓库 `http/gin/`。
 
-> 物理驱动实现位于 Runtime 模块：`gochen-runtime` 仓库 `http/nethttp`（基于 Go 标准库 `net/http`），说明见该仓库 `http/README.md`。
+## 接口
 
-## 1. 顶层概念
+| 入口 | 职责 |
+| --- | --- |
+| `IContext` | 组合请求、绑定、响应、键值存取和流程控制能力 |
+| `IRequestContext` | 包装并派生 `context.Context` |
+| `IServer` / `IRouteGroup` | 路由、中间件、分组与服务生命周期 |
+| `Handler` | `func(IContext) error` |
+| `Middleware` | `func(IContext, func() error) error` |
+| `IFileHandler` / `IUploadedFile` | 可选文件上传能力 |
 
-| 概念 | 对应接口/类型 | 作用 |
-|---|---|---|
-| `IContext` | `httpx/context.go` | 处理器可见的上下文：读请求、写响应、存取键值、流程控制 |
-| `IServer` / `IRouteGroup` | `httpx/server.go` | 注册路由、路由分组、全局/组级中间件契约 |
-| `Middleware` | `httpx/server.go` | 统一中间件签名：`func(ctx IContext, next func() error) error` |
-| `IRequestContext` | `httpx/request.go` | 对 `context.Context` 的轻量封装（业务运行时语义走 `contextx`） |
+`NewRequestContext(ctx)` 与 `NewRequestContextWithValues(ctx, values)` 返回 `(IRequestContext, error)`，应处理构造错误。tenant、operator、user、session、trace、request 通过 `gochen/contextx` 读写；客户端 IP 与 User-Agent 从请求接口读取。
 
-gochen 的 HTTP 抽象采用接口隔离：请求读取、绑定、响应写入、上下文存取被拆分为多个小接口，再组合成 `IContext`（见 `httpx/context.go`）。
+## 响应助手
 
-`IRequestContext` 的默认实现与构造函数位于 `gochen/httpx` 根包：
+- 成功：`WriteSuccess(ctx, data)`、`WriteCreated(ctx, data)`、`WriteAccepted(ctx, data)`、`WriteNoContent(ctx)`。
+- 错误：`WriteError(ctx, err)`、`WriteErrorExtra(ctx, err, extra)`、`WriteErrorCode(ctx, code, message)`。
+- 响应模型为 `ResponseMessage`，统一携带 code / message 及可选 data / details / extra / trace_id / request_id。
+- `WriteRedirectJSON` 只接受以 `/` 开头的站内路径，拒绝外部 URL 和协议相对 URL。
 
-- `httpx.NewRequestContext(ctx)`
-- `httpx.NewRequestContextWithValues(ctx, values)`
-
-业务代码、测试桩和自定义适配器应直接依赖上述 Core 根入口。
-
-## 2. 统一响应助手（Helper）
-
-`httpx` 提供统一的 JSON 响应写出助手，保证全框架 API 风格一致：
-
-- 成功响应：`httpx.WriteSuccess(c, data)`、`httpx.WriteCreated(c, data)`、`httpx.WriteAccepted(c, data)`、`httpx.WriteNoContent(c)`
-- 错误响应：`httpx.WriteError(c, status, msg)`、`httpx.WriteErrorCode(c, code, msg)`、`httpx.WriteErrorExtra(c, status, code, msg, details)`
-
-## 3. 标准实现与启动示例（`gochen-runtime/http`）
-
-Runtime 模块提供了开箱即用的标准库实现：
+路由注册示例：
 
 ```go
-import (
-    "gochen/httpx"
-    "gochen-runtime/http"
-    "gochen-runtime/http/nethttp"
-)
+package example
 
-server := nethttp.NewServer(&http.WebConfig{Host: "0.0.0.0", Port: 8080})
+import "gochen/httpx"
 
-server.GET("/healthz", func(c httpx.IContext) error {
-    return httpx.WriteSuccess(c, map[string]any{"ok": true})
-})
-
-_ = server.Start(":8080")
+func RegisterHealth(group httpx.IRouteGroup) {
+	group.GET("/healthz", func(ctx httpx.IContext) error {
+		return httpx.WriteSuccess(ctx, map[string]any{"ok": true})
+	})
+}
 ```
 
-### 路由分组与中间件
+完整服务装配见 [Quick 指南](../docs/guides/quick-assembly.md)及 `gochen-runtime` 仓库 `http/README.md`。
 
-```go
-api := server.Group("/api/v1").
-	Use(authMiddleware)
+## 请求边界
 
-api.GET("/users", listUsers)
-api.POST("/users", createUser)
-```
+`MaxBodySizeKey` 是端点请求体限制的约定键。Runtime REST 通过 `ctx.Set(httpx.MaxBodySizeKey, limit)` 设置，具体 HTTP 适配器负责执行。Runtime nethttp 在未设置正数限制时使用 `DefaultMaxBodySizeBytes`（10 MiB），0 或负数不会关闭限制。
 
-## 3. 与 `gochen-runtime/api/rest` 的关键约定
+Runtime nethttp 的 `BindJSON` 拒绝未知字段、空请求体和尾随 JSON 数据。手写 handler 与 REST 应共享该解析语义；需要其他协议时由业务显式选择解码方式。
 
-### 3.1 端点级请求体大小限制（`MaxBodySizeKey`）
+Core `TenantContextMiddleware` 与 Runtime tenant middleware 都要求显式 resolver。租户来源应是已认证身份或可信网关；HTTP 中间件不替代 [Application 授权](../docs/architecture/layered-authz.md)。
 
-`gochen-runtime/api/rest` 会在 handler 执行前通过 `ctx.Set(httpx.MaxBodySizeKey, limit)` 声明“最大 body 大小”。
+Runtime `http/middleware` 提供 CORS、限流与熔断。CORS 默认关闭，启用时须配置非空 allowlist；通配 Origin 不能与 credentials 组合。限流、熔断参数复用 [policy](../policy/README.md)。
 
-- 这是一个“实现可选”的约定键（定义在 `httpx/request.go`）。
-- `httpx/nethttp` 会在读取 Body 时使用 `http.MaxBytesReader` 强制限制（见 `httpx/nethttp/context.go`）。
-- 安全默认（breaking）：当上层未显式设置 `MaxBodySizeKey` 时，`httpx/nethttp` 仍会启用默认上限 `httpx.DefaultMaxBodySizeBytes`（10MB）。
-  - 放大限制：`ctx.Set(httpx.MaxBodySizeKey, 50<<20)`（例如 50MB）
-  - 0 或负数会回退到默认上限；如需上传大文件，请显式设置足够大的正数上限。
+## 自定义适配器
 
-### 3.2 operator/租户等业务信息的传递
-
-`IContext` 自带键值存取接口（`Set/Get`），推荐由鉴权中间件将“当前用户标识”等信息写入 ctx storage，再由上层（例如 `gochen-runtime/api/rest` 的 `RouteConfig.Audit.OperatorExtractor`）读取。
-
-`IRequestContext` 本身不再暴露 `tenant/trace/request/session/user` getter：
-
-- `tenant_id` / `trace_id` / `request_id` / `operator` / `user_id` / `session_id` 统一通过 `gochen/contextx` 读写；
-- `client_ip` / `user_agent` 继续直接从 `IRequestReader` 读取。
-
-### 3.3 JSON 绑定语义
-
-`httpx/nethttp` 的 `BindJSON` 默认采用“拒绝未知字段、禁止尾随数据”的严格解析策略：
-
-- 未声明字段会直接返回 `errors.InvalidInput`，避免请求体拼写错误被静默吞掉；
-- 仅允许单一 JSON 值：尾随数据或多值（例如 `{"a":1}{"a":2}`）返回 `errors.InvalidInput`。
-
-### 3.4 CORS 安全默认（breaking）
-
-`httpx/middleware` 的 CORS 中间件默认不开放跨域：
-
-- `middleware.CORSFromWebConfig(nil)` 等价于 no-op；
-- `cfg.CORSEnabled=false` 时 no-op；
-- `cfg.CORSEnabled=true` 时要求显式 allowlist（`CORSAllowOrigins` 非空），否则仍视为 no-op。
-
-如需显式允许任意 Origin（不安全，承接旧语义），请显式将 allowlist 设置为 `["*"]`（浏览器场景下不允许 credentials），例如：
-
-```go
-server.Use(middleware.CORS(&middleware.CORSConfig{
-	AllowOrigins: []string{"*"},
-}))
-```
-
-### 3.5 RateLimitConfig 结构体字面量（breaking）
-
-`httpx/middleware` 的限流中间件 `middleware.RateLimit` 使用 `middleware.RateLimitConfig` 作为配置对象。
-
-说明：`RateLimitConfig` 目前**内嵌**了 `gochen/policy/ratelimit.Config`，因此外部调用方若使用“带字段名”的结构体字面量，写法需要显式嵌套到 `Config: ...` 下，否则会编译失败。
-
-示例：
-
-```go
-server.Use(middleware.RateLimit(middleware.RateLimitConfig{
-	Config: ratelimit.Config{
-		RequestsPerSecond: 50,
-		BurstSize:         100,
-	},
-	SkipPaths: []string{"/healthz"},
-}))
-```
-
-## 4. 扩展：适配其他 Web 框架
-
-当你希望使用 Gin/Echo/Fiber 等框架时，可以按以下思路写适配层：
-
-1) 实现 `gochen/httpx` 中的 `IContext`（可基于组合拆分接口实现）；
-2) 实现 `IServer`/`IRouteGroup` 的路由注册与分组；
-3) 保持中间件签名一致（`Middleware`），让 `gochen-runtime/api/rest` 等上层代码无需感知具体框架。
-
-> 推荐策略：只在业务仓库实现适配层，gochen 侧保持抽象与 `httpx/nethttp` 的参考实现。
+适配器实现上述 Core 接口并保留 context 取消、错误映射、请求体限制和中间件顺序。Runtime REST 只依赖这些契约。访问具体 net/http 对象时使用 Runtime `http/nethttp` 的受限 helper，业务 Application 保持对 HTTP 实现无感知。

@@ -1,66 +1,37 @@
-# gochen 文档门户
+# Gochen 文档索引
 
-本目录承载 gochen 的架构设计、接入指南与速查资料。
+本目录说明 Core 及其 Runtime、Contrib 配套能力。跨仓资料以仓库名和仓库内路径标注。
 
-## 推荐阅读路径
+## 接入与架构
 
-### 第一次接触 gochen
+| 文档 | 内容 |
+| --- | --- |
+| [项目入口](../README.md) | 项目定位、模块边界、本地验证 |
+| [下游接入指南](guides/downstream-guide.md) | 本地依赖、能力选择、组合根与接入约束 |
+| [Quick 装配](guides/quick-assembly.md) | Repo / Application / REST / Host 工厂与列名约定 |
+| [Contrib 适配器](guides/contrib-guide.md) | 第三方适配器职责与接入边界 |
+| [框架架构](architecture/framework-design.md) | 能力分层、依赖方向、生命周期和并发约定 |
+| [分层授权](architecture/layered-authz.md) | L0–L4、DataScope、写入约束与跨隔离读取 |
+| [开发规范](../SPEC.md) / [仓库约定](../AGENTS.md) | 编码规则、顶级包与依赖矩阵 |
 
-1. [../README.md](../README.md)
-2. [guides/downstream-guide.md](guides/downstream-guide.md)
-3. [architecture/framework-design.md](architecture/framework-design.md)
-4. [../examples/README.md](../examples/README.md)
+首次接入可按“项目入口 → 下游接入指南 → Quick 装配 → 示例”阅读。
 
-### 作为下游项目接入 gochen
+## Core 模块
 
-1. [guides/downstream-guide.md](guides/downstream-guide.md)
-2. [../app/README.md](../app/README.md)
-3. `gochen-runtime` 仓库 `host/README.md`
-4. `gochen-runtime` 仓库 `api/rest/README.md`
-5. [../eventing/README.md](../eventing/README.md)
+| 能力 | 文档 |
+| --- | --- |
+| 领域与应用 | [domain](../domain/README.md)、[app](../app/README.md)、[Operation](../app/operation/README.md) |
+| HTTP 与 ORM 契约 | [httpx](../httpx/README.md)、[db/orm](../db/orm/README.md) |
+| 事件驱动 | [eventing](../eventing/README.md)、[EventBus](../eventing/bus/README.md)、[EventStore](../eventing/store/README.md)、[Outbox](../eventing/outbox/README.md)、[Projection](../eventing/projection/README.md) |
+| 消息 | [messaging](../messaging/README.md)、[Command](../messaging/command/README.md) |
+| 过程与策略 | [process](../process/README.md)、[Saga](../process/saga/README.md)、[Workflow](../process/workflow/README.md)、[policy](../policy/README.md) |
+| 错误与日志 | [errors](../errors/README.md)、[logging](../observe/logging/README.md) |
 
-### 作为 gochen 贡献者或维护者
+## 专题与示例
 
-1. [../SPEC.md](../SPEC.md)
-2. [architecture/framework-design.md](architecture/framework-design.md)
-
-## 文档分层
-
-### `architecture/`
-
-面向"想理解为什么这样设计"的读者，关注整体架构、模块边界与设计原则。
-
-- [architecture/framework-design.md](architecture/framework-design.md)：框架整体架构、分层契约、Monorepo 双模块拓扑与关键设计约束
-- [architecture/rbac-to-layered-authz.md](architecture/rbac-to-layered-authz.md)：从 RBAC 到分层授权的设计哲学与核心概念
-
-先读 [architecture/framework-design.md](architecture/framework-design.md) 建立全局认知；想深入理解分层授权模型的内在逻辑，读 [rbac-to-layered-authz.md](architecture/rbac-to-layered-authz.md)。
-
-### `guides/`
-
-面向"要在项目里落地 gochen"的读者，关注接入方式、迁移路径与使用建议。
-
-- [guides/downstream-guide.md](guides/downstream-guide.md)：下游项目接入原则、治理约束与评审清单
-- [guides/starter-refactor-guide.md](guides/starter-refactor-guide.md)：gochen-contrib 生态外设适配器与重构指南
-- [guides/db-schema-migration-guide.md](guides/db-schema-migration-guide.md)：事件存储、Outbox、Projection 相关表结构迁移指南
-
-### `reference/`
-
-面向"快速查速查和术语"的读者。
-
-- [reference/ddd-eventsourcing-quick-reference.md](reference/ddd-eventsourcing-quick-reference.md)：DDD / Event Sourcing / CQRS 速查
-- [reference/event-schema-evolution.md](reference/event-schema-evolution.md)：事件 schema 演进与滚动升级纪律
-- [reference/eventing-saga-events.md](reference/eventing-saga-events.md)：Saga 生命周期事件说明
-
-## 按主题找文档
-
-| 你关心的问题                         | 建议阅读                                                                                         |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------ |
-| gochen 的项目定位与价值              | [../README.md](../README.md)                                                                     |
-| 下游项目怎么接入、怎么避免重复造轮子 | [guides/downstream-guide.md](guides/downstream-guide.md)                                         |
-| gochen 到底提供了哪些能力            | [guides/downstream-guide.md](guides/downstream-guide.md)                                         |
-| 各模块的边界与设计理由               | [architecture/framework-design.md](architecture/framework-design.md)                             |
-| 分层授权模型的核心设计原理           | [architecture/rbac-to-layered-authz.md](architecture/rbac-to-layered-authz.md)                   |
-| gochen-contrib 生态外设如何适配      | [guides/starter-refactor-guide.md](guides/starter-refactor-guide.md)                             |
-| DDD / Event Sourcing 快速上手        | [reference/ddd-eventsourcing-quick-reference.md](reference/ddd-eventsourcing-quick-reference.md) |
-| 数据表迁移与 schema 设计             | [guides/db-schema-migration-guide.md](guides/db-schema-migration-guide.md)                       |
-| 可运行示例从哪里看                   | [../examples/README.md](../examples/README.md)                                                   |
+- [DDD / Event Sourcing / CQRS 速查](reference/ddd-eventsourcing-quick-reference.md)。
+- [事件 Schema 与回放](reference/event-schema-evolution.md)。
+- [Saga 生命周期事件](reference/eventing-saga-events.md)。
+- [数据库 Schema 与迁移](guides/db-schema-migration-guide.md)。
+- [Core 示例](../examples/README.md)。
+- `gochen-runtime` 仓库 `host/README.md`、`api/rest/README.md`、`http/README.md`、`examples/README.md`。

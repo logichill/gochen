@@ -1,40 +1,16 @@
-# process（多阶段过程运行时）
+# process：过程运行时
 
-`process` 用于承载“一个过程如何被提交、推进、收敛、恢复与观察”的框架能力。
+`process` 提供多步骤推进、补偿、互斥执行和后台任务监督能力，业务逻辑由调用方定义。
 
-它面向的是“多阶段性质”的运行时问题，而不是某个具体业务域：
+| 包 | 职责 | 入口 |
+| --- | --- | --- |
+| [saga](saga/README.md) | 顺序执行步骤，失败时逆序补偿，保存进度以恢复 | `SagaOrchestrator` |
+| [workflow](workflow/README.md) | 定义、实例、条件分支、汇聚、驳回与生命周期 | `Engine` |
+| `lock` | 按业务 key 串行化，支持可替换锁提供者 | `ILockProvider` |
+| `task` | 受控 goroutine、失败记录、取消与停止等待 | `TaskSupervisor` |
 
-- 一个操作先被系统接受，随后异步处理；
-- 一个操作会触发多个子系统更新，需要等待最终一致性收敛；
-- 一个过程需要恢复、补偿、串行化或暴露阶段状态；
-- 一个调用方需要知道当前过程是已接受、处理中、已完成还是降级。
+写入口结果和 accepted / processing / settled 状态由 [app/operation](../app/operation/README.md) 表达。重试、限流与熔断由 [policy](../policy/README.md) 提供，消息传递由 [messaging](../messaging/README.md) 承担。
 
-设计边界：
+Core 提供内存状态存储。生产持久化与跨进程并发控制由注入的 Store / LockProvider 负责，SQL 实现在 `gochen-runtime` 仓库 `process/`。事件或状态中的业务数据应使用可稳定序列化的快照，避免共享可变对象。
 
-- `process` 关注“过程实例如何推进与收敛”；
-- `policy` 关注重试/限流/熔断等横切控制策略；
-- `task` 关注后台监督与调度；
-- `eventing` / `messaging` 关注事件与消息传递；
-- `process` 本身不绑定具体业务，也不直接等同于某一种传输方式或存储方式。
-
-当前目录已统一承载：
-
-- `process/saga`：补偿型编排；
-- `process/workflow`：状态机/流程推进；
-- `process/lock`：串行化执行抽象。
-
-`process/workflow` 的分支与汇聚语义：
-
-- `AdvanceNode` 会激活当前节点的全部后继；`AdvanceNodeTo` 只选择一个直接后继，适合审批分支、选择网关或业务状态机。
-- 最多一条入边的节点可省略 `Kind`（按普通 task 处理）。
-- 多入边节点**必须显式声明 `Kind`**：`NodeKindTask` 表示“任一分支到达即可继续”（exclusive merge），`NodeKindJoin` 表示“必须等待全部入边到达”（join-all），不再按图结构自动推断。
-
-相关但不归属于 `process` 的能力：
-
-- `app/operation`：面向应用层/接口层的写入口协议与操作生命周期包装。
-
-命名收敛约定：
-
-- `process` 只承载真正的过程编排与收敛基础能力；
-- `app/operation` 负责“对外可观察的写操作协议”；
-- `saga` / `workflow` / `lock` 继续作为 `process` 下的内部推进或基础能力。
+Saga 与 Workflow 示例位于 `gochen-runtime` 仓库 `examples/process/`。Core 任务示例见[任务与策略](../examples/task/policy/main.go)。

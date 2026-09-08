@@ -1,36 +1,35 @@
-# ORM 抽象（db/orm）
+# ORM 契约
 
-本包只提供 ORM 抽象接口与模型元信息描述，不包含任何 ORM 行为实现。业务侧通过适配器模式将具体 ORM（如 GORM、Ent、SQLX 自定义层）接入 gochen。
+`gochen/db/orm` 定义 ORM、Model、事务 session、查询选项和元信息，不包含物理驱动。标准 SQL 实现在 `gochen-runtime` 仓库 `db/orm/lite`、`db/orm/repo`，GORM 适配在 `gochen-contrib` 仓库 `data/orm/gorm`。
 
-边界：
-- 这里不负责连接管理、迁移、事务语义或任何具体 ORM 细节；
-- 这里的目标是让 repo/service 层“只依赖抽象”，把基础设施细节留在业务仓库。
+## 接口与能力
 
-## 设计要点
-- **接口而非实现**：定义 `IOrm/IOrmSession/IModel/IAssociation`（关联需传入 owner 对象），业务侧实现适配器；`IModel.Dialect()` 必须返回非 nil 的数据库方言能力。
-- **能力检测**：`Capabilities` 声明支持的能力，超出能力的调用应返回明确错误（统一使用 `errors.NewCode(errors.Unsupported, "orm: capability unsupported")` 或类似规范错误）。
-- **元信息承载**：`ModelMeta/FieldMeta/AssociationMeta` 传递表名、字段、关联等描述，`Tags` 可存放原始 `orm`/`gorm` 等标签字符串，避免编译期改动。
-- **轻量查询选项**：`QueryOptions` 覆盖常见的筛选/排序/分页/预加载/行锁/Join/GroupBy 需求，适配器自行解释或报不支持。
-- **SELECT 安全边界**：`WithSelect` / `Select` 只接受安全字段名；`COUNT(*) AS total`、`COALESCE(...) AS ...` 等原始表达式必须显式使用 `WithSelectExprUnsafe` / `SelectExprUnsafe`，并保证表达式不包含用户输入。
+| 接口 / 类型 | 职责 |
+| --- | --- |
+| `IOrm` | 模型入口、上下文派生、Begin / BeginTx、底层 Database |
+| `IOrmSession` | 事务会话，提供 Commit / Rollback |
+| `IModel` | 模型读写、计数、关联与方言 |
+| `IModelWithResult` | 返回受影响行数等 SQL 结果能力 |
+| `IAssociation` | 关联维护，显式指定 owner |
+| `Capabilities` | 声明适配器真实支持的能力 |
+| `ModelMeta` / `FieldMeta` / `AssociationMeta` | 表、字段、关联及标签元信息 |
+| `QueryOptions` | 查询条件、排序、分页、预加载、行锁、Join 与 GroupBy |
 
-## 推荐适配模式
-1) 在业务仓库实现适配器（例如 `GormAdapter`），满足上述接口、声明支持能力，并通过 `IModel.Dialect()` 暴露模型实际绑定的数据库方言。
-2) 通过 `ModelMeta` 注册模型描述，必要时解析 `Tags["orm"]` 中的原始内容映射到目标 ORM。
-3) 当调用方请求超出能力时返回错误（例如返回 `errors.NewCode(errors.Unsupported, ...)`），避免静默降级。
+适配器不能静默忽略不支持的请求，应返回 `errors.Unsupported`。受约束写入依赖准确的受影响行数，装配时必须确认底层能力。
 
-## 标识符约定（方言/大小写）
+## 字段与 SQL 边界
 
-通用 repo 会通过 `IModel.Dialect()` 对元数据中的动态列名进行方言化 quote；适配器返回 nil 方言时相关查询会 fail-closed，不会退化为裸列名。
+- `IModel.Dialect()` 必须返回非 nil 的实际数据库方言。无法识别方言时可显式使用 unknown 方言，但不具备标识符引用保证。
+- `WithSelect` 只接受安全字段名。受信任 SQL 表达式使用 `WithSelectExprUnsafe`，不能拼接用户输入。
+- 表名和列名建议使用 lower_snake；限定名按方言逐段引用。
+- ORM 查询选项与 `app/query` 的适配器 Filter 协议职责不同，Application / REST 负责按 QuerySchema 解码，再由仓储映射查询。
 
-若适配器无法识别具体驱动，可显式返回 `dialect.New("")` 表示 unknown 方言；unknown 方言不会为标识符添加引号，因此仍应避免保留字与大小写敏感标识符。
+Runtime Repo 的 `FilterOpLike` 表示包含字面文本，会转义 `%`、`_` 和反斜杠。Runtime SQLBuilder 的 `IN` slice 占位符会展开参数，空 slice / array 转为恒假条件；Application 查询协议的空 `in` / `not_in` 列表则返回输入错误。
 
-推荐强约定：
-- 表名/列名/别名使用 `lower_snake`（仅小写字母、数字、下划线，必要时用 `schema.table` 这种点分段形式）。
-- 适配器必须准确返回实际方言；仅在方言确实未知时，才需要避免保留字与大小写敏感标识符。
+## 仓储约束
 
-特别说明（`db/orm/lite` 适配器）：
-- SELECT/ORDER BY 会对“看起来是标识符”的列按方言 quote；
-- JOIN 场景会拼接表表达式并走 `FromUnsafe()`，因此会在 JOIN 表达式里按方言 quote 标识符；
-- WHERE 表达式仍由调用方提供（原样透传），若自行拼接了大小写敏感/需要引号的标识符，请确保与其他片段的 quoting 策略一致。
+租户与范围通过 Runtime Repo 的 `WithIsolation`、`WithResourceKind`、`WithScope` 等显式选项声明。扩展读取从 `ScopedQuery`、`GetWith`、`FindOneWith` 等受限入口继续构造，避免绕过隔离或软删条件。
 
-后续可在业务侧补充示例/contract tests 验证适配器行为，本包不承担具体 ORM 逻辑。
+列名优先级见 [Quick 装配](../../docs/guides/quick-assembly.md#列名约定)，授权链路见[分层授权](../../docs/architecture/layered-authz.md)。事务回调和审计的同事务要求见 [app](../../app/README.md)。
+
+数据库连接、DDL、schema 检查与迁移执行由 Runtime 提供，见[数据库 Schema 与迁移](../../docs/guides/db-schema-migration-guide.md)。

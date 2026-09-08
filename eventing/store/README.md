@@ -1,48 +1,36 @@
-# eventing/store：事件存储（EventStore）
+# EventStore
 
-`eventing/store` 提供事件存储的核心抽象与默认实现（内存/SQL/缓存装饰器/快照），用于 Event Sourcing 的“追加事件 + 回放事件”链路。
+`eventing/store` 定义聚合事件存储、全局流扫描与事务追加契约。Core 提供内存实现、缓存装饰器和快照能力；SQL 实现在 `gochen-runtime` 仓库 `eventing/store/sqlstore`。
 
-## 顶层概念
+## 接口与实现
 
-- `store.IEventStore[ID]`：聚合级事件存储（带聚合类型的 Append/Load/版本/存在性）。
-- `store.IEventStreamStore[ID]`：事件流扫描接口（游标/limit），用于投影回放、历史导出等“全局扫描”场景。
-- 默认实现：
-  - `store.NewMemoryEventStore[int64]()`：内存实现；其他聚合 ID 类型需显式替换泛型参数。
-  - `store/sqlstore`：SQL 实现（默认 `ID=int64`，支持 codec 扩展）。
-  - `store/cached`：缓存装饰器（在 inner store 上叠加读缓存/统计/TTL）。
-  - `store/snapshot`：快照存储与策略（减少回放事件量）。
+| 入口 | 内容 |
+| --- | --- |
+| `IEventStore[ID]` | AppendEvents、LoadEvents、HasAggregate、GetAggregateVersion |
+| `IEventStreamStore[ID]` | 在基础接口上增加 StreamEvents / StreamAggregate |
+| `ITransactionalEventStore[ID]` | 使用调用方数据库 / 事务作用域执行 AppendEventsWithDB |
+| `NewMemoryEventStore[ID]()` | 内存事件存储 |
+| `store/cached` | 读缓存、TTL 与统计 |
+| `store/snapshot` | 快照存储契约、内存实现与策略 |
 
-## 并发与线程安全（契约）
+完整签名见 [eventstore.go](eventstore.go)。
 
-### 1) Store 实例可并发复用
+## 聚合与并发
 
-除非实现另有说明，`IEventStore/IEventStreamStore` 的实现应满足：
+聚合由 `(aggregateType, aggregateID)` 唯一定位，aggregateType 必须非空。不同聚合类型可复用相同 ID，版本各自递增。
 
-- **可并发调用**：在多 goroutine 中复用同一个 store 实例调用 `AppendEvents/LoadEvents/StreamEvents/...` 不产生数据竞态；
-- **一致性由后端保证**：内存实现依赖内部锁；SQL 实现依赖数据库事务/约束（例如 `(aggregate_type, aggregate_id, version)` 的唯一性）；
-- **错误语义一致**：并发冲突返回 `errors.Concurrency`，且在 `Details` 中携带 `aggregate_id/expected_version/actual_version` 等关键字段（见 `contract_concurrency_test.go`）。
+`AppendEvents` 的 expectedVersion 是该事件流上一次已提交版本，新聚合为 0。版本检查与追加必须原子执行；冲突返回 `errors.Concurrency`，错误 details 携带聚合和版本信息。批次中的 nil / typed-nil 事件返回 `InvalidInput`。
 
-同一聚合由 `(aggregate_type, aggregate_id)` 定义；不同 `aggregate_type` 可以使用相同的 `aggregate_id`，互不共享版本序列。
+实现应支持并发调用。缓存装饰器按聚合 generation 阻止并发写入前读取的旧值回填，读返回事件快照。
 
-### 2) `expectedVersion` 是并发控制边界
+## 事件流与游标
 
-`AppendEvents(ctx, aggregateType, aggregateID, events, expectedVersion)` 使用乐观并发控制：
+`StreamEvents(ctx, opts)` 返回 Events、NextCursor、EventCursors 和 HasMore。游标由存储实现定义，调用方应原样保存；逐条提交消费进度时优先使用与 Events 一一对应的 EventCursors。不存在的事件 ID 游标返回 `NotFound`。
 
-- 调用方应基于同一 `(aggregateType, aggregateID)` 下的 `LoadEvents/GetAggregateVersion` 结果填写 `expectedVersion`；
-- 当并发写入导致版本不匹配时，返回 `errors.Concurrency`；
-- “至少一次”投递（Outbox/消息重放）场景应保证幂等：可用 `event_id`/`message_id` 做去重键（存储侧或消费侧）。
+默认与最大页大小均为 1000。`StreamAggregate` 按聚合版本读取，返回 NextVersion。全局扫描可与写入并发，不提供整个分页过程的快照事务；可靠消费须结合后端顺序能力、持久游标与幂等处理。
 
-### 3) 事件流扫描不保证快照一致性
+Runtime SQL store 可使用 `global_position` 与分配器建立全局顺序，也支持按 timestamp / ID 扫描。生产 schema 与索引要求见[数据库 Schema 与迁移](../../docs/guides/db-schema-migration-guide.md#事件存储)。
 
-`StreamEvents` 面向投影/回放，通常以“游标 + limit”分页读取：
+## 验证
 
-- 可能与写入并发，**不保证快照一致性**；
-- 调用方应按游标推进，并处理“重复/漏读”边界（例如以 `(timestamp,id)` 作为稳定排序键）。
-- `After` 指向不存在的事件时，内存与 SQL 实现均返回 `errors.NotFound`，避免静默重放或跳过。
-- append 批次中的 nil 或 typed-nil 事件返回 `errors.InvalidInput`，不会触发 panic。
-- 缓存装饰器用按聚合 key 的 generation 屏障拒绝并发写入前读取到的旧快照回填。
-
-## 回归测试
-
-- 并发冲突错误码契约：`eventing/store/contract_concurrency_test.go`
-- 缓存装饰器并发：`eventing/store/cached/cached_store_concurrency_test.go`
+并发冲突契约见 [contract_concurrency_test.go](contract_concurrency_test.go)，缓存并发行为见 `store/cached` 测试。在 Core 仓库执行 `GOWORK=off go test -count=1 ./eventing/store/...`。
