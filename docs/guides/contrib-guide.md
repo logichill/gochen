@@ -8,6 +8,7 @@
 | --- | --- |
 | `http/gin` | 实现 Core HTTP 上下文、服务器与路由组契约 |
 | `data/db/gorm` | 基于 GORM 的数据库与事务适配 |
+| `data/db/gorm/factory` | 可选的 MySQL/PostgreSQL/SQLite 配置与 DSN 工厂 |
 | `data/orm/gorm` | 实现 ORM / Model 查询能力及模型到迁移草稿的转换 |
 | `data/db/driver` | 数据库驱动注册 |
 | `lock/redis` | Redis 分布式锁 |
@@ -16,6 +17,8 @@
 | `migration` | 数据库迁移 CLI 与数据库管理能力，复用 Runtime migration runner |
 
 Contrib 当前使用单一 `go.mod`，业务按包导入所需适配器。Core 与 Runtime 不反向导入 Contrib。Redis 在此提供锁能力；网络消息 Transport 由业务或扩展仓库实现，接入契约见 [messaging](../../messaging/README.md#外部-transport-接入)。
+
+包装已有 GORM 连接使用 `gormdb.New`；显式注入 Dialector 使用 `gormdb.Open`；按配置选择驱动使用 `gormfactory.NewFromConfig` / `NewFromDSN`。只有最后一种入口会引入全部受支持驱动。
 
 ## 装配方式
 
@@ -28,7 +31,9 @@ Contrib 当前使用单一 `go.mod`，业务按包导入所需适配器。Core �
 ## 适配契约
 
 - HTTP 适配器实现 `httpx.IContext`、`IServer`、`IRouteGroup`，保留请求 context、取消信号、统一响应和 body 限制；身份语义通过 `contextx` 传递。
+- Gin 的响应方法返回编码与写入错误，`SetContext` 同步到底层请求；静态资源及挂载点跳转执行全局中间件。其池化上下文不支持 Runtime `middleware.Timeout` 的异步处理链，组合使用会在执行 handler 前返回 `Unsupported`；需要该中间件时使用 Runtime nethttp。
 - ORM 适配器准确声明 `Capabilities`，不支持的能力返回 `Unsupported`；`IModel.Dialect()` 返回实际方言，标识符引用与参数绑定按方言处理。
+- 批量创建失败必须整体回滚；Repo 创建与更新的唯一约束冲突返回 `Conflict`。审计更新要求模型支持影响行数，否则返回 `Unsupported`，避免静默丢失乐观锁检查。
 - 事务适配器保证业务 SQL 使用事务 session，并正确处理提交后回调；不能在事务未提交时触发 `PostCommit` 副作用。
 - 隔离与授权由受保护 Application 和显式配置的通用 Repo 执行，适配器不得另设默认放行路径。
 - Redis 锁按持有者 token 释放和续租，失锁必须可被调用方感知；日志通过 `observe/logging` 注入。
@@ -39,3 +44,5 @@ Contrib 当前使用单一 `go.mod`，业务按包导入所需适配器。Core �
 ## 验证
 
 在 `gochen-contrib` 仓库独立执行 `GOWORK=off go build ./...`、`GOWORK=off go vet ./...`、`GOWORK=off go test -count=1 ./...`。真实数据库、Redis 等外部环境测试使用 `integration` tag，并按测试文件说明准备资源。
+
+Gin 与 GORM 分别执行 Runtime 的 `http/contracttest`、`db/orm/contracttest` 共享行为测试，和标准 net/http、Lite 实现核对相同的安全与错误契约。

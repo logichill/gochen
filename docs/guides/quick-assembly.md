@@ -48,6 +48,8 @@ Core [db.NamingConvention](../../db/naming.go) 定义默认列名：
 
 Quick Host 默认监听 `0.0.0.0`，BasePath 为 `/api/v1`，使用 net/http server，并启用路由冲突检查。`quick.Module` 可通过 `WithMiddlewares`、`WithDependencies`、`WithExtensions` 配置模块行为；它不提供业务 provider builder。需要依赖注入 provider、事件处理器或投影注册时，使用 `gochen-runtime/host.Module`。
 
+`registrar` 的类型为 `func(httpx.IRouteGroup) error`。对象通过 `router.RegisterRoutes` 方法值传入；需要工厂初始化时，先在调用方完成构造和错误处理，再传入注册函数。
+
 需要自定义监听地址、BasePath、HTTP server 或运行时能力时，使用 `host.Run` / `host.New` 与 `host/config` options。基础设施由组合根创建，再交给业务模块。
 
 ## 可运行示例

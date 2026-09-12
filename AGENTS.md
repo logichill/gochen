@@ -67,7 +67,9 @@
    | observe                          | contextx                                                                                              |
    | policy                           | clock, errors                                                                                         |
    | process                          | clock, errors, eventing, gen, internal, messaging, observe, policy                                    |
-   | testkit                          | app, contextx, db, domain, errors, httpx, gen                                                         |
+   | testkit                          | app, auth/scoped, contextx, db, domain, errors, httpx, gen                                            |
+
+   `testkit → auth/scoped` 用于内存仓储复现 L3 写入约束、租户对齐与版本检查，供无数据库的授权链路测试使用；该依赖不扩展业务包的允许矩阵。
 
 3. **依赖地板**：`domain` 非测试代码只依赖标准库与 `gochen/errors`（及自身子树）；基础叶子（clock/codec/gen/validate）只依赖标准库、`gochen/errors` 与本包子树。
 4. **`app/security` 单向依赖 `auth`**：`app/security/*` 是应用层安全 PEP 装饰器，其职责即把 `auth` 的安全契约应用到 Application 编排中，故允许 `app/security → auth`。该边**严格单向**（`auth` 禁止 import 任何 `app` 包），且基础业务包 `app/crud` / `app/audited` / `app/eventsourced` 必须保持对 `auth` 零依赖。
