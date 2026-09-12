@@ -169,6 +169,103 @@ func TestIdempotencyMiddleware_PublishAllBatchTransportFailureDoesNotMarkProcess
 	assert.Equal(t, []string{"cmd-1", "cmd-2"}, transport.batches[1])
 }
 
+type blockedBatchTransport struct {
+	messaging.ITransport
+	entered chan struct{}
+	release <-chan struct{}
+	calls   atomic.Int32
+}
+
+func (t *blockedBatchTransport) PublishAll(context.Context, []messaging.IMessage) error {
+	t.calls.Add(1)
+	t.entered <- struct{}{}
+	<-t.release
+	return nil
+}
+
+func TestIdempotencyMiddleware_ConcurrentBatchesDoNotPublishDuplicates(t *testing.T) {
+	middleware := NewIdempotencyMiddleware(nil)
+	defer func() { _ = middleware.Stop(context.Background()) }()
+	release := make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	defer unblock()
+	transport := &blockedBatchTransport{entered: make(chan struct{}, 2), release: release}
+	bus := messaging.NewMessageBus(transport)
+	bus.Use(middleware)
+	messages := func() []messaging.IMessage {
+		return []messaging.IMessage{
+			command.NewCommand("cmd-1", "CreateUser", "1", "User", nil),
+			command.NewCommand("cmd-2", "CreateUser", "2", "User", nil),
+		}
+	}
+	first, second := make(chan error, 1), make(chan error, 1)
+	go func() { first <- bus.PublishAll(context.Background(), messages()) }()
+	<-transport.entered
+	go func() { second <- bus.PublishAll(context.Background(), messages()) }()
+	var secondErr error
+	select {
+	case secondErr = <-second:
+		unblock()
+	case <-transport.entered:
+		unblock()
+		secondErr = <-second
+	}
+	assert.NoError(t, <-first)
+	if !errors.Is(secondErr, errors.Concurrency) {
+		t.Fatalf("concurrent batch = %v, transport calls = %d", secondErr, transport.calls.Load())
+	}
+	assert.NoError(t, bus.PublishAll(context.Background(), messages()))
+	assert.Equal(t, int32(1), transport.calls.Load())
+	assert.Equal(t, 2, middleware.GetProcessedCount())
+}
+
+func TestIdempotencyMiddleware_BatchesWithOppositeOrderDoNotDeadlock(t *testing.T) {
+	middleware := NewIdempotencyMiddleware(nil)
+	defer func() { _ = middleware.Stop(context.Background()) }()
+	first, finishFirst := middleware.BeginPublishAllBatch(context.Background())
+	defer finishFirst(false)
+	second, finishSecond := middleware.BeginPublishAllBatch(context.Background())
+	defer finishSecond(false)
+	a := command.NewCommand("a", "CreateUser", "1", "User", nil)
+	b := command.NewCommand("b", "CreateUser", "2", "User", nil)
+	next := func(context.Context, messaging.IMessage) error { return nil }
+	assert.NoError(t, middleware.Handle(first, a, next))
+	assert.NoError(t, middleware.Handle(second, b, next))
+	done := make(chan error, 1)
+	go func() { done <- middleware.Handle(first, b, next) }()
+	select {
+	case err := <-done:
+		assert.True(t, errors.Is(err, errors.Concurrency))
+	case <-time.After(time.Second):
+		finishSecond(false)
+		<-done
+		t.Fatal("batch blocked while already holding a different command lock")
+	}
+	finishFirst(false)
+	assert.NoError(t, middleware.Handle(second, a, next))
+	finishSecond(true)
+	assert.Equal(t, 2, middleware.GetProcessedCount())
+}
+
+func TestIdempotencyMiddleware_BatchScopesAreIndependent(t *testing.T) {
+	first, second := NewIdempotencyMiddleware(nil), NewIdempotencyMiddleware(nil)
+	defer func() { _ = first.Stop(context.Background()); _ = second.Stop(context.Background()) }()
+	release := make(chan struct{})
+	close(release)
+	transport := &blockedBatchTransport{entered: make(chan struct{}, 1), release: release}
+	bus := messaging.NewMessageBus(transport)
+	bus.Use(first)
+	bus.Use(second)
+	err := bus.PublishAll(context.Background(), []messaging.IMessage{
+		command.NewCommand("a", "CreateUser", "1", "User", nil),
+		command.NewCommand("b", "CreateUser", "2", "User", nil),
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, int32(1), transport.calls.Load())
+	assert.Equal(t, 2, first.GetProcessedCount())
+	assert.Equal(t, 2, second.GetProcessedCount())
+}
+
 // TestIdempotencyMiddleware_TTLExpiration 验证 IdempotencyMiddleware TTLExpiration。
 func TestIdempotencyMiddleware_TTLExpiration(t *testing.T) {
 	const ttl = 50 * time.Millisecond
@@ -331,6 +428,8 @@ func TestIdempotencyMiddleware_ClearKeepsActiveCommandLock(t *testing.T) {
 	cmd := command.NewCommand("cmd-1", "CreateUser", "1", "User", nil)
 	started := make(chan struct{})
 	release := make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	defer unblock()
 	firstErr := make(chan error, 1)
 	secondErr := make(chan error, 1)
 	secondReturned := make(chan struct{})
@@ -361,19 +460,13 @@ func TestIdempotencyMiddleware_ClearKeepsActiveCommandLock(t *testing.T) {
 
 	select {
 	case <-secondReturned:
-		t.Fatal("expected Clear to keep active command lock until first execution finishes")
-	case <-time.After(20 * time.Millisecond):
-	}
-
-	close(release)
-
-	select {
-	case <-secondReturned:
 	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for second execution")
+		t.Fatal("expected contended command to fail without waiting")
 	}
+	assert.ErrorIs(t, <-secondErr, errors.Concurrency)
+	unblock()
 	assert.NoError(t, <-firstErr)
-	assert.NoError(t, <-secondErr)
+	assert.NoError(t, middleware.Handle(context.Background(), cmd, secondNext))
 	assert.Equal(t, int32(1), atomic.LoadInt32(&executionCount))
 }
 

@@ -111,12 +111,19 @@ func (t *MemoryTransport) Publish(ctx context.Context, message messaging.IMessag
 		return cloneErr
 	}
 
+	// 克隆可能执行用户代码；入队时重新确认队列仍属于本轮运行，
+	// 并持有状态锁，保证 Stop 不能在发送期间关闭队列。
+	t.mutex.RLock()
+	defer t.mutex.RUnlock()
+	if !t.running || t.queue != queue {
+		return errors.NewCode(errors.Conflict, "memory transport stopped while cloning message")
+	}
 	return publishOne(ctx, queue, queuedMessage)
 }
 
 // PublishAll 按顺序把一批消息写入内存队列。
 //
-// 说明：消息克隆或校验过程中的 panic 会传播给调用方；队列关闭导致的发送 panic 会转换为 Conflict 错误。
+// 说明：消息克隆或校验过程中的 panic 会传播给调用方。
 // 批量入队会在入队前检查 ctx，开始写入队列后不再逐条监听 ctx.Done。
 func (t *MemoryTransport) PublishAll(ctx context.Context, messages []messaging.IMessage) error {
 	if ctx == nil {
@@ -166,11 +173,10 @@ func (t *MemoryTransport) PublishAll(ctx context.Context, messages []messaging.I
 	}
 
 	t.mutex.RLock()
-	if !t.running {
+	if !t.running || t.queue != queue {
 		t.mutex.RUnlock()
-		return errors.NewCode(errors.Conflict, "memory transport is not running")
+		return errors.NewCode(errors.Conflict, "memory transport stopped while cloning messages")
 	}
-	queue = t.queue
 	if cap(queue)-len(queue) < len(cloned) {
 		t.mutex.RUnlock()
 		return errors.NewCodeWithCause(errors.Queue, "message queue is full", nil)
@@ -180,12 +186,10 @@ func (t *MemoryTransport) PublishAll(ctx context.Context, messages []messaging.I
 	return publishMany(queue, cloned)
 }
 
-func publishOne(ctx context.Context, queue chan messaging.IMessage, message messaging.IMessage) (err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			err = errors.NewCode(errors.Conflict, "memory transport is stopping")
-		}
-	}()
+func publishOne(ctx context.Context, queue chan messaging.IMessage, message messaging.IMessage) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	select {
 	case queue <- message:
 		return nil
@@ -196,12 +200,7 @@ func publishOne(ctx context.Context, queue chan messaging.IMessage, message mess
 	}
 }
 
-func publishMany(queue chan messaging.IMessage, messages []messaging.IMessage) (err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			err = errors.NewCode(errors.Conflict, "memory transport is stopping")
-		}
-	}()
+func publishMany(queue chan messaging.IMessage, messages []messaging.IMessage) error {
 	for _, message := range messages {
 		queue <- message
 	}

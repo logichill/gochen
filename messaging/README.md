@@ -62,4 +62,8 @@ NATS、Redis Streams、Kafka 等适配器实现 ITransport，并明确以下语�
 
 MessageBus 可并发发布与订阅。Use / SetHandlerErrorHook 等配置在装配期完成，避免运行期时序改变中间件生效边界。
 
+多消息 `PublishAll` 先逐条执行中间件，再统一投递。中间件必须同步调用 `next`，可按顺序调用多次；一次中间件调用返回错误或 panic 时，会撤销该次调用暂存的消息及幂等预留，保留此前成功准备的消息，供外层恢复或重试。即使调用返回 `nil`，若该次没有保留下来的待投递消息，也会撤销该次新增的幂等状态，使被过滤或撤销的命令仍可重试。
+
+每次 `Publish` / `PublishAll` 调用的幂等作用域独立。嵌套发布继续继承租户、链路、取消信号和截止时间，已完成的内层投递不会随外层批次回滚。
+
 Core 示例见[死信处理](../examples/messaging/deadletter/main.go)。在 Core 仓库执行 `GOWORK=off go test -count=1 ./messaging/...`；并发行为由各 Transport 与总线测试覆盖。

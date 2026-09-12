@@ -116,6 +116,83 @@ func (m *blockingCloneMessage) CloneMessageEnvelope() messaging.IMessage {
 	return &clone
 }
 
+func TestMemoryTransport_PublishAllDoesNotCrossRestart(t *testing.T) {
+	ctx := context.Background()
+	tpt := NewMemoryTransportForTest(2)
+	require.NoError(t, tpt.Start(ctx))
+	message := &blockingCloneMessage{
+		Message: messaging.NewMessage("batch-restart", messaging.KindEvent, "test", nil),
+		started: make(chan struct{}), release: make(chan struct{}),
+	}
+	done := make(chan error, 1)
+	go func() { done <- tpt.PublishAll(ctx, []messaging.IMessage{message}) }()
+	<-message.started
+	_, err := tpt.StopWithSnapshot(ctx)
+	require.NoError(t, err)
+	require.NoError(t, tpt.Start(ctx))
+	close(message.release)
+	if err := <-done; !errors.Is(err, errors.Conflict) {
+		t.Errorf("old batch entered restarted transport: %v", err)
+	}
+	pending, err := tpt.StopWithSnapshot(ctx)
+	require.NoError(t, err)
+	require.Empty(t, pending)
+}
+
+func TestMemoryTransport_PublishCanceledContextDoesNotEnqueue(t *testing.T) {
+	tpt := NewMemoryTransportForTest(64)
+	require.NoError(t, tpt.Start(context.Background()))
+	t.Cleanup(func() { require.NoError(t, tpt.Stop(context.Background())) })
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for i := 0; i < 64; i++ {
+		err := tpt.Publish(ctx, messaging.NewMessage("canceled", messaging.KindEvent, "test", nil))
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("canceled publish = %v, queue depth = %d", err, tpt.Stats().QueueDepth)
+		}
+	}
+	if depth := tpt.Stats().QueueDepth; depth != 0 {
+		t.Fatalf("canceled messages were enqueued: %d", depth)
+	}
+}
+
+func TestMemoryTransport_PublishConcurrentStop(t *testing.T) {
+	ctx := context.Background()
+	for i := 0; i < 100; i++ {
+		tpt := NewMemoryTransportForTest(1)
+		require.NoError(t, tpt.Start(ctx))
+		message := &blockingCloneMessage{
+			Message: messaging.NewMessage("publish-stop", messaging.KindEvent, "test", nil),
+			started: make(chan struct{}),
+			release: make(chan struct{}),
+		}
+		published := make(chan error, 1)
+		go func() { published <- tpt.Publish(ctx, message) }()
+		<-message.started
+
+		type stopResult struct {
+			pending []messaging.IMessage
+			err     error
+		}
+		stopped := make(chan stopResult, 1)
+		go func() {
+			pending, err := tpt.StopWithSnapshot(ctx)
+			stopped <- stopResult{pending, err}
+		}()
+		close(message.release)
+
+		publishErr, result := <-published, <-stopped
+		require.NoError(t, result.err)
+		if publishErr == nil {
+			require.Len(t, result.pending, 1)
+			require.Equal(t, message.GetID(), result.pending[0].GetID())
+		} else {
+			require.True(t, errors.Is(publishErr, errors.Conflict))
+			require.Empty(t, result.pending)
+		}
+	}
+}
+
 // TestMemoryTransport_PublishFlow 验证 MemoryTransport PublishFlow。
 func TestMemoryTransport_PublishFlow(t *testing.T) {
 	tpt := NewMemoryTransport(16, 2)

@@ -31,6 +31,36 @@ type publishAllBatchMiddleware interface {
 	BeginPublishAllBatch(ctx context.Context) (context.Context, func(success bool))
 }
 
+type publishAllAttemptMiddleware interface {
+	BeginPublishAllAttempt(ctx context.Context) func(success bool)
+}
+
+type publishAllMiddleware struct {
+	IMiddleware
+	messages *[]IMessage
+	attempts []publishAllAttemptMiddleware
+}
+
+func (m publishAllMiddleware) Handle(ctx context.Context, message IMessage, next HandlerFunc) error {
+	checkpoint := len(*m.messages)
+	success := false
+	defer func() {
+		if !success {
+			clear((*m.messages)[checkpoint:])
+			*m.messages = (*m.messages)[:checkpoint]
+		}
+	}()
+	for _, middleware := range m.attempts {
+		if finish := middleware.BeginPublishAllAttempt(ctx); finish != nil {
+			defer func() { finish(success) }()
+		}
+	}
+	err := m.IMiddleware.Handle(ctx, message, next)
+	// 内层短路或恢复错误可能返回 nil，却没有留下待投递消息；此时也撤销本次新增状态。
+	success = err == nil && len(*m.messages) > checkpoint
+	return err
+}
+
 // IMessageBus 消息总线接口。
 type IMessageBus interface {
 	Subscribe(ctx context.Context, messageType string, handler IMessageHandler) (UnsubscribeFunc, error)
@@ -206,6 +236,17 @@ func (bus *MessageBus) PublishAll(ctx context.Context, messages []IMessage) erro
 		}
 	}()
 
+	// 每层调用独立回滚，确保错误被外层恢复或重试时，失败尝试的消息和状态已撤销。
+	var attempts []publishAllAttemptMiddleware
+	for _, middleware := range middlewares {
+		if attempt, ok := middleware.(publishAllAttemptMiddleware); ok {
+			attempts = append(attempts, attempt)
+		}
+	}
+	for i, middleware := range middlewares {
+		middlewares[i] = publishAllMiddleware{IMiddleware: middleware, messages: &batched, attempts: attempts}
+	}
+
 	for index, message := range messages {
 		if message == nil {
 			return errors.NewCode(errors.InvalidInput, "message is nil").WithContext("index", index)
@@ -245,9 +286,17 @@ func (bus *MessageBus) PublishAll(ctx context.Context, messages []IMessage) erro
 	return nil
 }
 
-// executeMiddlewares 构建并执行最终处理链。
+// executeMiddlewares 隔离继承的批次状态，再构建并执行即时投递处理链。
 func (bus *MessageBus) executeMiddlewares(ctx context.Context, message IMessage, finalHandler HandlerFunc) error {
-	return bus.executeMiddlewaresWith(ctx, message, finalHandler, bus.snapshotMiddlewares())
+	middlewares := bus.snapshotMiddlewares()
+	for _, middleware := range middlewares {
+		if publisher, ok := middleware.(interface {
+			BeginPublish(context.Context) context.Context
+		}); ok {
+			ctx = publisher.BeginPublish(ctx)
+		}
+	}
+	return bus.executeMiddlewaresWith(ctx, message, finalHandler, middlewares)
 }
 
 func (bus *MessageBus) snapshotMiddlewares() []IMiddleware {
