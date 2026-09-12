@@ -51,6 +51,9 @@ type Config struct {
 	// - 若返回 false，将立即停止重试并返回该错误；
 	// - 典型用法：只对网络错误、5xx、限流错误等重试。
 	RetryIf func(err error) bool
+
+	// OnRetry 可选：单次尝试失败且确定重试、进入退避前触发的回调。
+	OnRetry func(ctx context.Context, attempt int, err error, delay time.Duration)
 }
 
 // DefaultConfig 返回默认配置。
@@ -190,6 +193,9 @@ func do(ctx context.Context, cfg Config, op OperationWithInfo) error {
 
 		if attempt < cfg.MaxAttempts {
 			delay := computeDelay(cfg, attempt)
+			if cfg.OnRetry != nil {
+				cfg.OnRetry(ctx, attempt, err, delay)
+			}
 			if delay > 0 {
 				timer := clk.NewTimer(delay)
 				select {

@@ -41,6 +41,9 @@ type IModel interface {
 
 	First(ctx context.Context, dest any, opts ...QueryOption) error
 	Find(ctx context.Context, dest any, opts ...QueryOption) error
+	// Count 统计满足条件的记录数。
+	// 当指定 WithGroupBy 时，统计分组后的组数（即以子查询形式执行 SELECT COUNT(*) FROM (SELECT ... GROUP BY ...)）；
+	// 仅应用 Where、Joins 和 GroupBy，忽略分页、投影、排序、预加载及行锁选项。
 	Count(ctx context.Context, opts ...QueryOption) (int64, error)
 
 	Create(ctx context.Context, entities ...any) error

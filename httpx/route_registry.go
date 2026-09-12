@@ -291,8 +291,8 @@ func (r *routeRegistry) conflicts() []RouteConflict {
 	return out
 }
 
-// normalizeRoutePrefix 规范化路由前缀。
-func normalizeRoutePrefix(prefix string) string {
+// NormalizeRoutePrefix 规范化路由前缀。
+func NormalizeRoutePrefix(prefix string) string {
 	prefix = strings.TrimSpace(prefix)
 	if prefix == "" || prefix == "/" {
 		return ""
@@ -303,8 +303,12 @@ func normalizeRoutePrefix(prefix string) string {
 	return strings.TrimSuffix(prefix, "/")
 }
 
-// normalizeRoutePath 规范化路由路径。
-func normalizeRoutePath(path string) string {
+func normalizeRoutePrefix(prefix string) string {
+	return NormalizeRoutePrefix(prefix)
+}
+
+// NormalizeRoutePath 规范化路由路径。
+func NormalizeRoutePath(path string) string {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return ""
@@ -315,9 +319,14 @@ func normalizeRoutePath(path string) string {
 	return path
 }
 
-func joinRoutePrefix(parentPrefix string, childPrefix string) string {
-	parentPrefix = normalizeRoutePrefix(parentPrefix)
-	childPrefix = normalizeRoutePrefix(childPrefix)
+func normalizeRoutePath(path string) string {
+	return NormalizeRoutePath(path)
+}
+
+// JoinRoutePrefix 拼接父前缀和子前缀。
+func JoinRoutePrefix(parentPrefix string, childPrefix string) string {
+	parentPrefix = NormalizeRoutePrefix(parentPrefix)
+	childPrefix = NormalizeRoutePrefix(childPrefix)
 	if parentPrefix == "" {
 		return childPrefix
 	}
@@ -327,14 +336,32 @@ func joinRoutePrefix(parentPrefix string, childPrefix string) string {
 	return parentPrefix + childPrefix
 }
 
-func joinRoutePath(prefix string, path string) string {
-	prefix = normalizeRoutePrefix(prefix)
-	path = normalizeRoutePath(path)
+func joinRoutePrefix(parentPrefix string, childPrefix string) string {
+	return JoinRoutePrefix(parentPrefix, childPrefix)
+}
+
+// JoinRoutePath 拼接路由前缀与子路径，严格保留子路径指定的尾部斜杠语义。
+func JoinRoutePath(prefix string, path string) string {
+	prefix = NormalizeRoutePrefix(prefix)
+	path = strings.TrimSpace(path)
 	if prefix == "" {
+		if path == "" {
+			return "/"
+		}
+		if !strings.HasPrefix(path, "/") {
+			return "/" + path
+		}
 		return path
 	}
-	if path == "" || path == "/" {
+	if path == "" {
 		return prefix
 	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
 	return prefix + path
+}
+
+func joinRoutePath(prefix string, path string) string {
+	return JoinRoutePath(prefix, path)
 }

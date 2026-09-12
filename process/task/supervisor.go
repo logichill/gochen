@@ -93,28 +93,9 @@ func (gm *TaskSupervisor) Go(ctx context.Context, taskName string, fn func(conte
 		return err
 	}
 
-	go func() {
-		defer gm.wg.Done()
-		defer func() {
-			if r := recover(); r != nil {
-				stack := string(debug.Stack())
-				gm.recordFailure(GoroutineFailure{
-					Manager: gm.name,
-					Task:    taskName,
-					Panic:   r,
-					Stack:   stack,
-					At:      gm.clock.Now(),
-				})
-				gm.logger.Error(ctx, "goroutine panic recovered",
-					logging.String("manager", gm.name),
-					logging.String("task", taskName),
-					logging.Any("panic", r),
-					logging.String("stack", stack))
-			}
-		}()
-
+	gm.launchManaged(ctx, taskName, "goroutine panic recovered", func() {
 		fn(ctx)
-	}()
+	})
 	return nil
 }
 
@@ -134,26 +115,7 @@ func (gm *TaskSupervisor) GoLoop(ctx context.Context, taskName string, interval 
 		return err
 	}
 
-	go func() {
-		defer gm.wg.Done()
-		defer func() {
-			if r := recover(); r != nil {
-				stack := string(debug.Stack())
-				gm.recordFailure(GoroutineFailure{
-					Manager: gm.name,
-					Task:    taskName,
-					Panic:   r,
-					Stack:   stack,
-					At:      gm.clock.Now(),
-				})
-				gm.logger.Error(ctx, "goroutine loop panic recovered",
-					logging.String("manager", gm.name),
-					logging.String("task", taskName),
-					logging.Any("panic", r),
-					logging.String("stack", stack))
-			}
-		}()
-
+	gm.launchManaged(ctx, taskName, "goroutine loop panic recovered", func() {
 		ticker, err := gm.clock.NewTicker(interval)
 		if err != nil {
 			gm.recordFailure(GoroutineFailure{Manager: gm.name, Task: taskName, Err: err, At: gm.clock.Now()})
@@ -197,7 +159,7 @@ func (gm *TaskSupervisor) GoLoop(ctx context.Context, taskName string, interval 
 				return
 			}
 		}
-	}()
+	})
 	return nil
 }
 
@@ -219,47 +181,19 @@ func (gm *TaskSupervisor) GoWithTimeout(ctx context.Context, taskName string, ti
 		return err
 	}
 
-	go func() {
-		defer gm.wg.Done()
-		defer func() {
-			if r := recover(); r != nil {
-				stack := string(debug.Stack())
-				gm.recordFailure(GoroutineFailure{
-					Manager: gm.name,
-					Task:    taskName,
-					Panic:   r,
-					Stack:   stack,
-					At:      gm.clock.Now(),
-				})
-				gm.logger.Error(ctx, "goroutine panic recovered",
-					logging.String("manager", gm.name),
-					logging.String("task", taskName),
-					logging.Any("panic", r),
-					logging.String("stack", stack))
-			}
-		}()
-
+	gm.launchManaged(ctx, taskName, "goroutine panic recovered", func() {
 		timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
 
 		done := make(chan error, 1)
 		go func() {
 			// 避免 fn() 内部 panic 导致外层永远等不到 done，从而 goroutine 泄露。
-			defer func() {
-				if r := recover(); r != nil {
-					stack := string(debug.Stack())
-					gm.recordFailure(GoroutineFailure{Manager: gm.name, Task: taskName, Panic: r, Stack: stack, At: gm.clock.Now()})
-					gm.logger.Error(ctx, "goroutine task panic",
-						logging.String("manager", gm.name),
-						logging.String("task", taskName),
-						logging.Any("panic", r),
-						logging.String("stack", stack))
-					done <- &supervisedTaskPanicError{err: errors.NewCode(errors.Internal, "goroutine task panic").
-						WithContext("manager", gm.name).
-						WithContext("task", taskName).
-						WithContext("panic", r)}
-				}
-			}()
+			defer gm.recoverPanic(ctx, taskName, "goroutine task panic", func(r any, _ string) {
+				done <- &supervisedTaskPanicError{err: errors.NewCode(errors.Internal, "goroutine task panic").
+					WithContext("manager", gm.name).
+					WithContext("task", taskName).
+					WithContext("panic", r)}
+			})
 			done <- fn(timeoutCtx)
 		}()
 
@@ -287,7 +221,7 @@ func (gm *TaskSupervisor) GoWithTimeout(ctx context.Context, taskName string, ti
 				logging.String("task", taskName),
 				logging.Duration("timeout", timeout))
 		}
-	}()
+	})
 	return nil
 }
 
@@ -547,4 +481,33 @@ func NewStopContext(parent context.Context, fallback time.Duration) (context.Con
 		timeout = time.Millisecond
 	}
 	return context.WithTimeout(context.WithoutCancel(parent), timeout)
+}
+
+func (gm *TaskSupervisor) recoverPanic(ctx context.Context, taskName, msg string, onRecover func(r any, stack string)) {
+	if r := recover(); r != nil {
+		stack := string(debug.Stack())
+		gm.recordFailure(GoroutineFailure{
+			Manager: gm.name,
+			Task:    taskName,
+			Panic:   r,
+			Stack:   stack,
+			At:      gm.clock.Now(),
+		})
+		gm.logger.Error(ctx, msg,
+			logging.String("manager", gm.name),
+			logging.String("task", taskName),
+			logging.Any("panic", r),
+			logging.String("stack", stack))
+		if onRecover != nil {
+			onRecover(r, stack)
+		}
+	}
+}
+
+func (gm *TaskSupervisor) launchManaged(ctx context.Context, taskName, panicMsg string, body func()) {
+	go func() {
+		defer gm.wg.Done()
+		defer gm.recoverPanic(ctx, taskName, panicMsg, nil)
+		body()
+	}()
 }

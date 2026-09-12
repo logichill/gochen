@@ -194,3 +194,61 @@ func TestMemoryStore_CleanupSnapshotsNonPositiveRetentionNoop(t *testing.T) {
 		t.Fatalf("expected snapshot to survive zero retention cleanup: %v", err)
 	}
 }
+
+func TestMemoryStore_TypedMetadataIsolation(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore[int64]()
+
+	originalIDs := []int{1, 2, 3}
+	originalMap := map[string]int{"a": 10}
+
+	snap := Snapshot[int64]{
+		AggregateID:   100,
+		AggregateType: "test",
+		Version:       1,
+		Data:          []byte("test-data"),
+		Timestamp:     time.Now(),
+		Metadata: map[string]any{
+			"ids": originalIDs,
+			"map": originalMap,
+		},
+	}
+	if err := store.SaveSnapshot(ctx, snap); err != nil {
+		t.Fatalf("save snapshot failed: %v", err)
+	}
+
+	// 外部修改保存输入
+	originalIDs[0] = 99
+	originalMap["a"] = 99
+
+	found, err := store.FindSnapshot(ctx, "test", 100)
+	if err != nil {
+		t.Fatalf("find snapshot failed: %v", err)
+	}
+
+	ids, ok := found.Metadata["ids"].([]int)
+	if !ok || len(ids) != 3 || ids[0] != 1 {
+		t.Fatalf("expected isolated slice ids[0]==1, got %v", found.Metadata["ids"])
+	}
+	m, ok := found.Metadata["map"].(map[string]int)
+	if !ok || m["a"] != 10 {
+		t.Fatalf("expected isolated map m[a]==10, got %v", found.Metadata["map"])
+	}
+
+	// 修改查询返回值
+	ids[0] = 123
+	m["a"] = 123
+
+	again, err := store.FindSnapshot(ctx, "test", 100)
+	if err != nil {
+		t.Fatalf("second find snapshot failed: %v", err)
+	}
+	idsAgain := again.Metadata["ids"].([]int)
+	if idsAgain[0] != 1 {
+		t.Fatalf("expected isolated slice after mutation, got %v", idsAgain)
+	}
+	mAgain := again.Metadata["map"].(map[string]int)
+	if mAgain["a"] != 10 {
+		t.Fatalf("expected isolated map after mutation, got %v", mAgain)
+	}
+}

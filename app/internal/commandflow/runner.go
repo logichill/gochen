@@ -56,35 +56,29 @@ func Run[T any](ctx context.Context, plan Plan[T]) (Result[T], error) {
 		return result, errors.NewCode(errors.InvalidInput, "attempt func is nil")
 	}
 
-	cfg := normalizeRetryConfig(plan.RetryConfig)
-	startedAt := time.Now()
-	var finalErr error
+	cfg := plan.RetryConfig
+	if cfg.MaxAttempts <= 0 {
+		cfg.MaxAttempts = 1
+	}
+	if cfg.RetryIf == nil {
+		cfg.RetryIf = func(error) bool { return false }
+	}
+	if plan.OnRetry != nil {
+		cfg.OnRetry = func(retryCtx context.Context, attempt int, err error, delay time.Duration) {
+			plan.OnRetry(retryCtx, attempt, result.State, err, delay)
+		}
+	}
 
-	for attempt := 1; attempt <= cfg.MaxAttempts; attempt++ {
-		state, err := plan.Attempt(ctx, attempt)
+	startedAt := time.Now()
+	finalErr := retry.DoWithInfo(ctx, func(attemptCtx context.Context, attempt int) error {
+		state, err := plan.Attempt(attemptCtx, attempt)
 		result.State = state
 		result.Attempts = attempt
 		if plan.AfterAttempt != nil {
-			plan.AfterAttempt(ctx, attempt, state, err)
+			plan.AfterAttempt(attemptCtx, attempt, state, err)
 		}
-		if err == nil {
-			finalErr = nil
-			break
-		}
-		if attempt >= cfg.MaxAttempts || !cfg.RetryIf(err) {
-			finalErr = err
-			break
-		}
-
-		delay := retry.ComputeDelay(cfg, attempt)
-		if plan.OnRetry != nil {
-			plan.OnRetry(ctx, attempt, state, err, delay)
-		}
-		if waitErr := waitBackoff(ctx, delay); waitErr != nil {
-			finalErr = waitErr
-			break
-		}
-	}
+		return err
+	}, cfg)
 
 	if finalErr != nil && plan.WrapFinalError != nil {
 		finalErr = plan.WrapFinalError(finalErr, result.Attempts)
@@ -98,34 +92,4 @@ func Run[T any](ctx context.Context, plan Plan[T]) (Result[T], error) {
 		plan.Trace(ctx, result.Attempts, result.Elapsed, finalErr)
 	}
 	return result, finalErr
-}
-
-func normalizeRetryConfig(cfg retry.Config) retry.Config {
-	if cfg.MaxAttempts <= 0 {
-		cfg.MaxAttempts = 1
-	}
-	if cfg.RetryIf == nil {
-		cfg.RetryIf = func(error) bool { return false }
-	}
-	return cfg
-}
-
-func waitBackoff(ctx context.Context, delay time.Duration) error {
-	if delay <= 0 {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-			return nil
-		}
-	}
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
 }

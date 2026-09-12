@@ -67,36 +67,12 @@ func (p *MemoryLockProvider) AcquireLease(ctx context.Context, key string) (ILoc
 		return nil, ctx.Err()
 	}
 
-	lease := &memoryLease{lost: make(chan error)}
-	lease.release = func() {
-		lease.once.Do(func() {
-			p.releaseWaiter(key, entry, acquired)
-			close(lease.lost)
-		})
+	lost := make(chan error)
+	release := func() {
+		p.releaseWaiter(key, entry, acquired)
+		close(lost)
 	}
-	return lease, nil
-}
-
-type memoryLease struct {
-	once    sync.Once
-	release func()
-	lost    chan error
-}
-
-func (l *memoryLease) Release() {
-	if l == nil || l.release == nil {
-		return
-	}
-	l.release()
-}
-
-func (l *memoryLease) Lost() <-chan error {
-	if l == nil {
-		ch := make(chan error)
-		close(ch)
-		return ch
-	}
-	return l.lost
+	return NewLease(release, lost), nil
 }
 
 func (p *MemoryLockProvider) releaseWaiter(key string, entry *memoryLock, acquired bool) {

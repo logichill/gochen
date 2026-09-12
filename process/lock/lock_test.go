@@ -122,7 +122,7 @@ func TestMemoryLockProvider_AcquireLeaseLostClosesOnRelease(t *testing.T) {
 }
 
 func TestMemoryLockProvider_AcquireLeaseLostClosesForNilLease(t *testing.T) {
-	var lease *memoryLease
+	var lease *Lease
 
 	select {
 	case _, ok := <-lease.Lost():
