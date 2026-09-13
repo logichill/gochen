@@ -26,7 +26,7 @@ Runtime `db/schema` 提供 Schema / Table / Column / Index AST，introspect、di
 - 标识符仅接受安全名称；复杂 SQL 表达式不能充当表、列或索引名。
 - SQLite 已有表新增无默认值的 NOT NULL 列会被拒绝；MySQL 非主键 AUTO_INCREMENT 列不能由当前 AST 自动安全渲染。这类迁移须显式设计。
 
-Contrib `data/orm/gorm.GenerateMigrationDraft` 从模型生成 AST 并比较当前数据库，`WriteMigrationDraft` 写入 SQL 文件。复杂场景可用带 options 的入口注入 current schema / introspector。
+Contrib `db/migrate/gormmigrate.GenerateMigrationDraft` 从模型生成 AST 并比较当前数据库，`WriteMigrationDraft` 写入 SQL 文件。复杂场景可用带 options 的入口注入 current schema / introspector。
 
 执行前检查 Warnings 和 SQL。生成的 down 草稿含 `ManualReviewGuardStatement`，Runner 在设置 dirty 前识别并拒绝该 guard；人工审核后才可解除。数据回填、收紧约束和破坏性 DDL 的影响由具体迁移方案承担。
 

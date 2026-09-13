@@ -9,7 +9,8 @@
 | `http/gin` | 实现 Core HTTP 上下文、服务器与路由组契约 |
 | `data/db/gorm` | 基于 GORM 的数据库与事务适配 |
 | `data/db/gorm/factory` | 可选的 MySQL/PostgreSQL/SQLite 配置与 DSN 工厂 |
-| `data/orm/gorm` | 实现 ORM / Model 查询能力及模型到迁移草稿的转换 |
+| `data/orm/gorm` | 实现 ORM / Model 查询能力与事务会话管理 |
+| `db/migrate/gormmigrate` | 基于 GORM 模型的 schema AST 解析、迁移草稿生成与 AutoMigrate 工具 |
 | `data/db/driver` | 数据库驱动注册 |
 | `lock/redis` | Redis 分布式锁 |
 | `observe/otel` | OpenTelemetry 追踪适配 |
