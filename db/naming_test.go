@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"gochen/db"
-	"gochen/db/orm"
 	"gochen/testkit/assert"
 )
 
@@ -20,9 +19,6 @@ func TestNamingConventionDefaults(t *testing.T) {
 	assert.Equal(t, "updated_by", def.UpdatedByColumn)
 	assert.Equal(t, "deleted_at", def.DeletedAtColumn)
 	assert.Equal(t, "deleted_by", def.DeletedByColumn)
-
-	ormDef := orm.DefaultNamingConvention()
-	assert.Equal(t, def, ormDef)
 }
 
 func TestNamingConvention_WithDefaults(t *testing.T) {

@@ -295,27 +295,6 @@ func TestDefaultConfig(t *testing.T) {
 	}
 }
 
-// TestPow 验证 Pow。
-func TestPow(t *testing.T) {
-	tests := []struct {
-		base, exp, expected float64
-	}{
-		{2, 0, 1},
-		{2, 1, 2},
-		{2, 2, 4},
-		{2, 3, 8},
-		{3, 2, 9},
-		{10, 3, 1000},
-	}
-
-	for _, tt := range tests {
-		result := pow(tt.base, tt.exp)
-		if result != tt.expected {
-			t.Errorf("pow(%v, %v) = %v, expected %v", tt.base, tt.exp, result, tt.expected)
-		}
-	}
-}
-
 // TestIsRetryable 验证 IsRetryable。
 func TestIsRetryable(t *testing.T) {
 	if IsRetryable(nil) {

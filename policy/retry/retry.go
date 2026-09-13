@@ -104,10 +104,6 @@ func DoWithInfo(ctx context.Context, op OperationWithInfo, cfg Config) error {
 	return do(ctx, cfg, op)
 }
 
-func pow(base, exp float64) float64 {
-	return math.Pow(base, exp)
-}
-
 // normalizeConfig 规范化配置。
 func normalizeConfig(cfg Config) Config {
 	if cfg.MaxAttempts <= 0 {
@@ -219,7 +215,7 @@ func computeDelay(cfg Config, attempt int) time.Duration {
 	if attempt <= 0 {
 		attempt = 1
 	}
-	scaled := float64(cfg.InitialDelay) * pow(cfg.BackoffFactor, float64(attempt-1))
+	scaled := float64(cfg.InitialDelay) * math.Pow(cfg.BackoffFactor, float64(attempt-1))
 	var delay time.Duration
 	switch {
 	case math.IsNaN(scaled) || scaled <= 0:

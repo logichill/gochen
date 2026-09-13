@@ -40,6 +40,10 @@ type ProjectionConfig struct {
 	CheckpointSaveCount int
 }
 
+func projectionLogger() logging.ILogger {
+	return logging.ComponentLogger("projection.manager")
+}
+
 func defaultDeadLetterFunc() func(err error, event eventing.IEvent, projection string) {
 	return func(err error, event eventing.IEvent, projection string) {
 		ctx := contextx.Background()

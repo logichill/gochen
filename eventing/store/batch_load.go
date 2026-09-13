@@ -9,23 +9,7 @@ import (
 	"gochen/eventing"
 )
 
-// AggregateExists 检查聚合是否存在。
-func AggregateExists[ID comparable](ctx context.Context, store IEventStore[ID], aggregateType string, aggregateID ID) (bool, error) {
-	return store.HasAggregate(ctx, aggregateType, aggregateID)
-}
-
-// GetCurrentVersion 从存储中查询事件。
-//
-// 说明：
-// - GetCurrentVersion 获取聚合当前版本。
-func GetCurrentVersion[ID comparable](ctx context.Context, store IEventStore[ID], aggregateType string, aggregateID ID) (uint64, error) {
-	return store.GetAggregateVersion(ctx, aggregateType, aggregateID)
-}
-
-// LoadAllEvents 解析事件。
-//
-// 说明：
-// - LoadAllEvents 加载聚合所有事件。
+// LoadAllEvents 加载聚合所有事件（版本从 0 开始）。
 func LoadAllEvents[ID comparable](ctx context.Context, store IEventStore[ID], aggregateType string, aggregateID ID) ([]eventing.Event[ID], error) {
 	return store.LoadEvents(ctx, aggregateType, aggregateID, 0)
 }

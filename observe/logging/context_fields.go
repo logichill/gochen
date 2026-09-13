@@ -3,7 +3,7 @@ package logging
 import (
 	"context"
 
-	"gochen/contextx/fields"
+	"gochen/contextx/field"
 )
 
 // ContextFields 从 ctx 中提取标准化的链路字段（若存在）。
@@ -16,17 +16,17 @@ func ContextFields(ctx context.Context) []Field {
 		return nil
 	}
 	var out []Field
-	if v := fields.TenantID(ctx); v != "" {
-		out = append(out, String(fields.MetadataTenantKey, v))
+	if v := field.TenantID(ctx); v != "" {
+		out = append(out, String(field.MetadataTenantKey, v))
 	}
-	if v := fields.TraceID(ctx); v != "" {
-		out = append(out, String(fields.MetadataTraceKey, v))
+	if v := field.TraceID(ctx); v != "" {
+		out = append(out, String(field.MetadataTraceKey, v))
 	}
-	if v := fields.RequestID(ctx); v != "" {
-		out = append(out, String(fields.MetadataRequestIDKey, v))
+	if v := field.RequestID(ctx); v != "" {
+		out = append(out, String(field.MetadataRequestIDKey, v))
 	}
-	if v := fields.Operator(ctx); v != "" {
-		out = append(out, String(fields.MetadataOperatorKey, v))
+	if v := field.Operator(ctx); v != "" {
+		out = append(out, String(field.MetadataOperatorKey, v))
 	}
 	return out
 }

@@ -8,7 +8,7 @@ import (
 	"gochen/contextx"
 	"gochen/eventing"
 	"gochen/eventing/store"
-	"gochen/eventing/store/decorators"
+	"gochen/eventing/store/decorator"
 	"gochen/messaging/command"
 	"gochen/testkit/assert"
 	"gochen/testkit/require"
@@ -46,7 +46,7 @@ func TestEndToEndTraceID(t *testing.T) {
 
 	// 4. 保存事件
 	baseStore := store.NewMemoryEventStore[int64]()
-	tracingStore := decorators.NewTracingEventStore(baseStore)
+	tracingStore := decorator.NewTracingEventStore(baseStore)
 
 	err = tracingStore.AppendEvents(ctx, "Order", event.AggregateID, []eventing.IStorableEvent[int64]{event}, 0)
 	require.NoError(t, err)
@@ -81,7 +81,7 @@ func TestTracingStore_MultipleEvents(t *testing.T) {
 
 	// 保存
 	baseStore := store.NewMemoryEventStore[int64]()
-	tracingStore := decorators.NewTracingEventStore(baseStore)
+	tracingStore := decorator.NewTracingEventStore(baseStore)
 
 	err = tracingStore.AppendEvents(ctx, "Order", 100, events, 0)
 	require.NoError(t, err)
@@ -102,7 +102,7 @@ func TestTracingStore_WithoutContext(t *testing.T) {
 	event := testutil.NewEvent[int64](100, "Order", "OrderCreated", 1, nil)
 
 	baseStore := store.NewMemoryEventStore[int64]()
-	tracingStore := decorators.NewTracingEventStore(baseStore)
+	tracingStore := decorator.NewTracingEventStore(baseStore)
 
 	err := tracingStore.AppendEvents(ctx, "Order", event.AggregateID, []eventing.IStorableEvent[int64]{event}, 0)
 	require.NoError(t, err)
@@ -133,7 +133,7 @@ func TestTraceChain(t *testing.T) {
 	// Event1
 	event1 := testutil.NewEvent[int64](100, "Order", "OrderCreated", 1, nil)
 	baseStore := store.NewMemoryEventStore[int64]()
-	tracingStore := decorators.NewTracingEventStore(baseStore)
+	tracingStore := decorator.NewTracingEventStore(baseStore)
 	err = tracingStore.AppendEvents(ctx, "Order", event1.AggregateID, []eventing.IStorableEvent[int64]{event1}, 0)
 	require.NoError(t, err)
 

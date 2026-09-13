@@ -7,7 +7,7 @@ import (
 	"gochen/contextx"
 	"gochen/errors"
 	"gochen/messaging"
-	"gochen/messaging/transport/internal/subscriptions"
+	"gochen/messaging/transport/internal/subscription"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -155,7 +155,7 @@ func (t *SyncTransport) PublishAll(ctx context.Context, messages []messaging.IMe
 
 // Subscribe 为指定消息类型注册处理器，并返回取消订阅函数。
 func (t *SyncTransport) Subscribe(ctx context.Context, messageType string, handler messaging.IMessageHandler) (messaging.UnsubscribeFunc, error) {
-	return subscriptions.Subscribe(ctx, &t.mutex, t.handlers, messageType, handler)
+	return subscription.Subscribe(ctx, &t.mutex, t.handlers, messageType, handler)
 }
 
 // Start 将传输层切换到可发布状态。

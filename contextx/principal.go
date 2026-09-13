@@ -10,7 +10,7 @@ import (
 	"context"
 	"strings"
 
-	"gochen/contextx/fields"
+	"gochen/contextx/field"
 )
 
 type principalKey uint8
@@ -23,22 +23,22 @@ const (
 
 // WithTenantID 返回携带 tenantID 的 context。
 func WithTenantID(ctx context.Context, tenantID string) (context.Context, error) {
-	return fields.WithTenantID(ctx, tenantID)
+	return field.WithTenantID(ctx, tenantID)
 }
 
 // TenantID 从 context 中获取 tenantID。
 func TenantID(ctx context.Context) string {
-	return fields.TenantID(ctx)
+	return field.TenantID(ctx)
 }
 
 // WithOperator 返回携带 operator 的 context。
 func WithOperator(ctx context.Context, operator string) (context.Context, error) {
-	return fields.WithOperator(ctx, operator)
+	return field.WithOperator(ctx, operator)
 }
 
 // Operator 从 context 中获取 operator。
 func Operator(ctx context.Context) string {
-	return fields.Operator(ctx)
+	return field.Operator(ctx)
 }
 
 // WithUserID 返回携带 userID 的 context。

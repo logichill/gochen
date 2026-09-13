@@ -36,7 +36,7 @@ type routeRegistryServer struct {
 
 // GET 注册 GET 路由并记录注册信息（用于启动期冲突检测）。
 func (s *routeRegistryServer) GET(path string, handler Handler) IServer {
-	s.reg.add("GET", normalizeRoutePath(path))
+	s.reg.add("GET", NormalizeRoutePath(path))
 	if inner := s.inner.GET(path, handler); inner != nil {
 		s.inner = inner
 	}
@@ -45,7 +45,7 @@ func (s *routeRegistryServer) GET(path string, handler Handler) IServer {
 
 // POST 注册 POST 路由并记录注册信息（用于启动期冲突检测）。
 func (s *routeRegistryServer) POST(path string, handler Handler) IServer {
-	s.reg.add("POST", normalizeRoutePath(path))
+	s.reg.add("POST", NormalizeRoutePath(path))
 	if inner := s.inner.POST(path, handler); inner != nil {
 		s.inner = inner
 	}
@@ -54,7 +54,7 @@ func (s *routeRegistryServer) POST(path string, handler Handler) IServer {
 
 // PUT 注册 PUT 路由并记录注册信息（用于启动期冲突检测）。
 func (s *routeRegistryServer) PUT(path string, handler Handler) IServer {
-	s.reg.add("PUT", normalizeRoutePath(path))
+	s.reg.add("PUT", NormalizeRoutePath(path))
 	if inner := s.inner.PUT(path, handler); inner != nil {
 		s.inner = inner
 	}
@@ -63,7 +63,7 @@ func (s *routeRegistryServer) PUT(path string, handler Handler) IServer {
 
 // DELETE 注册 DELETE 路由并记录注册信息（用于启动期冲突检测）。
 func (s *routeRegistryServer) DELETE(path string, handler Handler) IServer {
-	s.reg.add("DELETE", normalizeRoutePath(path))
+	s.reg.add("DELETE", NormalizeRoutePath(path))
 	if inner := s.inner.DELETE(path, handler); inner != nil {
 		s.inner = inner
 	}
@@ -72,7 +72,7 @@ func (s *routeRegistryServer) DELETE(path string, handler Handler) IServer {
 
 // PATCH 注册 PATCH 路由并记录注册信息（用于启动期冲突检测）。
 func (s *routeRegistryServer) PATCH(path string, handler Handler) IServer {
-	s.reg.add("PATCH", normalizeRoutePath(path))
+	s.reg.add("PATCH", NormalizeRoutePath(path))
 	if inner := s.inner.PATCH(path, handler); inner != nil {
 		s.inner = inner
 	}
@@ -81,7 +81,7 @@ func (s *routeRegistryServer) PATCH(path string, handler Handler) IServer {
 
 // HEAD 注册 HEAD 路由并记录注册信息（用于启动期冲突检测）。
 func (s *routeRegistryServer) HEAD(path string, handler Handler) IServer {
-	s.reg.add("HEAD", normalizeRoutePath(path))
+	s.reg.add("HEAD", NormalizeRoutePath(path))
 	if inner := s.inner.HEAD(path, handler); inner != nil {
 		s.inner = inner
 	}
@@ -90,7 +90,7 @@ func (s *routeRegistryServer) HEAD(path string, handler Handler) IServer {
 
 // OPTIONS 注册 OPTIONS 路由并记录注册信息（用于启动期冲突检测）。
 func (s *routeRegistryServer) OPTIONS(path string, handler Handler) IServer {
-	s.reg.add("OPTIONS", normalizeRoutePath(path))
+	s.reg.add("OPTIONS", NormalizeRoutePath(path))
 	if inner := s.inner.OPTIONS(path, handler); inner != nil {
 		s.inner = inner
 	}
@@ -102,7 +102,7 @@ func (s *routeRegistryServer) Group(prefix string) IRouteGroup {
 	return &routeRegistryGroup{
 		inner:  s.inner.Group(prefix),
 		reg:    s.reg,
-		prefix: normalizeRoutePrefix(prefix),
+		prefix: NormalizeRoutePrefix(prefix),
 	}
 }
 
@@ -120,7 +120,7 @@ func (s *routeRegistryServer) Static(prefix, root string) IServer {
 	// 以及真正的静态资源前缀（以 / 结尾的 pattern）。
 	//
 	// 这里用 method+path 记录，便于启动期 fail-fast 检测“重复注册”（即便底层实现不 panic）。
-	p := normalizeRoutePath(prefix)
+	p := NormalizeRoutePath(prefix)
 	if p == "" {
 		p = "/"
 	}
@@ -143,7 +143,7 @@ func (s *routeRegistryServer) Static(prefix, root string) IServer {
 
 // ServeStatic 提供静态资源服务，并记录潜在冲突信息（method+path）。
 func (s *routeRegistryServer) ServeStatic(path, root string) {
-	p := normalizeRoutePath(path)
+	p := NormalizeRoutePath(path)
 	s.reg.add("GET", p)
 	s.reg.add("HEAD", p)
 	s.inner.ServeStatic(path, root)
@@ -165,7 +165,7 @@ type routeRegistryGroup struct {
 
 // GET 注册 GET 路由并记录注册信息（用于启动期冲突检测）。
 func (g *routeRegistryGroup) GET(path string, handler Handler) IRouteGroup {
-	g.reg.add("GET", joinRoutePath(g.prefix, path))
+	g.reg.add("GET", JoinRoutePath(g.prefix, path))
 	if inner := g.inner.GET(path, handler); inner != nil {
 		g.inner = inner
 	}
@@ -174,7 +174,7 @@ func (g *routeRegistryGroup) GET(path string, handler Handler) IRouteGroup {
 
 // POST 注册 POST 路由并记录注册信息（用于启动期冲突检测）。
 func (g *routeRegistryGroup) POST(path string, handler Handler) IRouteGroup {
-	g.reg.add("POST", joinRoutePath(g.prefix, path))
+	g.reg.add("POST", JoinRoutePath(g.prefix, path))
 	if inner := g.inner.POST(path, handler); inner != nil {
 		g.inner = inner
 	}
@@ -183,7 +183,7 @@ func (g *routeRegistryGroup) POST(path string, handler Handler) IRouteGroup {
 
 // PUT 注册 PUT 路由并记录注册信息（用于启动期冲突检测）。
 func (g *routeRegistryGroup) PUT(path string, handler Handler) IRouteGroup {
-	g.reg.add("PUT", joinRoutePath(g.prefix, path))
+	g.reg.add("PUT", JoinRoutePath(g.prefix, path))
 	if inner := g.inner.PUT(path, handler); inner != nil {
 		g.inner = inner
 	}
@@ -192,7 +192,7 @@ func (g *routeRegistryGroup) PUT(path string, handler Handler) IRouteGroup {
 
 // DELETE 注册 DELETE 路由并记录注册信息（用于启动期冲突检测）。
 func (g *routeRegistryGroup) DELETE(path string, handler Handler) IRouteGroup {
-	g.reg.add("DELETE", joinRoutePath(g.prefix, path))
+	g.reg.add("DELETE", JoinRoutePath(g.prefix, path))
 	if inner := g.inner.DELETE(path, handler); inner != nil {
 		g.inner = inner
 	}
@@ -201,7 +201,7 @@ func (g *routeRegistryGroup) DELETE(path string, handler Handler) IRouteGroup {
 
 // PATCH 注册 PATCH 路由并记录注册信息（用于启动期冲突检测）。
 func (g *routeRegistryGroup) PATCH(path string, handler Handler) IRouteGroup {
-	g.reg.add("PATCH", joinRoutePath(g.prefix, path))
+	g.reg.add("PATCH", JoinRoutePath(g.prefix, path))
 	if inner := g.inner.PATCH(path, handler); inner != nil {
 		g.inner = inner
 	}
@@ -210,7 +210,7 @@ func (g *routeRegistryGroup) PATCH(path string, handler Handler) IRouteGroup {
 
 // HEAD 注册 HEAD 路由并记录注册信息（用于启动期冲突检测）。
 func (g *routeRegistryGroup) HEAD(path string, handler Handler) IRouteGroup {
-	g.reg.add("HEAD", joinRoutePath(g.prefix, path))
+	g.reg.add("HEAD", JoinRoutePath(g.prefix, path))
 	if inner := g.inner.HEAD(path, handler); inner != nil {
 		g.inner = inner
 	}
@@ -219,7 +219,7 @@ func (g *routeRegistryGroup) HEAD(path string, handler Handler) IRouteGroup {
 
 // OPTIONS 注册 OPTIONS 路由并记录注册信息（用于启动期冲突检测）。
 func (g *routeRegistryGroup) OPTIONS(path string, handler Handler) IRouteGroup {
-	g.reg.add("OPTIONS", joinRoutePath(g.prefix, path))
+	g.reg.add("OPTIONS", JoinRoutePath(g.prefix, path))
 	if inner := g.inner.OPTIONS(path, handler); inner != nil {
 		g.inner = inner
 	}
@@ -231,7 +231,7 @@ func (g *routeRegistryGroup) Group(prefix string) IRouteGroup {
 	return &routeRegistryGroup{
 		inner:  g.inner.Group(prefix),
 		reg:    g.reg,
-		prefix: joinRoutePrefix(g.prefix, prefix),
+		prefix: JoinRoutePrefix(g.prefix, prefix),
 	}
 }
 
@@ -261,7 +261,7 @@ func newRouteRegistry() *routeRegistry {
 // add 累计 (METHOD, normalizedPath) 注册次数；用于 conflicts 检测重复路由。
 func (r *routeRegistry) add(method, path string) {
 	method = strings.TrimSpace(strings.ToUpper(method))
-	path = normalizeRoutePath(path)
+	path = NormalizeRoutePath(path)
 	if method == "" || path == "" {
 		return
 	}
@@ -303,10 +303,6 @@ func NormalizeRoutePrefix(prefix string) string {
 	return strings.TrimSuffix(prefix, "/")
 }
 
-func normalizeRoutePrefix(prefix string) string {
-	return NormalizeRoutePrefix(prefix)
-}
-
 // NormalizeRoutePath 规范化路由路径。
 func NormalizeRoutePath(path string) string {
 	path = strings.TrimSpace(path)
@@ -317,10 +313,6 @@ func NormalizeRoutePath(path string) string {
 		path = "/" + path
 	}
 	return path
-}
-
-func normalizeRoutePath(path string) string {
-	return NormalizeRoutePath(path)
 }
 
 // JoinRoutePrefix 拼接父前缀和子前缀。
@@ -334,10 +326,6 @@ func JoinRoutePrefix(parentPrefix string, childPrefix string) string {
 		return parentPrefix
 	}
 	return parentPrefix + childPrefix
-}
-
-func joinRoutePrefix(parentPrefix string, childPrefix string) string {
-	return JoinRoutePrefix(parentPrefix, childPrefix)
 }
 
 // JoinRoutePath 拼接路由前缀与子路径，严格保留子路径指定的尾部斜杠语义。
@@ -360,8 +348,4 @@ func JoinRoutePath(prefix string, path string) string {
 		path = "/" + path
 	}
 	return prefix + path
-}
-
-func joinRoutePath(prefix string, path string) string {
-	return JoinRoutePath(prefix, path)
 }

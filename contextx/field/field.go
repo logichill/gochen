@@ -1,5 +1,5 @@
-// Package fields 提供轻量级 context 字段键和访问器。
-package fields
+// Package field 提供轻量级 context 字段键和访问器。
+package field
 
 import (
 	"context"

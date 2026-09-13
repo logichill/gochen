@@ -5,7 +5,7 @@ import (
 	"context"
 
 	"gochen/messaging"
-	"gochen/messaging/transport/internal/subscriptions"
+	"gochen/messaging/transport/internal/subscription"
 )
 
 // Subscribe 订阅消息并注册处理器。
@@ -22,5 +22,5 @@ import (
 // - - error: 订阅失败时返回错误。
 func (t *MemoryTransport) Subscribe(ctx context.Context, messageType string, handler messaging.IMessageHandler) (messaging.UnsubscribeFunc, error) {
 	// Keep ctx nil checks and other validations consistent across transports.
-	return subscriptions.Subscribe(ctx, &t.mutex, t.handlers, messageType, handler)
+	return subscription.Subscribe(ctx, &t.mutex, t.handlers, messageType, handler)
 }
