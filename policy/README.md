@@ -20,7 +20,9 @@
 
 ## 限流
 
-`Limiter.Allow(key string)` 使用 key 区分令牌桶。同一固定 key 可作为全局配额，用户 / IP 等 key 可用于细分配额。RequestsPerSecond 非正时不限流；WindowSize 控制空闲 key 回收。
+`Limiter.Allow(key string)` 使用 key 区分令牌桶。同一固定 key 可作为全局配额，用户 / IP 等 key 可用于细分配额。RequestsPerSecond 为 `float64`，支持小数速率，例如 `0.5` 表示每分钟补充 30 个令牌；有限非正值不限流，NaN / Inf 拒绝请求。BurstSize 非正时使用速率向上取整值，最少为 1。
+
+`Limiter.Tokens(key)` 读取当前令牌数，不消耗令牌，也不延长闲置时间。WindowSize 控制闲置清理频率；只回收已补满的空闲桶，避免低速率配额在清理后被提前重置。
 
 复用同一 limiter 实例才能累计配额，不应为每次请求创建实例。
 

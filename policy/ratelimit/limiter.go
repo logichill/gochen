@@ -1,6 +1,7 @@
 package ratelimit
 
 import (
+	"math"
 	"sync"
 	"time"
 
@@ -9,9 +10,10 @@ import (
 
 // Config 定义限流器配置。
 type Config struct {
-	// RequestsPerSecond 每秒允许请求数（<=0 表示不限流）。
-	RequestsPerSecond int
-	// BurstSize 突发容量（<=0 时按 RequestsPerSecond 兜底，仍 <=0 则默认 1）。
+	// RequestsPerSecond 每秒补充的令牌数，支持小数（如 0.5 表示每分钟 30 次）。
+	// <=0 表示不限流；NaN 和无穷值拒绝请求。
+	RequestsPerSecond float64
+	// BurstSize 突发容量（<=0 时使用向上取整的 RequestsPerSecond，最少 1）。
 	BurstSize int
 	// WindowSize 用于 key 维度的“闲置清理”窗口（<=0 默认 1 分钟）。
 	WindowSize time.Duration
@@ -31,21 +33,19 @@ type tokenBucket struct {
 }
 
 // newTokenBucket 创建令牌Bucket。
-func newTokenBucket(clk clock.IClock, rps int, burst int) *tokenBucket {
+func newTokenBucket(clk clock.IClock, rps float64, burst int) *tokenBucket {
 	if clk == nil {
 		clk = clock.NewRealClock()
 	}
 	if rps <= 0 {
 		rps = 1
 	}
-	if burst <= 0 {
-		burst = rps
-	}
+	capacity := burstCapacity(rps, burst)
 	return &tokenBucket{
 		clk:        clk,
-		rate:       float64(rps),
-		capacity:   float64(burst),
-		tokens:     float64(burst),
+		rate:       rps,
+		capacity:   capacity,
+		tokens:     capacity,
 		lastRefill: clk.Now(),
 	}
 }
@@ -55,7 +55,22 @@ func (b *tokenBucket) allow() bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	now := b.clk.Now()
+	b.refillLocked(b.clk.Now())
+	if b.tokens >= 1.0 {
+		b.tokens -= 1.0
+		return true
+	}
+	return false
+}
+
+func burstCapacity(rps float64, burst int) float64 {
+	if burst > 0 {
+		return float64(burst)
+	}
+	return math.Max(1, math.Ceil(rps))
+}
+
+func (b *tokenBucket) refillLocked(now time.Time) {
 	elapsed := now.Sub(b.lastRefill).Seconds()
 	if elapsed > 0 {
 		b.tokens += elapsed * b.rate
@@ -64,12 +79,13 @@ func (b *tokenBucket) allow() bool {
 		}
 		b.lastRefill = now
 	}
+}
 
-	if b.tokens >= 1.0 {
-		b.tokens -= 1.0
-		return true
-	}
-	return false
+func (b *tokenBucket) available(now time.Time) float64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.refillLocked(now)
+	return b.tokens
 }
 
 type bucketEntry struct {
@@ -114,6 +130,9 @@ func (l *Limiter) Allow(key string) bool {
 	if l == nil {
 		return true
 	}
+	if math.IsNaN(l.cfg.RequestsPerSecond) || math.IsInf(l.cfg.RequestsPerSecond, 0) {
+		return false
+	}
 	if l.cfg.RequestsPerSecond <= 0 {
 		return true
 	}
@@ -128,7 +147,8 @@ func (l *Limiter) Allow(key string) bool {
 	if now.Sub(l.lastCleanup) >= cleanupInterval {
 		expireBefore := now.Add(-cleanupInterval)
 		for k, entry := range l.buckets {
-			if entry == nil || entry.lastSeen.Before(expireBefore) {
+			// 仅清理已补满的闲置桶，避免低速率在窗口过期时凭空恢复突发额度。
+			if entry == nil || (entry.lastSeen.Before(expireBefore) && entry.bucket.available(now) >= entry.bucket.capacity) {
 				delete(l.buckets, k)
 			}
 		}
@@ -152,4 +172,18 @@ func (l *Limiter) Allow(key string) bool {
 		return true
 	}
 	return bucket.allow()
+}
+
+// Tokens 返回指定 key 当前可用的令牌数，不消耗令牌，也不延长闲置清理时间。
+// 未访问过的 key 返回完整突发容量；不限流或无效配置返回 0。
+func (l *Limiter) Tokens(key string) float64 {
+	if l == nil || l.cfg.RequestsPerSecond <= 0 || math.IsNaN(l.cfg.RequestsPerSecond) || math.IsInf(l.cfg.RequestsPerSecond, 0) {
+		return 0
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if entry := l.buckets[key]; entry != nil {
+		return entry.bucket.available(l.clk.Now())
+	}
+	return burstCapacity(l.cfg.RequestsPerSecond, l.cfg.BurstSize)
 }
