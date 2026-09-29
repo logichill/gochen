@@ -42,6 +42,9 @@ type cacheMetricsHolder struct {
 func NewCachedEventStore[ID comparable](inner store.IEventStreamStore[ID], config *Config) *CachedEventStore[ID] {
 	if config == nil {
 		config = DefaultConfig()
+	} else {
+		configCopy := *config
+		config = &configCopy
 	}
 
 	// 验证并修正配置值

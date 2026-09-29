@@ -3,6 +3,7 @@ package cached
 import (
 	"context"
 	"gochen/eventing/internal/testutil"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,6 +16,71 @@ import (
 	"gochen/eventing/store"
 	"gochen/messaging"
 )
+
+func TestNewCachedEventStore_DoesNotMutateConfig(t *testing.T) {
+	inner := store.NewMemoryEventStore[int64]()
+	customClock := clock.NewRealClock()
+
+	// 零值字段会被归一化到内部默认值，但调用方传入的配置对象必须保持原样。
+	zero := &Config{Clock: customClock}
+	cachedStore := NewCachedEventStore[int64](inner, zero)
+	defer cachedStore.Close()
+
+	if zero.TTL != 0 || zero.MaxAggregates != 0 || zero.CleanupInterval != 0 || zero.DisableCleanup {
+		t.Fatalf("constructor mutated caller config: %+v", zero)
+	}
+	if zero.Clock != customClock {
+		t.Fatalf("constructor replaced caller clock: %v", zero.Clock)
+	}
+	if cachedStore.interval != time.Minute || cachedStore.cache.ttl != 5*time.Minute || cachedStore.cache.maxAggregates != defaultMaxAggregates {
+		t.Fatalf("normalized values not applied: interval=%v ttl=%v max=%d",
+			cachedStore.interval, cachedStore.cache.ttl, cachedStore.cache.maxAggregates)
+	}
+	if cachedStore.clock != customClock {
+		t.Fatalf("custom clock not propagated")
+	}
+
+	// 显式配置同样不允许被改写。
+	custom := &Config{
+		TTL:             time.Second,
+		MaxAggregates:   7,
+		CleanupInterval: 2 * time.Second,
+		DisableCleanup:  true,
+	}
+	customStore := NewCachedEventStore[int64](inner, custom)
+	if custom.TTL != time.Second || custom.MaxAggregates != 7 || custom.CleanupInterval != 2*time.Second || !custom.DisableCleanup {
+		t.Fatalf("constructor mutated custom config: %+v", custom)
+	}
+	if customStore.interval != 2*time.Second || customStore.cache.ttl != time.Second || customStore.cache.maxAggregates != 7 {
+		t.Fatalf("custom values not applied: interval=%v ttl=%v max=%d",
+			customStore.interval, customStore.cache.ttl, customStore.cache.maxAggregates)
+	}
+}
+
+func TestNewCachedEventStore_ConcurrentSharedConfig(t *testing.T) {
+	const goroutines = 8
+
+	inner := store.NewMemoryEventStore[int64]()
+	// 共享同一配置指针并发构造：构造器只读输入，故 race 检测下必须无竞争。
+	shared := &Config{DisableCleanup: true}
+
+	var wg sync.WaitGroup
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cachedStore := NewCachedEventStore[int64](inner, shared)
+			if cachedStore.interval != time.Minute || cachedStore.cache.ttl != 5*time.Minute {
+				t.Errorf("normalized values not applied: interval=%v ttl=%v", cachedStore.interval, cachedStore.cache.ttl)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if shared.TTL != 0 || shared.MaxAggregates != 0 || shared.CleanupInterval != 0 || !shared.DisableCleanup || shared.Clock != nil {
+		t.Fatalf("concurrent construction mutated shared config: %+v", shared)
+	}
+}
 
 // TestCachedEventStore 验证 CachedEventStore。
 func TestCachedEventStore(t *testing.T) {

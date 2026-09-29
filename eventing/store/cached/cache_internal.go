@@ -3,7 +3,6 @@ package cached
 import (
 	"container/list"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"gochen/eventing"
@@ -24,10 +23,9 @@ type EventCache[ID comparable] struct {
 
 // CachedAggregate 缓存的聚合数据。
 type CachedAggregate[ID comparable] struct {
-	Events     []eventing.Event[ID] // 事件列表
-	Version    uint64               // 当前版本
-	LastAccess atomic.Int64         // 最后访问时间（UnixNano）
-	CreatedAt  time.Time            // 创建时间
+	Events    []eventing.Event[ID] // 事件列表
+	Version   uint64               // 当前版本
+	CreatedAt time.Time            // 创建时间
 }
 
 type aggregateCacheKey[ID comparable] struct {
@@ -73,7 +71,6 @@ func (s *CachedEventStore[ID]) getCachedEvents(key aggregateCacheKey[ID], fromVe
 
 	s.cache.mutex.Lock()
 	if current, ok := s.cache.aggregateCache[key]; ok && current == cached && !s.isExpired(current) {
-		current.LastAccess.Store(s.now().UnixNano())
 		s.touchCacheEntryUnsafe(key)
 	}
 	s.cache.mutex.Unlock()
@@ -115,7 +112,6 @@ func (s *CachedEventStore[ID]) cacheAggregateUnsafe(key aggregateCacheKey[ID], e
 		Version:   latestVersion,
 		CreatedAt: now,
 	}
-	cached.LastAccess.Store(now.UnixNano())
 	if _, exists := s.cache.aggregateCache[key]; !exists {
 		for len(s.cache.aggregateCache) >= s.cache.maxAggregates {
 			s.evictOldestUnsafe()
@@ -255,16 +251,6 @@ func (s *CachedEventStore[ID]) isExpired(cached *CachedAggregate[ID]) bool {
 		return true
 	}
 	return s.now().Sub(cached.CreatedAt) > s.cache.ttl
-}
-
-func (c *CachedAggregate[ID]) lastAccessTime() time.Time {
-	if c == nil {
-		return time.Time{}
-	}
-	if nanos := c.LastAccess.Load(); nanos > 0 {
-		return time.Unix(0, nanos)
-	}
-	return c.CreatedAt
 }
 
 func (s *CachedEventStore[ID]) now() time.Time {
