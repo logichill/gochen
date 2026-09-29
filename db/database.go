@@ -18,19 +18,21 @@ import (
 
 // IDatabase 通用数据库接口。
 type IDatabase interface {
-	// 查询操作
+	// 查询操作。ctx 为 nil 时实现必须返回 InvalidInput；QueryRow 始终返回非 nil 行对象，
+	// 延迟错误由其 Scan/Err 暴露。
 	Query(ctx context.Context, query string, args ...any) (IRows, error)
 	QueryRow(ctx context.Context, query string, args ...any) IRow
 
 	// 执行操作
 	Exec(ctx context.Context, query string, args ...any) (sql.Result, error)
 
-	// 事务操作
+	// 事务操作。嵌套事务可按实现契约返回 Unsupported。
 	Begin(ctx context.Context) (ITransaction, error)
 	BeginTx(ctx context.Context, opts *sql.TxOptions) (ITransaction, error)
 
 	// 连接管理
 	Ping(ctx context.Context) error
+	// Close 释放当前实现拥有的资源；借用事务视图的 Close 必须保持 no-op。
 	Close() error
 }
 

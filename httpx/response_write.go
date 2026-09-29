@@ -141,5 +141,5 @@ func isSafeRedirectLocation(location string) bool {
 	if err != nil {
 		return false
 	}
-	return u.IsAbs() == false && u.Host == "" && strings.HasPrefix(u.Path, "/")
+	return !u.IsAbs() && u.Host == "" && strings.HasPrefix(u.Path, "/")
 }

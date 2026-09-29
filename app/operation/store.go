@@ -366,9 +366,7 @@ func (s *MemoryStore) pruneDeletedTombstonesLocked() {
 	for len(s.deleted) > defaultMaxDeletedTombstones && len(s.deletedOrder) > 0 {
 		id := s.deletedOrder[0]
 		s.deletedOrder = s.deletedOrder[1:]
-		if _, ok := s.deleted[id]; ok {
-			delete(s.deleted, id)
-		}
+		delete(s.deleted, id)
 	}
 	if len(s.deleted) == 0 {
 		s.deletedOrder = nil

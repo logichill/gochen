@@ -1,4 +1,4 @@
-.PHONY: help telemetry-off test test-core integration coverage coverage-core coverage-check race race-core bench bench-core test-all downstream-smoke check-downstream clean docs fmt vet lint lint-full check stats
+.PHONY: help telemetry-off test test-core integration coverage coverage-core coverage-check race race-core bench bench-core test-all downstream-smoke check-downstream clean docs fmt vet lint lint-full check quality-local stats
 
 CORE_PACKAGES := ./domain/eventsourced ./app/eventsourced ./eventing/projection ./eventing/outbox
 COVERAGE_MIN ?= 55
@@ -211,3 +211,15 @@ check: fmt vet lint test race coverage-check
 # 完整检查并验证声明下游项目。
 check-downstream: check downstream-smoke
 	@echo "✅ 完整检查通过！"
+
+# 无全局副作用的独立质量入口；显式关闭 workspace，确保 Core 零依赖约束可复验。
+quality-local:
+	GOWORK=off go build ./...
+	GOWORK=off go vet ./...
+	@if ! command -v golangci-lint >/dev/null 2>&1; then \
+		echo "golangci-lint not found; install golangci-lint v2.x or run through CI"; \
+		exit 127; \
+	fi
+	GOWORK=off golangci-lint run --new=false ./...
+	GOWORK=off go test -count=1 ./...
+	GOWORK=off go test -race -count=1 ./...

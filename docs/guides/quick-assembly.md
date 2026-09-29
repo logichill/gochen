@@ -43,18 +43,49 @@ Core [db.NamingConvention](../../db/naming.go) 定义默认列名：
 | `quick.RESTRegistrar(app, opts...)` | 返回 `func(httpx.IRouteGroup) error`，用于模块路由注册 |
 | `quick.RESTRegister(group, app, opts...)` | 直接调用标准 REST 注册器 |
 | `quick.Module(name, registrar, opts...)` | 返回 `module.ModuleCtor`，用于轻量路由模块 |
-| `quick.Run(ctx, name, port, modules...)` | 启动并阻塞等待服务结束 |
-| `quick.Server(name, port, modules...)` | 返回生命周期引擎，调用方控制启动 |
+| `quick.New(opts...)` | 创建应用声明，高级选项复用 host/config |
+| `app.Modules(ctors...)` | 注册模块，默认按模块 ID 推导前缀 |
+| `app.Group(prefix).Use(middlewares...)` | 创建共享前缀与 middleware 的作用域，可继续嵌套 |
+| `app.Mount(prefix, ctor)` | 显式覆盖模块前缀，"/" 表示当前组根路径 |
+| `app.Run(ctx)` / `app.Build()` | 阻塞运行 / 返回生命周期引擎 |
 
 Quick Host 默认监听 `0.0.0.0`，BasePath 为 `/api/v1`，使用 net/http server，并启用路由冲突检查。`quick.Module` 可通过 `WithMiddlewares`、`WithDependencies`、`WithExtensions` 配置模块行为；它不提供业务 provider builder。需要依赖注入 provider、事件处理器或投影注册时，使用 `gochen-runtime/host.Module`。
 
 `registrar` 的类型为 `func(httpx.IRouteGroup) error`。对象通过 `router.RegisterRoutes` 方法值传入；需要工厂初始化时，先在调用方完成构造和错误处理，再传入注册函数。
 
-需要自定义监听地址、BasePath、HTTP server 或运行时能力时，使用 `host.Run` / `host.New` 与 `host/config` options。基础设施由组合根创建，再交给业务模块。
+需要自定义监听地址、BasePath、HTTP server 或运行时能力时，将 `host/config` options 传给 `quick.New`。基础设施由组合根创建，再交给业务模块；完整模块和轻量模块使用相同的挂载入口。
+
+```go
+app := quick.New()
+app.Use(auditMiddleware)
+app.Modules(NewIAMModule)
+business := app.Group("").Use(authMiddleware)
+business.Modules(NewFamilyModule, NewShopModule)
+business.Group("/admin").Modules(NewLLMModule)
+if err := app.Run(ctx); err != nil {
+    return err
+}
+```
+
+默认路径为 BasePath + 分组前缀 + "/" + 模块 ID；Mount 仅覆盖最后的模块前缀，不影响 middleware。模块 ID 仍在整个 Host 中唯一，不允许通过不同分组重复挂载同一个 ID。
+
+middleware 顺序为基础 API → 外层分组 → 内层分组 → 模块 → registrar 局部；退出顺序相反。根级 Use 包含健康检查路由，分组 Use 只影响该组及子组模块。认证与授权策略必须显式声明，框架不根据模块名称猜测。
+
+分组声明在 Build 时固定，构建前追加的 Use 会应用到该组已经声明的模块。每个 registrar 获得独立子 group，局部 Use 不影响同模块内的其它 registrar。路由注册后的 middleware 保持 HTTP 适配器原有的快照语义。
+
+应用声明用于启动前单线程装配，每个 Application 只能 Build/Run 一次。模块工厂在 Host Prepare 时执行，模块依赖、扩展及生命周期能力保持不变。Quick 不接受 WithModules、WithModuleHTTP 或非空 WithModuleHTTPDefaults：使用 Modules、Mount、Group 声明，避免两套设置互相覆盖。底层 Host 仍提供显式配置能力。
 
 ## 可运行示例
 
 在 `gochen-runtime` 仓库执行：
+
+```bash
+GOWORK=off go run ./examples/quick/modules
+```
+
+无需配置文件，访问 `/api/v1/hello/ping` 或 `/api/v1/admin/hello-admin/ping`，Ctrl-C 优雅退出。
+
+数据库与授权装配示例：
 
 ```bash
 GOWORK=off go run ./examples/quick
