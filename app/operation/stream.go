@@ -31,7 +31,7 @@ func PrepareStreamHeaders(header http.Header) {
 
 // WriteSSEEvent 把 payload 以单个 SSE event 写出。
 func WriteSSEEvent(writer io.Writer, event string, payload any) error {
-	data, err := jsoncodec.MarshalPreserveNumber(payload)
+	data, err := jsoncodec.Encode(payload)
 	if err != nil {
 		return errors.Wrap(err, errors.Internal, "failed to encode operation stream payload")
 	}

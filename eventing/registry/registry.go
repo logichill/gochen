@@ -125,10 +125,8 @@ func (r *Registry) DeserializeFromMap(eventType string, data map[string]any) (an
 		return nil, errors.NewCode(errors.NotFound, "unknown event type").WithContext("event_type", eventType)
 	}
 
-	// 先将 map 序列化为 JSON bytes
-	// 注意：若 data 来自 json.Decoder.UseNumber() 的解码（数字为 json.Number），直接 json.Marshal 会把数字编码为 JSON string。
-	// 这里使用 jsoncodec.MarshalPreserveNumber 将 json.Number 规范化为可按 number 输出的 RawNumber，避免精度与类型语义丢失。
-	jsonBytes, err := jsoncodec.MarshalPreserveNumber(data)
+	// Encode 直接保留 UseNumber 解码得到的数字表示，不经过浮点数转换。
+	jsonBytes, err := jsoncodec.Encode(data)
 	if err != nil {
 		return nil, errors.Wrap(err, errors.Internal, "failed to marshal event map").WithContext("event_type", eventType)
 	}

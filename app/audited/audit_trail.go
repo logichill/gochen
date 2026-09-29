@@ -115,16 +115,16 @@ func computeEntityDiff[T any](before, after T) (json.RawMessage, error) {
 
 		if !oldExists && newExists {
 			// 新增字段
-			diffs = append(diffs, audited.FieldChange{Field: key, Old: nil, New: jsoncodec.NormalizeNumbers(newVal)})
+			diffs = append(diffs, audited.FieldChange{Field: key, Old: nil, New: newVal})
 		} else if oldExists && !newExists {
 			// 删除字段
-			diffs = append(diffs, audited.FieldChange{Field: key, Old: jsoncodec.NormalizeNumbers(oldVal), New: nil})
+			diffs = append(diffs, audited.FieldChange{Field: key, Old: oldVal, New: nil})
 		} else if !reflect.DeepEqual(oldVal, newVal) {
 			// 变更字段
 			diffs = append(diffs, audited.FieldChange{
 				Field: key,
-				Old:   jsoncodec.NormalizeNumbers(oldVal),
-				New:   jsoncodec.NormalizeNumbers(newVal),
+				Old:   oldVal,
+				New:   newVal,
 			})
 		}
 	}

@@ -12,7 +12,7 @@ import (
 // RawNumber 表示“以字符串保存原始表示，但在 JSON 中按 number 输出”的数值类型。
 //
 // 说明：
-// - 主要用于解决 json.Number 在 any/map 中间态再次 Marshal 时被编码为 JSON string 的问题；
+// - 接受数字或数字字符串输入，拒绝空值；普通 JSON 数字可直接使用 json.Number；
 // - RawNumber.MarshalJSON 会输出不带引号的数字 token，并做语法校验以避免注入。
 type RawNumber string
 

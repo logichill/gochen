@@ -48,6 +48,8 @@ func (c *Codec[T]) Encode(v T) ([]byte, error) {
 }
 
 // Encode 使用默认配置将强类型值序列化为 JSON 字节切片。
+// 遵循 encoding/json 语义：json.Number 保留数字表示，零值编码为 0；
+// nil map/slice 编码为 null，循环引用返回 Internal 错误。
 func Encode[T any](v T) ([]byte, error) {
 	return New[T]().Encode(v)
 }
