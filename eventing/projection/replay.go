@@ -32,9 +32,17 @@ func (pm *ProjectionManager[ID]) resumeRuntimeFromCheckpoint(ctx context.Context
 
 	rt.execMu.Lock()
 	defer rt.execMu.Unlock()
-	wasRunning := rt.isRunning()
+	// active 与 running 取同一快照，避免两次读取之间被并发停用：
+	// 事件处理路径（startWhenDone=false）在投影已停用或已停止时必须静默跳过，
+	// 否则残留在总线上的旧 handler 会把事件变成 Conflict 死信；
+	// 显式恢复（startWhenDone=true）遇到清理中的投影才返回 Conflict。
+	active, wasRunning := rt.lifecycleState()
 	if !startWhenDone && !wasRunning {
 		return nil
+	}
+	if !active {
+		return errors.NewCode(errors.Conflict, "projection is being cleaned up").
+			WithContext("projection", projectionName)
 	}
 
 	pm.mutex.RLock()

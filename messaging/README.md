@@ -40,6 +40,8 @@ MessageBus 将 context 中的 tenant / trace / operator 等语义写入 Metadata
 
 ## 停止与处理失败
 
+`MessageBus.Subscribe` 返回的释放函数仅在底层退订成功后完成；失败可用新的 context 重试同一函数。并发释放串行执行，等待时遵循 context 取消；成功后重复调用不再触达 Transport。Transport 的退订实现也须在失败时保留重试能力。
+
 `messaging.StopTransport(ctx, transport)` 统一处理 Stop、可选 StopWithSnapshot 及已停止的幂等语义。若调用方需要接收并重投 pending，应直接调用 `ITransportStopSnapshot.StopWithSnapshot` 保留其返回值。
 
 正常停止等待已接受消息完成；超时快照可能包含排队中和处理中但未确认完成的消息，重投需按 ID 去重。

@@ -17,6 +17,7 @@ import (
 // ProjectionManager 表示投影管理器。
 type ProjectionManager[ID comparable] struct {
 	runtimes        map[string]*projectionRuntime[ID]
+	registering     map[string]*projectionRuntime[ID]
 	eventStore      store.IEventStreamStore[ID]
 	eventBus        bus.IEventBus
 	config          *ProjectionConfig
@@ -72,6 +73,7 @@ func NewProjectionManagerWithConfig[ID comparable](
 
 	pm := &ProjectionManager[ID]{
 		runtimes:      make(map[string]*projectionRuntime[ID]),
+		registering:   make(map[string]*projectionRuntime[ID]),
 		eventStore:    eventStore,
 		eventBus:      eventBus,
 		config:        config,

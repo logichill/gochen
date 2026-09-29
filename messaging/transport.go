@@ -16,12 +16,15 @@ var ErrTransportAlreadyStopped = stderrors.New("transport already stopped")
 //
 // 约定：
 // - 返回 nil 表示已成功取消或已处于取消状态（幂等）；具体幂等性由实现决定；
+// - 返回错误时必须保留重试能力，不能把失败的释放记为完成；
 // - ctx 可用于远程 transport 的超时/取消控制；对于纯内存实现可忽略。
 type UnsubscribeFunc func(ctx context.Context) error
 
 // ITransport 消息传输接口。
 //
 // 语义约定：
+//   - Start 返回非 nil error 时，必须清理本次启动已经创建的资源；初次启动失败应保持未运行，
+//     对已运行实例的重复启动失败应保留原运行状态，调用方不能无条件调用 Stop；
 //   - Publish/PublishAll 返回的 error 只代表“传输层本身”的错误（连接失败、队列已满、未 Start 等）；
 //   - 对于异步实现（如 memory/redisstreams/natsjetstream），消息处理器（IMessageHandler.Handle）的错误通常不会通过返回值暴露，
 //     而是由实现自行记录日志或上报监控；

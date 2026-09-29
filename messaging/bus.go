@@ -10,6 +10,7 @@ import (
 
 	"gochen/contextx"
 	"gochen/errors"
+	"gochen/internal/cleanup"
 )
 
 // HandlerFunc 是一个函数类型，用于处理消息（中间件链中的基本执行单元）。
@@ -120,6 +121,7 @@ func (bus *MessageBus) getHandlerErrorHook() HandlerErrorHook {
 }
 
 // Subscribe 为指定消息类型注册处理器，并返回幂等的取消订阅函数。
+// 退订失败时保留重试能力；并发退订串行执行，等待时响应 context 取消。
 func (bus *MessageBus) Subscribe(ctx context.Context, messageType string, handler IMessageHandler) (UnsubscribeFunc, error) {
 	if bus == nil || bus.transport == nil {
 		return nil, errors.NewCode(errors.InvalidInput, "message bus transport cannot be nil")
@@ -141,17 +143,7 @@ func (bus *MessageBus) Subscribe(ctx context.Context, messageType string, handle
 		return nil, err
 	}
 
-	var once sync.Once
-	return func(unsubCtx context.Context) error {
-		if unsubCtx == nil {
-			return errors.NewCode(errors.InvalidInput, "ctx is nil")
-		}
-		var err error
-		once.Do(func() {
-			err = unsub(unsubCtx)
-		})
-		return err
-	}, nil
+	return cleanup.Retryable(unsub), nil
 }
 
 func isNilMessageHandler(handler IMessageHandler) bool {

@@ -291,9 +291,11 @@ func (p *MockProjection) Status() ProjectionStatus {
 
 // MockEventBus for testing
 type MockEventBus struct {
-	publishedEvents []eventing.IEvent
-	handlers        map[string][]bus.IEventHandler
-	mu              sync.Mutex
+	publishedEvents  []eventing.IEvent
+	handlers         map[string][]bus.IEventHandler
+	mu               sync.Mutex
+	unsubscribeErr   error
+	unsubscribeCalls int
 }
 
 // PublishEvent 发布事件到事件总线。
@@ -372,19 +374,25 @@ func (m *MockEventBus) SubscribeEvent(ctx context.Context, eventType string, han
 	m.handlers[eventType] = append(m.handlers[eventType], handler)
 	m.mu.Unlock()
 
-	var once sync.Once
+	var unsubscribed bool
 	return func(ctx context.Context) error {
-		once.Do(func() {
-			m.mu.Lock()
-			defer m.mu.Unlock()
-			handlers := m.handlers[eventType]
-			for i := range handlers {
-				if handlers[i] == handler {
-					m.handlers[eventType] = append(handlers[:i], handlers[i+1:]...)
-					break
-				}
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		if unsubscribed {
+			return nil
+		}
+		m.unsubscribeCalls++
+		if m.unsubscribeErr != nil && m.unsubscribeCalls == 1 {
+			return m.unsubscribeErr
+		}
+		handlers := m.handlers[eventType]
+		for i := range handlers {
+			if handlers[i] == handler {
+				m.handlers[eventType] = append(handlers[:i], handlers[i+1:]...)
+				break
 			}
-		})
+		}
+		unsubscribed = true
 		return nil
 	}, nil
 }

@@ -5,10 +5,10 @@ import (
 	"context"
 	"fmt"
 	"reflect"
-	"sync"
 
 	"gochen/errors"
 	"gochen/eventing"
+	"gochen/internal/cleanup"
 	"gochen/messaging"
 )
 
@@ -63,7 +63,8 @@ type IEventBus interface {
 	PublishEvent(ctx context.Context, evt eventing.IEvent) error
 	PublishEvents(ctx context.Context, events []eventing.IEvent) error
 	SubscribeEvent(ctx context.Context, eventType string, handler IEventHandler) (messaging.UnsubscribeFunc, error)
-	// 便捷方法：按处理器声明的事件类型批量订阅，并返回一个“一次性取消所有订阅”的函数。
+	// SubscribeHandler 按事件类型批量订阅，返回可重试的聚合释放函数。
+	// 注册失败且回滚未完成时，同时返回释放函数与错误，调用方必须保留并清理。
 	SubscribeHandler(ctx context.Context, handler IEventHandler) (messaging.UnsubscribeFunc, error)
 }
 
@@ -122,6 +123,8 @@ func (eb *EventBus) SubscribeEvent(ctx context.Context, eventType string, handle
 }
 
 // SubscribeHandler 按处理器声明的事件类型批量订阅。
+// 释放逆序尝试全部订阅并聚合错误，成功项不再重复释放。
+// 注册失败时自动回滚；回滚失败则返回剩余订阅的释放函数及完整错误链。
 func (eb *EventBus) SubscribeHandler(ctx context.Context, handler IEventHandler) (messaging.UnsubscribeFunc, error) {
 	if ctx == nil {
 		return nil, errors.NewCode(errors.InvalidInput, "ctx is nil")
@@ -138,33 +141,37 @@ func (eb *EventBus) SubscribeHandler(ctx context.Context, handler IEventHandler)
 	}
 
 	unsubs := make([]messaging.UnsubscribeFunc, 0, len(types))
+	release := cleanup.Retryable(func(unsubCtx context.Context) error {
+		var errs []error
+		for i := len(unsubs) - 1; i >= 0; i-- {
+			if unsubs[i] == nil {
+				continue
+			}
+			if err := unsubs[i](unsubCtx); err != nil {
+				errs = append(errs, err)
+			} else {
+				unsubs[i] = nil
+			}
+		}
+		return errors.Join(errs...)
+	})
 	for _, t := range types {
 		unsub, err := eb.SubscribeEvent(ctx, t, handler)
+		if unsub != nil {
+			unsubs = append(unsubs, unsub)
+		}
 		if err != nil {
-			// 回滚已创建订阅，避免半注册状态。
-			for i := len(unsubs) - 1; i >= 0; i-- {
-				_ = unsubs[i](ctx)
+			if len(unsubs) == 0 {
+				return nil, err
+			}
+			if rollbackErr := release(ctx); rollbackErr != nil {
+				return release, errors.Join(err, rollbackErr)
 			}
 			return nil, err
 		}
-		unsubs = append(unsubs, unsub)
 	}
 
-	var once sync.Once
-	return func(unsubCtx context.Context) error {
-		if unsubCtx == nil {
-			return errors.NewCode(errors.InvalidInput, "ctx is nil")
-		}
-		var firstErr error
-		once.Do(func() {
-			for i := len(unsubs) - 1; i >= 0; i-- {
-				if err := unsubs[i](unsubCtx); err != nil && firstErr == nil {
-					firstErr = err
-				}
-			}
-		})
-		return firstErr
-	}, nil
+	return release, nil
 }
 
 func isNilEventHandler(handler IEventHandler) bool {

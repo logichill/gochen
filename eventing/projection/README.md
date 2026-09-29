@@ -6,12 +6,20 @@
 
 `NewProjectionManager[ID](eventStore, eventBus, registry, upgraders)` 与带 config 的构造函数均返回 manager 和 error。Registry / UpgraderRegistry 显式注入；投影的类型注册在启动前完成。
 
-- `RegisterProjection` / `RegisterProjectionWithContext` 注册投影。
+- `IProjectionRegistrar.RegisterProjectionAny` 注册投影，返回绑定本次注册的 `messaging.UnsubscribeFunc`。成功返回非 nil 函数；失败但仍有资源待清理时也会返回函数，调用方必须保留并清理。重复释放成功，旧释放函数不会移除同名的新注册。
+- `RegisterProjection` / `RegisterProjectionWithContext` 与按名注销方法供组合根管理；共享 manager 的组件通过上述释放函数管理自身生命周期。
+- `SupportedEventTypes` 中重复的事件类型只建立一次订阅。
 - `StartProjection` / `StopProjection` 控制运行。
 - `ResumeFromCheckpoint` 从持久位置恢复并启动。
 - `RebuildProjection` 重建读模型，完成后保持 stopped，须显式启动。
 
 配置入口为 `ProjectionConfig`；LowLatency、Balanced、HighThroughput 预设控制 checkpoint 保存频率等参数。
+
+注销先停用投影并等待在途处理，再释放订阅。清理进行中或失败时，状态为 `cleanup_pending`；失败原因记录在 `LastError`，名称保持占用，Start/Resume/Rebuild 返回 Conflict。重试释放只处理剩余订阅，完成后状态查询返回 NotFound。
+
+等待并发清理或在途处理时遵循释放上下文的取消与超时；停用后等待超时会保留资源供重试，不启动后台清理。底层订阅释放函数也须遵循传入的 context。
+
+`app/eventsourced.EventSourcedAutoRegistrar.RegisterProjections` 返回各次注册的释放函数；即使批次出错也必须处理返回的函数，可交给 `UnregisterProjections(ctx, releases...)` 逆序释放。批量清理会尝试全部释放函数并聚合错误，失败后可重试同一组函数。
 
 ## 两种运行方式
 

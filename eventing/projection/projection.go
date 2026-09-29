@@ -32,7 +32,7 @@ type ProjectionStatus struct {
 	LastEventTime   time.Time `json:"last_event_time"`
 	ProcessedEvents int64     `json:"processed_events"`
 	FailedEvents    int64     `json:"failed_events"`
-	Status          string    `json:"status"` // running, stopped, error
+	Status          string    `json:"status"` // running, stopped, rebuilding, error, cleanup_pending
 	LastError       string    `json:"last_error,omitempty"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`

@@ -19,6 +19,10 @@ func (pm *ProjectionManager[ID]) RebuildProjection(ctx context.Context, name str
 
 	rt.execMu.Lock()
 	defer rt.execMu.Unlock()
+	if !rt.isActive() {
+		return errors.NewCode(errors.Conflict, "projection is being cleaned up").
+			WithContext("projection", name)
+	}
 
 	pm.mutex.RLock()
 	checkpointStore := pm.checkpointStore

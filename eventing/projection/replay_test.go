@@ -647,3 +647,45 @@ func TestProjectionManager_RebuildProjection_TenantAwareProjectorPreservesCheckp
 	require.Equal(t, int64(len(events)), checkpoint.Position)
 	require.Equal(t, events[len(events)-1].ID, checkpoint.LastEventID)
 }
+
+// TestProjectionEventHandler_SkipsSilentlyAfterFailedUnsubscribe 回归 R2：
+// 启用 checkpoint store 后，投影卸载时若退订失败，旧 handler 仍会收到事件；
+// 此时必须静默跳过，而不是返回 Conflict 并投递死信。
+func TestProjectionEventHandler_SkipsSilentlyAfterFailedUnsubscribe(t *testing.T) {
+	ctx := context.Background()
+	eventStore := store.NewMemoryEventStore[int64]()
+	eventBus := &MockEventBus{unsubscribeErr: errors.New("unsubscribe failed")}
+
+	reg := newTestRegistry(t)
+	manager, err := NewProjectionManager[int64](eventStore, eventBus, reg, upcast.NewUpgraderRegistry())
+	require.NoError(t, err)
+	manager, err = manager.WithCheckpointStore(NewMemoryCheckpointStore())
+	require.NoError(t, err)
+
+	deadLetters := 0
+	manager.config.DeadLetterFunc = func(error, eventing.IEvent, string) { deadLetters++ }
+
+	projection := NewMockProjection("stale-projection", []string{"TestEvent"})
+	require.NoError(t, manager.RegisterProjection(projection))
+	require.NoError(t, manager.StartProjection(projection.Name()))
+
+	rt, ok := manager.runtime(projection.Name())
+	require.True(t, ok)
+	handler := rt.handlers["TestEvent"]
+	require.NotNil(t, handler)
+
+	// 退订失败后 runtime 已停用，但 handler 仍留在总线上。
+	require.Error(t, manager.UnregisterProjectionWithContext(ctx, projection.Name()))
+
+	evt := &eventing.Event[int64]{
+		Message: messaging.Message{
+			ID:        "event-1",
+			Type:      "TestEvent",
+			Timestamp: time.Now(),
+			Metadata:  messaging.NewMetadata(),
+		},
+	}
+	require.NoError(t, handler.HandleEvent(ctx, evt))
+	assert.Equal(t, 0, deadLetters)
+	assert.Equal(t, 0, projection.processedEvents)
+}
