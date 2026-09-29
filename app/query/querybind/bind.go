@@ -11,6 +11,7 @@ import (
 )
 
 var timeType = reflect.TypeOf(time.Time{})
+var decoderType = reflect.TypeOf((*IDecoder)(nil)).Elem()
 
 // IDecoder 表示业务自定义规则的扩展点。
 //
@@ -60,6 +61,15 @@ func bindWithSchemaInferOptions(filters query.QueryFilters, dst any, opts *query
 		exprs := filters.Get(filterName)
 		if len(exprs) == 0 {
 			continue
+		}
+
+		// Validate default pointer traversal before resolveDecoder can allocate a
+		// nil pointer. Custom pointer decoders retain priority and may opt into
+		// their own recursive representation.
+		if fieldValue.Kind() == reflect.Ptr && !fieldValue.Type().Implements(decoderType) {
+			if err := validateBindPointerType(fieldValue.Type(), map[reflect.Type]bool{}); err != nil {
+				return bindError(filterName, err)
+			}
 		}
 
 		if decoder, ok := resolveDecoder(fieldValue); ok {
@@ -135,6 +145,9 @@ func bindDefault(dst reflect.Value, exprs []query.QueryExpr) error {
 	}
 
 	if dst.Kind() == reflect.Ptr {
+		if err := validateBindPointerType(dst.Type(), map[reflect.Type]bool{}); err != nil {
+			return err
+		}
 		if dst.IsNil() {
 			dst.Set(reflect.New(dst.Type().Elem()))
 		}
@@ -154,6 +167,17 @@ func bindDefault(dst reflect.Value, exprs []query.QueryExpr) error {
 	}
 
 	return assignScalar(dst, exprs[0].Value)
+}
+
+func validateBindPointerType(t reflect.Type, path map[reflect.Type]bool) error {
+	for t != nil && t.Kind() == reflect.Pointer {
+		if path[t] {
+			return errors.NewCode(errors.InvalidInput, "querybind: recursive pointer type").WithContext("type", t.String())
+		}
+		path[t] = true
+		t = t.Elem()
+	}
+	return nil
 }
 
 func bindSlice(dst reflect.Value, exprs []query.QueryExpr) error {

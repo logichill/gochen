@@ -5,6 +5,8 @@ import (
 	"slices"
 	"testing"
 	"time"
+
+	"gochen/errors"
 )
 
 type InferEmbeddedFields struct {
@@ -24,6 +26,46 @@ type inferTestEntity struct {
 	Secret    string    `query:"-"`
 	Version   uint64    `query:"nofilter,nosort,noselect"`
 	private   string
+}
+
+type schemaRecursiveLeft struct {
+	Right *schemaRecursiveRight
+}
+
+type schemaRecursiveRight struct {
+	Left *schemaRecursiveLeft
+}
+
+type schemaTreeCategory struct {
+	ID       string
+	Name     string
+	Parent   *schemaTreeCategory
+	Children []*schemaTreeCategory
+	Meta     map[string]*schemaTreeCategory
+}
+
+type schemaMutualNamedFields struct {
+	Label string
+	Graph *schemaRecursiveLeft
+}
+
+type SchemaSelfEmbeddedNode struct {
+	*SchemaSelfEmbeddedNode
+	Visible string
+}
+
+type SchemaEmbeddedLeft struct {
+	*SchemaEmbeddedRight
+}
+
+type SchemaEmbeddedRight struct {
+	*SchemaEmbeddedLeft
+}
+
+type schemaRecursiveRangeSlice []Range[schemaRecursiveRangeSlice]
+
+type SchemaHiddenRecursiveNode struct {
+	Next *SchemaHiddenRecursiveNode
 }
 
 func TestInferQuerySchema_DefaultsFromStruct(t *testing.T) {
@@ -168,6 +210,173 @@ func TestInferQuerySchema_ReturnsErrorOnInvalidTag(t *testing.T) {
 	_, err := InferQuerySchema[*badEntity](nil)
 	if err == nil {
 		t.Fatalf("expected error")
+	}
+}
+
+func TestInferQuerySchema_AllowsRecursiveNamedStructFields(t *testing.T) {
+	schema, err := InferQuerySchemaFromType(reflect.TypeOf(schemaTreeCategory{}), nil)
+	if err != nil {
+		t.Fatalf("named recursive struct fields are skipped by inference: %v", err)
+	}
+	if schema == nil {
+		t.Fatal("expected inferred schema")
+	}
+	checkField(t, schema, "id", FieldTypeString, []FilterOp{FilterOpEq, FilterOpLike}, true, true, "")
+	checkField(t, schema, "name", FieldTypeString, []FilterOp{FilterOpEq, FilterOpLike}, true, true, "")
+	for _, name := range []string{"parent", "children", "meta"} {
+		if _, ok := schema.Field(name); ok {
+			t.Fatalf("expected %q to be skipped as an unsupported field type", name)
+		}
+	}
+
+	mutual, err := InferQuerySchemaFromType(reflect.TypeOf(schemaMutualNamedFields{}), nil)
+	if err != nil {
+		t.Fatalf("mutually recursive named fields are skipped by inference: %v", err)
+	}
+	checkField(t, mutual, "label", FieldTypeString, []FilterOp{FilterOpEq, FilterOpLike}, true, true, "")
+}
+
+func TestInferQuerySchema_RejectsRecursiveAnonymousEmbedding(t *testing.T) {
+	type selfEmbedded struct {
+		SchemaSelfEmbeddedNode
+	}
+	if _, err := InferQuerySchemaFromType(reflect.TypeOf(selfEmbedded{}), nil); !errors.Is(err, errors.InvalidInput) {
+		t.Fatalf("self-embedded error = %v, want InvalidInput", err)
+	}
+
+	type mutuallyEmbedded struct {
+		SchemaEmbeddedLeft
+	}
+	if _, err := InferQuerySchemaFromType(reflect.TypeOf(mutuallyEmbedded{}), nil); !errors.Is(err, errors.InvalidInput) {
+		t.Fatalf("mutually embedded error = %v, want InvalidInput", err)
+	}
+}
+
+func TestInferQuerySchema_RejectsRecursiveRangeSliceCycle(t *testing.T) {
+	type input struct {
+		Items schemaRecursiveRangeSlice
+	}
+	if _, err := InferQuerySchemaFromType(reflect.TypeOf(input{}), nil); !errors.Is(err, errors.InvalidInput) {
+		t.Fatalf("range/slice cycle error = %v, want InvalidInput", err)
+	}
+}
+
+func TestInferQuerySchema_RejectsRecursivePointerAndSliceAliases(t *testing.T) {
+	type recursivePointer *recursivePointer
+	type recursiveSlice []recursiveSlice
+	type recursiveRangePointer *Range[recursiveRangePointer]
+	type recursivePointerSlice *[]recursivePointerSlice
+
+	for _, typ := range []reflect.Type{
+		reflect.TypeFor[struct{ Value recursivePointer }](),
+		reflect.TypeFor[struct{ Value recursiveSlice }](),
+		reflect.TypeFor[struct{ Value recursiveRangePointer }](),
+		reflect.TypeFor[struct{ Value recursivePointerSlice }](),
+	} {
+		t.Run(typ.String(), func(t *testing.T) {
+			if _, err := InferQuerySchemaFromType(typ, nil); !errors.Is(err, errors.InvalidInput) {
+				t.Fatalf("recursive alias error = %v, want InvalidInput", err)
+			}
+		})
+	}
+}
+
+func TestInferQuerySchema_ExplicitTypeOverridesRecursiveInference(t *testing.T) {
+	type recursivePointer *recursivePointer
+	type recursiveSlice []recursiveSlice
+	type input struct {
+		Pointer                 recursivePointer          `query:"type=string"`
+		Slice                   recursiveSlice            `query:"type=string"`
+		Range                   schemaRecursiveRangeSlice `query:"type=string"`
+		*SchemaSelfEmbeddedNode `query:"type=string"`
+	}
+	schema, err := InferQuerySchema[input](nil)
+	if err != nil {
+		t.Fatalf("explicit types must bypass recursive inference: %v", err)
+	}
+	for _, name := range []string{"pointer", "slice", "range", "schema_self_embedded_node"} {
+		field, ok := schema.Field(name)
+		if !ok || field.Type != FieldTypeString {
+			t.Fatalf("field %q = %+v, exists=%v; want string", name, field, ok)
+		}
+	}
+}
+
+func TestInferQuerySchema_SkipsJSONHiddenRecursiveFields(t *testing.T) {
+	type input struct {
+		Visible  string
+		Hidden   *SchemaHiddenRecursiveNode `json:"-"`
+		Explicit string                     `json:"-" query:"field=explicit"`
+	}
+
+	schema, err := InferQuerySchemaFromType(reflect.TypeOf(input{}), nil)
+	if err != nil {
+		t.Fatalf("json-hidden recursive field should be skipped: %v", err)
+	}
+	if _, ok := schema.Field("visible"); !ok {
+		t.Fatal("expected visible field")
+	}
+	if _, ok := schema.Field("hidden"); ok {
+		t.Fatal("did not expect json-hidden field")
+	}
+	if _, ok := schema.Field("explicit"); !ok {
+		t.Fatal("expected explicit query tag to override json-hidden field")
+	}
+}
+
+func TestInferQuerySchema_SkipsJSONHiddenAnonymousRecursiveField(t *testing.T) {
+	type input struct {
+		Visible                   string
+		SchemaHiddenRecursiveNode `json:"-"`
+	}
+
+	schema, err := InferQuerySchemaFromType(reflect.TypeOf(input{}), nil)
+	if err != nil {
+		t.Fatalf("json-hidden anonymous recursive field should be skipped: %v", err)
+	}
+	if _, ok := schema.Field("visible"); !ok {
+		t.Fatal("expected visible field")
+	}
+}
+
+func TestInferQuerySchema_AllowsFiniteDiamondEmbedding(t *testing.T) {
+	type Leaf struct{}
+	type Left struct {
+		Leaf
+		LeftValue int
+	}
+	type Right struct {
+		Leaf
+		RightValue int
+	}
+	type Root struct {
+		Left
+		Right
+	}
+
+	schema, err := InferQuerySchemaFromType(reflect.TypeOf(Root{}), nil)
+	if err != nil {
+		t.Fatalf("finite diamond should remain valid: %v", err)
+	}
+	if _, ok := schema.Field("left_value"); !ok {
+		t.Fatal("expected left_value in finite diamond schema")
+	}
+	if _, ok := schema.Field("right_value"); !ok {
+		t.Fatal("expected right_value in finite diamond schema")
+	}
+}
+
+func TestInferQuerySchema_AllowsFiniteRepeatedStructFields(t *testing.T) {
+	type leaf struct {
+		Value int
+	}
+	type input struct {
+		First  leaf
+		Second leaf
+	}
+
+	if _, err := InferQuerySchemaFromType(reflect.TypeOf(input{}), nil); err != nil {
+		t.Fatalf("finite repeated struct fields should remain valid: %v", err)
 	}
 }
 

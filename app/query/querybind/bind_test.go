@@ -1,12 +1,39 @@
 package querybind
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
 	"gochen/app/query"
 	"gochen/errors"
 )
+
+type recursiveQuerySlice []recursiveQuerySlice
+
+func (s *recursiveQuerySlice) DecodeQueryExprs(exprs []query.QueryExpr) error {
+	return json.Unmarshal([]byte(exprs[0].Value.String), s)
+}
+
+func TestBind_RecursiveCustomDecoderWithExplicitSchema(t *testing.T) {
+	type input struct {
+		Tree recursiveQuerySlice `query:"type=string"`
+	}
+	schema, err := query.InferQuerySchema[input](nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if field, ok := schema.Field("tree"); !ok || field.Type != query.FieldTypeString {
+		t.Fatalf("expected explicit string field, got %+v", field)
+	}
+	var dst input
+	if err := Bind(query.QueryFilters{"tree": {{Op: query.FilterOpEq, Value: query.StringValue("[[],[[]]]")}}}, &dst); err != nil {
+		t.Fatal(err)
+	}
+	if len(dst.Tree) != 2 || len(dst.Tree[0]) != 0 || len(dst.Tree[1]) != 1 {
+		t.Fatalf("unexpected decoded tree: %#v", dst.Tree)
+	}
+}
 
 type decodeText struct {
 	Value string
@@ -73,6 +100,27 @@ func TestBind_DefaultRulesAndCustomDecoder(t *testing.T) {
 	}
 	if dst.Name.Value != "alice" || dst.Name.Op != query.FilterOpLike {
 		t.Fatalf("unexpected custom decoder result: %+v", dst.Name)
+	}
+}
+
+func TestBind_RejectsRecursivePointerBeforeAllocation(t *testing.T) {
+	type recursive *recursive
+	type sample struct {
+		Value recursive `filter:"value"`
+	}
+
+	var dst sample
+	err := Bind(query.QueryFilters{
+		"value": {{
+			Op:    query.FilterOpEq,
+			Value: query.IntValue(1),
+		}},
+	}, &dst)
+	if !errors.Is(err, errors.InvalidInput) {
+		t.Fatalf("Bind error = %v, want InvalidInput", err)
+	}
+	if dst.Value != nil {
+		t.Fatal("recursive pointer validation allocated the destination")
 	}
 }
 

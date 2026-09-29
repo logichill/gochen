@@ -44,7 +44,7 @@ func InferQuerySchemaFromType(typ reflect.Type, opts *SchemaInferOptions) (*Quer
 
 	fields := make([]QueryField, 0)
 	seen := make(map[string]struct{})
-	if err := collectInferredQueryFields(typ, opts, &fields, seen); err != nil {
+	if err := collectInferredQueryFields(typ, opts, &fields, seen, map[reflect.Type]bool{}); err != nil {
 		return nil, err
 	}
 	if len(fields) == 0 {
@@ -68,7 +68,12 @@ func InferQuerySchemaFromValue(value any, opts *SchemaInferOptions) (*QuerySchem
 	return InferQuerySchemaFromType(reflect.TypeOf(value), opts)
 }
 
-func collectInferredQueryFields(typ reflect.Type, opts *SchemaInferOptions, out *[]QueryField, seen map[string]struct{}) error {
+func collectInferredQueryFields(typ reflect.Type, opts *SchemaInferOptions, out *[]QueryField, seen map[string]struct{}, path map[reflect.Type]bool) error {
+	if path[typ] {
+		return errors.NewCode(errors.InvalidInput, "recursive query schema type").WithContext("type", typ.String())
+	}
+	path[typ] = true
+	defer delete(path, typ)
 	for i := 0; i < typ.NumField(); i++ {
 		sf := typ.Field(i)
 		if !sf.IsExported() {
@@ -82,20 +87,22 @@ func collectInferredQueryFields(typ reflect.Type, opts *SchemaInferOptions, out 
 		if tag.Skip {
 			continue
 		}
+		// An explicit query tag keeps control over inference.  Otherwise a
+		// json:"-" field is hidden before inspecting its type; hidden recursive
+		// DTO fields must not make the whole query schema invalid.
+		if shouldSkipInferredField(sf, hasTag) {
+			continue
+		}
 
 		innerType := derefQueryType(sf.Type)
-		if sf.Anonymous && tag.Name == "" && innerType != nil && innerType.Kind() == reflect.Struct && innerType != timeType {
-			if err := collectInferredQueryFields(innerType, opts, out, seen); err != nil {
+		if sf.Anonymous && tag.Name == "" && tag.Type == "" && innerType != nil && innerType.Kind() == reflect.Struct && innerType != timeType {
+			if err := collectInferredQueryFields(innerType, opts, out, seen, path); err != nil {
 				return err
 			}
 			continue
 		}
 
-		if shouldSkipInferredField(sf, hasTag) {
-			continue
-		}
-
-		fieldType, ok, err := inferQueryFieldType(innerType, tag.Type)
+		fieldType, ok, err := inferQueryFieldType(sf.Type, tag.Type)
 		if err != nil {
 			return errors.Wrap(err, errors.InvalidInput, "invalid inferred query field type").WithContext("field", sf.Name)
 		}
@@ -195,13 +202,22 @@ func ResolveQueryFieldNameWithOptions(sf reflect.StructField, opts *SchemaInferO
 }
 
 func derefQueryType(typ reflect.Type) reflect.Type {
+	seen := make(map[reflect.Type]struct{})
 	for typ != nil && typ.Kind() == reflect.Pointer {
+		if _, ok := seen[typ]; ok {
+			return nil
+		}
+		seen[typ] = struct{}{}
 		typ = typ.Elem()
 	}
 	return typ
 }
 
 func inferQueryFieldType(typ reflect.Type, explicit string) (FieldType, bool, error) {
+	return inferQueryFieldTypeSeen(typ, explicit, make(map[reflect.Type]bool))
+}
+
+func inferQueryFieldTypeSeen(typ reflect.Type, explicit string, path map[reflect.Type]bool) (FieldType, bool, error) {
 	if explicit != "" {
 		fieldType, err := parseFieldType(explicit)
 		if err != nil {
@@ -210,19 +226,22 @@ func inferQueryFieldType(typ reflect.Type, explicit string) (FieldType, bool, er
 		return fieldType, true, nil
 	}
 	if typ == nil {
-		return "", false, nil
+		return "", false, errors.NewCode(errors.InvalidInput, "recursive query field type")
 	}
 	if typ == timeType {
 		return FieldTypeTime, true, nil
 	}
-	if fieldType, ok, err := inferRangeQueryFieldType(typ); ok || err != nil {
-		return fieldType, ok, err
+	if path[typ] {
+		return "", false, errors.NewCode(errors.InvalidInput, "recursive query field type").WithContext("type", typ.String())
 	}
-	if typ.Kind() == reflect.Slice {
-		return inferQueryFieldType(derefQueryType(typ.Elem()), "")
+	path[typ] = true
+	defer delete(path, typ)
+	// 环检测与实际推导共用路径；普通 struct、map、array 不下探。
+	if typ.Kind() == reflect.Pointer || typ.Kind() == reflect.Slice {
+		return inferQueryFieldTypeSeen(typ.Elem(), "", path)
 	}
-	if typ.Kind() == reflect.Struct {
-		return "", false, nil
+	if valueType, ok := rangeQueryValueType(typ); ok {
+		return inferQueryFieldTypeSeen(valueType, "", path)
 	}
 
 	switch typ.Kind() {
@@ -240,29 +259,30 @@ func inferQueryFieldType(typ reflect.Type, explicit string) (FieldType, bool, er
 	}
 }
 
-func inferRangeQueryFieldType(typ reflect.Type) (FieldType, bool, error) {
+// rangeQueryValueType 返回 Range 类型承载的取值类型。
+func rangeQueryValueType(typ reflect.Type) (reflect.Type, bool) {
 	typ = derefQueryType(typ)
 	if typ == nil || typ.Kind() != reflect.Struct {
-		return "", false, nil
+		return nil, false
 	}
 	if typ.PkgPath() != "gochen/app/query" || !strings.HasPrefix(typ.Name(), "Range[") {
-		return "", false, nil
+		return nil, false
 	}
 
 	lowerField, ok := typ.FieldByName("Lower")
 	if !ok {
-		return "", false, nil
+		return nil, false
 	}
 	lowerType := derefQueryType(lowerField.Type)
 	if lowerType == nil || lowerType.Kind() != reflect.Struct || lowerType.PkgPath() != "gochen/app/query" || !strings.HasPrefix(lowerType.Name(), "Bound[") {
-		return "", false, nil
+		return nil, false
 	}
 
 	valueField, ok := lowerType.FieldByName("Value")
 	if !ok {
-		return "", false, nil
+		return nil, false
 	}
-	return inferQueryFieldType(derefQueryType(valueField.Type), "")
+	return valueField.Type, true
 }
 
 func inferDefaultFilterOpsForType(sourceType reflect.Type, typ FieldType) []FilterOp {
