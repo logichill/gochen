@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"gochen/clock"
+	"gochen/contextx"
 	"gochen/errors"
 	"gochen/eventing"
 	"gochen/eventing/monitoring"
@@ -162,6 +163,7 @@ func (s *CachedEventStore[ID]) LoadEvents(ctx context.Context, aggregateType str
 		return nil, errors.NewCode(errors.InvalidInput, "aggregate type cannot be empty")
 	}
 	key := cacheKey(aggregateType, aggregateID)
+	key.tenantID = contextx.TenantID(ctx)
 	if cached := s.getCachedEvents(key, afterVersion); cached != nil {
 		if err := ctx.Err(); err != nil {
 			return nil, err

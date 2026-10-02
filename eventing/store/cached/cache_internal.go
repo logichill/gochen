@@ -11,7 +11,7 @@ import (
 
 // EventCache 事件缓存。
 type EventCache[ID comparable] struct {
-	aggregateCache map[aggregateCacheKey[ID]]*CachedAggregate[ID] // 聚合缓存（key: aggregateType + aggregateID）
+	aggregateCache map[aggregateCacheKey[ID]]*CachedAggregate[ID] // 聚合缓存（key: aggregateType + aggregateID + tenantID）
 	lru            *list.List                                     // aggregateCacheKey[ID], front is least recently used
 	lruIndex       map[aggregateCacheKey[ID]]*list.Element
 	generations    map[aggregateCacheKey[ID]]uint64
@@ -31,6 +31,7 @@ type CachedAggregate[ID comparable] struct {
 type aggregateCacheKey[ID comparable] struct {
 	aggregateType string
 	aggregateID   ID
+	tenantID      string
 }
 
 func cacheKey[ID comparable](aggregateType string, aggregateID ID) aggregateCacheKey[ID] {
@@ -165,20 +166,20 @@ func (s *CachedEventStore[ID]) invalidateCache(aggregateType string, aggregateID
 	s.cache.mutex.Lock()
 	defer s.cache.mutex.Unlock()
 
-	key := cacheKey(aggregateType, aggregateID)
 	if s.cache.generations == nil {
 		s.cache.generations = make(map[aggregateCacheKey[ID]]uint64)
 	}
-	if s.cache.aggregateCache == nil {
-		s.cache.aggregateCache = make(map[aggregateCacheKey[ID]]*CachedAggregate[ID])
+	// 一条事件流可以有多个租户视图，追加后须一起失效，包括尚未完成的回填。
+	for key := range s.cache.aggregateCache {
+		if key.aggregateType == aggregateType && key.aggregateID == aggregateID {
+			s.deleteCacheEntryUnsafe(key)
+			s.recordInvalidation()
+		}
 	}
-	s.cache.generations[key]++
-	if _, exists := s.cache.aggregateCache[key]; exists {
-		s.deleteCacheEntryUnsafe(key)
-		s.recordInvalidation()
-	}
-	if s.cache.activeFills[key] == 0 {
-		delete(s.cache.generations, key)
+	for key := range s.cache.activeFills {
+		if key.aggregateType == aggregateType && key.aggregateID == aggregateID {
+			s.cache.generations[key]++
+		}
 	}
 }
 

@@ -21,7 +21,7 @@
 
 `AppendEvents` 的 expectedVersion 是该事件流上一次已提交版本，新聚合为 0。版本检查与追加必须原子执行；冲突返回 `errors.Concurrency`，错误 details 携带聚合和版本信息。批次中的 nil / typed-nil 事件返回 `InvalidInput`。
 
-实现应支持并发调用。缓存装饰器按聚合 generation 阻止并发写入前读取的旧值回填，读返回事件快照。
+实现应支持并发调用。缓存装饰器按 `(aggregateType, aggregateID, contextx.TenantID(ctx))` 隔离读取视图；无租户上下文使用独立视图，不复用租户缓存。所有视图共享 `MaxAggregates` 容量上限。追加成功后失效该聚合的全部视图，并通过 generation 阻止并发写入前读取的旧值回填，读返回事件快照。
 
 ## 事件流与游标
 
