@@ -90,6 +90,68 @@ func newTestRegistry(tb testing.TB) *registry.Registry {
 	return reg
 }
 
+// positionOrderedStore 模拟 SQL 按 global_position 排序且独立应用时间过滤的行为。
+type positionOrderedStore struct {
+	store.IEventStreamStore[int64]
+	events []eventing.Event[int64]
+}
+
+func (s *positionOrderedStore) StreamEvents(ctx context.Context, opts *store.StreamOptions) (*store.StreamResult[int64], error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	var afterPosition int64
+	for _, event := range s.events {
+		if event.ID == opts.After {
+			afterPosition = event.GlobalPosition
+		}
+	}
+	result := &store.StreamResult[int64]{}
+	for _, event := range s.events {
+		if event.GlobalPosition <= afterPosition || event.Timestamp.Before(opts.FromTime) {
+			continue
+		}
+		if len(result.Events) == 1 {
+			result.HasMore = true
+			break
+		}
+		result.Events = append(result.Events, event)
+		result.NextCursor = event.ID
+	}
+	return result, nil
+}
+
+func TestProjectionReplayKeepsEventsWithEarlierTimestamps(t *testing.T) {
+	for _, resume := range []bool{false, true} {
+		t.Run(fmt.Sprint("resume_", resume), func(t *testing.T) {
+			ctx := context.Background()
+			now := time.Now()
+			stream := &positionOrderedStore{IEventStreamStore: store.NewMemoryEventStore[int64]()}
+			for i, timestamp := range []time.Time{now, now.Add(-time.Hour), now.Add(time.Hour)} {
+				event := testutil.NewEvent[int64](1, "Agg", "TestEvent", uint64(i+1), &replayTestPayload{})
+				event.Timestamp = timestamp
+				event.GlobalPosition = int64(i + 1)
+				stream.events = append(stream.events, *event)
+			}
+			checkpoints := NewMemoryCheckpointStore()
+			manager, err := NewProjectionManager[int64](stream, &MockEventBus{}, newTestRegistry(t), upcast.NewUpgraderRegistry())
+			require.NoError(t, err)
+			_, err = manager.WithCheckpointStore(checkpoints)
+			require.NoError(t, err)
+			projection := NewMockProjection("position-ordered", []string{"TestEvent"})
+			require.NoError(t, manager.RegisterProjection(projection))
+			want := 3
+			if resume {
+				first := stream.events[0]
+				require.NoError(t, checkpoints.Save(ctx, NewCheckpoint(projection.Name(), first.GlobalPosition, first.ID, first.Timestamp)))
+				want = 2
+			}
+			require.NoError(t, manager.ResumeFromCheckpoint(ctx, projection.Name()))
+			require.Equal(t, want, projection.processedEvents)
+		})
+	}
+}
+
 // TestProjectionManager_ResumeFromCheckpoint_ReplaysFromStore 验证 ProjectionManager ResumeFromCheckpoint ReplaysFromStore。
 func TestProjectionManager_ResumeFromCheckpoint_ReplaysFromStore(t *testing.T) {
 	ctx := context.Background()

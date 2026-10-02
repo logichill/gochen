@@ -190,6 +190,10 @@ func (pm *ProjectionManager[ID]) replayProjectionFromCheckpoint(ctx context.Cont
 }
 
 func (pm *ProjectionManager[ID]) fetchEventsForReplay(ctx context.Context, after string, fromTime time.Time, supportedTypes []string) ([]eventing.Event[ID], bool, error) {
+	// 游标决定恢复位置；全局位置递增并不保证事件时间递增。
+	if after != "" {
+		fromTime = time.Time{}
+	}
 	stream, err := pm.eventStore.StreamEvents(ctx, &store.StreamOptions{
 		After:    after,
 		FromTime: fromTime,
