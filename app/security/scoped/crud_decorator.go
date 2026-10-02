@@ -43,7 +43,7 @@ type Config struct {
 
 	// ScopeResolver 解析读路径的数据范围。
 	//
-	// 为 nil 时读路径要求 ctx 已绑定范围，否则 fail-closed。
+	// 优先使用 ctx 已绑定的范围，再调用 resolver；两者均无时要求决策提供范围。
 	ScopeResolver authscoped.IDataScopeResolver
 }
 
@@ -203,13 +203,14 @@ func (a *application[T, ID]) writeContext(
 // 两处特例：
 //   - 决策没给出可用范围（典型是新建，资源尚未归属任何范围）→ 以主体范围为准，
 //     由仓储在落库时盖戳；
-//   - 未配置 ScopeResolver 但决策已给出可用范围 → 以决策为准。缺 resolver 本身
-//     不是放行理由，但也不该让"PDP 已明确授权"的请求无谓失败。
+//   - ctx 未绑定范围且未配置 ScopeResolver，但决策已给出可用范围 → 以决策为准。
+//     缺 resolver 本身不是放行理由，但也不该让"PDP 已明确授权"的请求无谓失败。
 func (a *application[T, ID]) bindEffectiveScope(
 	ctx context.Context,
 	decided authscoped.DataScope,
 ) (context.Context, error) {
-	if a.config.ScopeResolver == nil {
+	_, hasBoundScope := authscoped.DataScopeFromContext(ctx)
+	if a.config.ScopeResolver == nil && !hasBoundScope {
 		if decided.AllowsAny() {
 			return bindScope(ctx, decided)
 		}

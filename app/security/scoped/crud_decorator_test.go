@@ -245,6 +245,48 @@ func TestReadBindsDataScopeToContext(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestBoundScopeWithoutResolverCannotBeWidened(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		scope authscoped.DataScope
+	}{
+		{name: "deny_all", scope: authscoped.DenyAll()},
+		{name: "disjoint", scope: authscoped.Filtered(202)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newRepo(true)
+			cfg := config()
+			cfg.ScopeResolver = nil
+			secured, err := secscoped.New[*order, int64](newApp(t, repo), allowAuthorizer(t, 101), cfg)
+			require.NoError(t, err)
+			ctx, err := authscoped.WithDataScope(context.Background(), tc.scope)
+			require.NoError(t, err)
+
+			_, err = secured.List(ctx, 0, 10)
+			require.True(t, errors.Is(err, errors.Forbidden), "bound scope must constrain reads")
+			err = secured.Create(ctx, &order{ScopeID: 101})
+			require.True(t, errors.Is(err, errors.Forbidden), "bound scope must constrain writes")
+			require.False(t, repo.createConstraintOK, "denied writes must not reach the repository")
+		})
+	}
+}
+
+func TestBoundScopeWithoutResolverSupportsActionOnlyDecision(t *testing.T) {
+	cfg := config()
+	cfg.ScopeResolver = nil
+	authorizer, err := authscoped.NewAuthorizer(nil, authscoped.EvaluatorFunc(
+		func(context.Context, string, []authscoped.Resource) (authscoped.Decision, error) {
+			return authscoped.Allow(), nil
+		}))
+	require.NoError(t, err)
+	secured, err := secscoped.New[*order, int64](newApp(t, newRepo(true)), authorizer, cfg)
+	require.NoError(t, err)
+	ctx, err := authscoped.WithDataScope(context.Background(), authscoped.Filtered(101))
+	require.NoError(t, err)
+	_, err = secured.List(ctx, 0, 10)
+	require.NoError(t, err)
+}
+
 // 未配置的操作 fail-closed。
 func TestUnconfiguredOperationFailsClosed(t *testing.T) {
 	cfg := config()
