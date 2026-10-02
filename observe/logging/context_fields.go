@@ -37,6 +37,8 @@ func mergeContextFields(ctx context.Context, fields []Field) []Field {
 	if len(ctxFields) == 0 {
 		return fields
 	}
+	merged := make([]Field, len(fields), len(fields)+len(ctxFields))
+	copy(merged, fields)
 	seen := make(map[string]struct{}, len(fields))
 	for _, f := range fields {
 		seen[f.Key] = struct{}{}
@@ -45,7 +47,7 @@ func mergeContextFields(ctx context.Context, fields []Field) []Field {
 		if _, ok := seen[f.Key]; ok {
 			continue
 		}
-		fields = append(fields, f)
+		merged = append(merged, f)
 	}
-	return fields
+	return merged
 }
