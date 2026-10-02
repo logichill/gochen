@@ -96,3 +96,51 @@ func TestManualClock_NewTicker_InvalidIntervalReturnsError(t *testing.T) {
 		t.Fatalf("NewTicker() ticker = %v, want nil", tk)
 	}
 }
+
+func TestManualClockReleasesInactiveTimers(t *testing.T) {
+	c := NewManualClock(time.Unix(0, 0))
+	for range 100 {
+		c.NewTimer(time.Hour).Stop()
+		ticker, err := c.NewTicker(time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ticker.Stop()
+		c.NewTimer(time.Second)
+	}
+	c.Advance(time.Second)
+	if len(c.timers) != 0 || len(c.tickers) != 0 {
+		t.Fatalf("inactive timers retained: timers=%d, tickers=%d", len(c.timers), len(c.tickers))
+	}
+}
+
+func TestManualTimerResetDiscardsExpiredTick(t *testing.T) {
+	c := NewManualClock(time.Unix(0, 0))
+	timer := c.NewTimer(time.Second)
+	c.Advance(time.Second)
+	timer.Reset(time.Hour)
+	select {
+	case timestamp := <-timer.C():
+		t.Fatalf("received stale tick after Reset: %v", timestamp)
+	default:
+	}
+	c.Advance(time.Hour)
+	select {
+	case timestamp := <-timer.C():
+		if !timestamp.Equal(c.Now()) {
+			t.Fatalf("reset timer fired at %v, want %v", timestamp, c.Now())
+		}
+	default:
+		t.Fatal("reset timer did not fire")
+	}
+	timer.Reset(time.Second)
+	c.Advance(time.Second)
+	if !timer.Stop() {
+		t.Fatal("Stop must report the unconsumed timer as active")
+	}
+	select {
+	case <-timer.C():
+		t.Fatal("received stale tick after Stop")
+	default:
+	}
+}
