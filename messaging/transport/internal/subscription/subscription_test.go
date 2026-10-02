@@ -14,6 +14,52 @@ type testHandler struct{ name string }
 func (h testHandler) Handle(context.Context, messaging.IMessage) error { return nil }
 func (h testHandler) Type() string                                     { return h.name }
 
+type handlerFunc func(context.Context, messaging.IMessage) error
+
+func (h handlerFunc) Handle(ctx context.Context, message messaging.IMessage) error {
+	return h(ctx, message)
+}
+
+func (h handlerFunc) Type() string { return "T" }
+
+func TestSubscribeUnsubscribesNonComparableHandlersIndependently(t *testing.T) {
+	ctx := context.Background()
+	var mu sync.RWMutex
+	handlers := map[string][]messaging.IMessageHandler{}
+	var calls [2]int
+	unsubs := make([]messaging.UnsubscribeFunc, 2)
+	for i := range calls {
+		unsub, err := Subscribe(ctx, &mu, handlers, "T", handlerFunc(func(context.Context, messaging.IMessage) error {
+			calls[i]++
+			return nil
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		unsubs[i] = unsub
+	}
+	if err := unsubs[0](ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, handler := range handlers["T"] {
+		if err := handler.Handle(ctx, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if calls != [2]int{0, 1} {
+		t.Fatalf("unsubscribe removed the wrong registration: calls=%v", calls)
+	}
+	if err := unsubs[0](ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := unsubs[1](ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(handlers["T"]) != 0 {
+		t.Fatal("unsubscribed handler is still registered")
+	}
+}
+
 func TestSubscribe_Validation(t *testing.T) {
 	var mu sync.RWMutex
 	handlers := map[string][]messaging.IMessageHandler{}

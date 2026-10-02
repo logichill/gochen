@@ -9,6 +9,11 @@ import (
 	"gochen/messaging"
 )
 
+// registration 为每次订阅提供独立、可比较的标识，处理器本身可以是函数或含 slice 的值。
+type registration struct {
+	messaging.IMessageHandler
+}
+
 func Subscribe(
 	ctx context.Context,
 	mu *sync.RWMutex,
@@ -32,11 +37,12 @@ func Subscribe(
 		return nil, errors.NewCode(errors.InvalidInput, "handlers map is nil")
 	}
 
+	registered := &registration{IMessageHandler: handler}
 	mu.Lock()
 	if handlers[messageType] == nil {
 		handlers[messageType] = make([]messaging.IMessageHandler, 0)
 	}
-	handlers[messageType] = append(handlers[messageType], handler)
+	handlers[messageType] = append(handlers[messageType], registered)
 	mu.Unlock()
 
 	var once sync.Once
@@ -46,7 +52,7 @@ func Subscribe(
 		}
 		var err error
 		once.Do(func() {
-			err = Unsubscribe(unsubCtx, mu, handlers, messageType, handler)
+			err = Unsubscribe(unsubCtx, mu, handlers, messageType, registered)
 		})
 		return err
 	}, nil
@@ -79,8 +85,14 @@ func Unsubscribe(
 	}
 
 	for i, h := range current {
-		if h == handler {
-			handlers[messageType] = append(current[:i], current[i+1:]...)
+		if registered, ok := h.(*registration); ok && registered == handler {
+			copy(current[i:], current[i+1:])
+			current[len(current)-1] = nil
+			if len(current) == 1 {
+				delete(handlers, messageType)
+			} else {
+				handlers[messageType] = current[:len(current)-1]
+			}
 			return nil
 		}
 	}
