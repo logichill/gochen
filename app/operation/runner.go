@@ -288,9 +288,7 @@ func (r *Runner) releaseIdempotencyReservationOnPanic(operationID string, cfg ex
 			defer func() {
 				_ = recover()
 			}()
-			cleanupCtx, cancel := context.WithTimeout(context.Background(), idempotencyReservationCleanupTimeout)
-			defer cancel()
-			_ = r.releaseIdempotencyReservation(cleanupCtx, operationID, cfg)
+			_ = r.releaseIdempotencyReservation(context.Background(), operationID, cfg)
 		}()
 		panic(recovered)
 	}
@@ -304,7 +302,10 @@ func (r *Runner) releaseIdempotencyReservation(ctx context.Context, operationID 
 	if !ok {
 		return nil
 	}
-	return releaser.ReleaseIdempotencyKey(ctx, cfg.idempotencyKey, operationID)
+	// 结果保存失败时请求可能已经取消，预留清理仍需独立完成并保留上下文路由信息。
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), idempotencyReservationCleanupTimeout)
+	defer cancel()
+	return releaser.ReleaseIdempotencyKey(cleanupCtx, cfg.idempotencyKey, operationID)
 }
 
 func (r *Runner) failedResult(spec *Spec, operationID string, result *Result, err error) *Result {

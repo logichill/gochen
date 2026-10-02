@@ -62,6 +62,41 @@ func TestDefaultOperationIDNonEmpty(t *testing.T) {
 	}
 }
 
+func TestRunnerReleasesReservationAfterRequestCancellation(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{name: "handler_success"},
+		{name: "handler_error", err: context.Canceled},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := NewMemoryStore()
+			runner := NewRunner(&RunnerOptions{Store: store})
+			spec := &Spec{Type: "task.create", Mode: ModeTracked, IdempotencyKey: "canceled-request"}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			_, err := runner.Execute(ctx, spec, func(context.Context) (*Result, error) {
+				cancel()
+				return nil, tc.err
+			})
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("expected canceled result persistence, got %v", err)
+			}
+			// 新 runner 排除进程内 singleflight，核实存储中的预留确实释放。
+			retry := NewRunner(&RunnerOptions{Store: store})
+			called := false
+			_, err = retry.Execute(context.Background(), spec, func(context.Context) (*Result, error) {
+				called = true
+				return nil, nil
+			})
+			if err != nil || !called {
+				t.Fatalf("canceled request left an unusable reservation: called=%v, err=%v", called, err)
+			}
+		})
+	}
+}
+
 func TestFallbackOperationIDNonEmptyAndUnique(t *testing.T) {
 	first := fallbackOperationID()
 	second := fallbackOperationID()
