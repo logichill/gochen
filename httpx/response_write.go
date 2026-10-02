@@ -134,7 +134,8 @@ func StatusAllowsBody(status int) bool {
 
 func isSafeRedirectLocation(location string) bool {
 	location = strings.TrimSpace(location)
-	if location == "" || strings.HasPrefix(location, "//") {
+	// 浏览器按 WHATWG URL 规则把反斜杠视为斜杠，net/url 不会做同样的归一化。
+	if location == "" || strings.HasPrefix(location, "//") || strings.Contains(location, `\`) {
 		return false
 	}
 	u, err := url.Parse(location)

@@ -156,6 +156,8 @@ func TestWriteRedirectJSON_RejectsExternalLocation(t *testing.T) {
 	tests := []string{
 		"https://example.com/path",
 		"//example.com/path",
+		`/\example.com/path`,
+		`/\/example.com/path`,
 		"target",
 		"",
 	}
