@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"gochen/codec/jsoncodec"
 	"gochen/errors"
 	"gochen/eventing/monitoring"
 	"gochen/observe/logging"
@@ -33,6 +34,7 @@ type Config struct {
 	Enabled         bool          `json:"enabled"`
 }
 
+// DefaultConfig 返回快照管理器的默认配置。
 func DefaultConfig() *Config {
 	return &Config{Frequency: 100, RetentionPeriod: 30 * 24 * time.Hour, MaxSnapshots: 10, Enabled: true}
 }
@@ -158,6 +160,7 @@ func (sm *Manager[ID]) CreateSnapshot(ctx context.Context, aggregateID ID, aggre
 }
 
 // LoadSnapshot 读取快照并把状态恢复到目标对象。
+// 动态字段中的 JSON 数值保留为 json.Number，避免大整数标识符丢失精度。
 func (sm *Manager[ID]) LoadSnapshot(ctx context.Context, aggregateID ID, target any) (*Snapshot[ID], error) {
 	start := time.Now()
 	aggregateType := ""
@@ -173,7 +176,7 @@ func (sm *Manager[ID]) LoadSnapshot(ctx context.Context, aggregateID ID, target 
 	}
 	if restorer, ok := target.(interface{ RestoreFromSnapshotData(data any) error }); ok {
 		var snapshotData any
-		if err := json.Unmarshal(snapshot.Data, &snapshotData); err != nil {
+		if err := jsoncodec.DecodeInto(snapshot.Data, &snapshotData); err != nil {
 			if m := sm.getMetrics(); m != nil {
 				m.RecordSnapshotLoaded(time.Since(start), false)
 			}
@@ -192,7 +195,7 @@ func (sm *Manager[ID]) LoadSnapshot(ctx context.Context, aggregateID ID, target 
 		snapshotLogger().Debug(ctx, "restored from lightweight snapshot",
 			logging.Any("aggregate_id", aggregateID))
 	} else {
-		if err := json.Unmarshal(snapshot.Data, target); err != nil {
+		if err := jsoncodec.DecodeIntoValue(snapshot.Data, target); err != nil {
 			if m := sm.getMetrics(); m != nil {
 				m.RecordSnapshotLoaded(time.Since(start), false)
 			}

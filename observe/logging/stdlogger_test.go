@@ -3,8 +3,8 @@ package logging
 import (
 	"bytes"
 	"context"
+	"io"
 	"log"
-	"os"
 	"strings"
 	"testing"
 
@@ -29,8 +29,7 @@ func TestNewStdLogger(t *testing.T) {
 // TestStdLogger_Debug 验证 StdLogger Debug。
 func TestStdLogger_Debug(t *testing.T) {
 	var buf bytes.Buffer
-	log.SetOutput(&buf)
-	defer log.SetOutput(nil)
+	setGlobalLogOutput(t, &buf)
 
 	logger := NewStdLogger("test")
 	ctx := context.Background()
@@ -73,8 +72,7 @@ func TestStdLogger_Info(t *testing.T) {
 // TestStdLogger_Warn 验证 StdLogger Warn。
 func TestStdLogger_Warn(t *testing.T) {
 	var buf bytes.Buffer
-	log.SetOutput(&buf)
-	defer log.SetOutput(nil)
+	setGlobalLogOutput(t, &buf)
 
 	logger := NewStdLogger("test")
 	ctx := context.Background()
@@ -96,8 +94,7 @@ func TestStdLogger_Warn(t *testing.T) {
 // TestStdLogger_Error 验证 StdLogger Error。
 func TestStdLogger_Error(t *testing.T) {
 	var buf bytes.Buffer
-	log.SetOutput(&buf)
-	defer log.SetOutput(nil)
+	setGlobalLogOutput(t, &buf)
 
 	logger := NewStdLogger("test")
 	ctx := context.Background()
@@ -118,8 +115,7 @@ func TestStdLogger_Error(t *testing.T) {
 
 func TestStdLogger_Error_AppError5xx_IncludesStackField(t *testing.T) {
 	var buf bytes.Buffer
-	log.SetOutput(&buf)
-	defer log.SetOutput(nil)
+	setGlobalLogOutput(t, &buf)
 
 	logger := NewStdLogger("test")
 	ctx := context.Background()
@@ -143,8 +139,7 @@ func TestStdLogger_Error_AppError5xx_IncludesStackField(t *testing.T) {
 
 func TestStdLogger_Error_AppError4xx_DoesNotIncludeStackField(t *testing.T) {
 	var buf bytes.Buffer
-	log.SetOutput(&buf)
-	defer log.SetOutput(nil)
+	setGlobalLogOutput(t, &buf)
 
 	logger := NewStdLogger("test")
 	ctx := context.Background()
@@ -161,8 +156,7 @@ func TestStdLogger_Error_TypedNilAppError_DoesNotPanic(t *testing.T) {
 	var appErr *errors.AppError
 
 	var buf bytes.Buffer
-	log.SetOutput(&buf)
-	defer log.SetOutput(os.Stderr)
+	setGlobalLogOutput(t, &buf)
 
 	logger := NewStdLogger("test")
 
@@ -259,8 +253,7 @@ func TestStdLogger_WithFields_Immutable(t *testing.T) {
 // TestStdLogger_MultipleFields 验证 StdLogger MultipleFields。
 func TestStdLogger_MultipleFields(t *testing.T) {
 	var buf bytes.Buffer
-	log.SetOutput(&buf)
-	defer log.SetOutput(nil)
+	setGlobalLogOutput(t, &buf)
 
 	logger := NewStdLogger("test")
 	ctx := context.Background()
@@ -292,8 +285,7 @@ func TestStdLogger_MultipleFields(t *testing.T) {
 // TestStdLogger_EmptyPrefix 验证 StdLogger EmptyPrefix。
 func TestStdLogger_EmptyPrefix(t *testing.T) {
 	var buf bytes.Buffer
-	log.SetOutput(&buf)
-	defer log.SetOutput(nil)
+	setGlobalLogOutput(t, &buf)
 
 	logger := NewStdLogger("")
 	ctx := context.Background()
@@ -309,8 +301,7 @@ func TestStdLogger_EmptyPrefix(t *testing.T) {
 // TestStdLogger_NoFields 验证 StdLogger NoFields。
 func TestStdLogger_NoFields(t *testing.T) {
 	var buf bytes.Buffer
-	log.SetOutput(&buf)
-	defer log.SetOutput(nil)
+	setGlobalLogOutput(t, &buf)
 
 	logger := NewStdLogger("test")
 	ctx := context.Background()
@@ -326,12 +317,34 @@ func TestStdLogger_NoFields(t *testing.T) {
 	}
 }
 
+// setGlobalLogOutput 为非并行测试临时替换标准库 logger 的输出，并在结束时恢复。
+func setGlobalLogOutput(tb testing.TB, writer io.Writer) {
+	tb.Helper()
+	before := log.Writer()
+	log.SetOutput(writer)
+	tb.Cleanup(func() { log.SetOutput(before) })
+}
+
+func TestStdLogger_GlobalLogWriterRestored(t *testing.T) {
+	before := log.Writer()
+	t.Run("fallback", func(t *testing.T) {
+		var buf bytes.Buffer
+		setGlobalLogOutput(t, &buf)
+		NewStdLogger("").Info(context.Background(), "fallback probe")
+		if !strings.Contains(buf.String(), "fallback probe") {
+			t.Fatalf("global fallback path broken, got %q", buf.String())
+		}
+	})
+	if got := log.Writer(); got == nil || got != before {
+		t.Fatal("global log writer was not restored")
+	}
+}
+
 // BenchmarkStdLogger_Info 用于评估 StdLogger Info 的性能。
 func BenchmarkStdLogger_Info(b *testing.B) {
 	logger := NewStdLogger("bench")
 	ctx := context.Background()
-	log.SetOutput(&bytes.Buffer{})
-	defer log.SetOutput(nil)
+	setGlobalLogOutput(b, io.Discard)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

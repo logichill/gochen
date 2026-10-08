@@ -18,7 +18,7 @@ import (
 type ProjectionManager[ID comparable] struct {
 	runtimes        map[string]*projectionRuntime[ID]
 	registering     map[string]*projectionRuntime[ID]
-	eventStore      store.IEventStreamStore[ID]
+	eventStore      store.IEventStreamReader[ID]
 	eventBus        bus.IEventBus
 	config          *ProjectionConfig
 	checkpointStore ICheckpointStore // 检查点存储（可选）
@@ -44,7 +44,7 @@ const replayBatchLimit = 1000 // 单次回放批量上限，避免一次性加�
 
 // NewProjectionManager 创建投影管理器。
 func NewProjectionManager[ID comparable](
-	eventStore store.IEventStreamStore[ID],
+	eventStore store.IEventStreamReader[ID],
 	eventBus bus.IEventBus,
 	reg *registry.Registry,
 	upgraders *upcast.UpgraderRegistry,
@@ -54,7 +54,7 @@ func NewProjectionManager[ID comparable](
 
 // NewProjectionManagerWithConfig 创建投影管理器并带配置。
 func NewProjectionManagerWithConfig[ID comparable](
-	eventStore store.IEventStreamStore[ID],
+	eventStore store.IEventStreamReader[ID],
 	eventBus bus.IEventBus,
 	reg *registry.Registry,
 	upgraders *upcast.UpgraderRegistry,

@@ -2,30 +2,15 @@ package outbox
 
 import (
 	"context"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"gochen/testkit/require"
-
 	"gochen/errors"
 	"gochen/eventing"
 	"gochen/observe/logging"
+	"gochen/testkit/require"
 )
-
-type oneShotOutboxRepo struct {
-	mu sync.Mutex
-
-	entries []OutboxEntry[int64]
-	pubs    int
-	fails   int
-}
-
-func newOneShotOutboxRepo(entries []OutboxEntry[int64]) *oneShotOutboxRepo {
-	cp := append([]OutboxEntry[int64](nil), entries...)
-	return &oneShotOutboxRepo{entries: cp}
-}
 
 // SaveWithEvents ctx：上下文（用于取消、超时与链路信息）。
 //
@@ -126,23 +111,6 @@ func (r *oneShotOutboxRepo) Stats() (pubs, fails int) {
 	return r.pubs, r.fails
 }
 
-type recordingBatchOps struct {
-	mu sync.Mutex
-
-	published            [][]ClaimedEntry
-	failed               [][]FailedEntry
-	markPublishedErr     error
-	publishedErr         []error
-	publishedHasDeadline []bool
-	publishedCh          chan error
-	publishedSnapshotCh  chan markBatchContextSnapshot
-}
-
-type cancelDuringPublishedBatchOps struct {
-	started chan struct{}
-	release chan struct{}
-}
-
 func (b *cancelDuringPublishedBatchOps) MarkAsPublishedBatch(ctx context.Context, entries []ClaimedEntry) error {
 	close(b.started)
 	<-b.release
@@ -157,11 +125,6 @@ func (b *cancelDuringPublishedBatchOps) DeletePublishedBatch(context.Context, []
 	return nil
 }
 
-type cancelDuringFailedBatchOps struct {
-	started chan struct{}
-	release chan struct{}
-}
-
 func (b *cancelDuringFailedBatchOps) MarkAsPublishedBatch(context.Context, []ClaimedEntry) error {
 	return nil
 }
@@ -174,11 +137,6 @@ func (b *cancelDuringFailedBatchOps) MarkAsFailedBatch(ctx context.Context, entr
 
 func (b *cancelDuringFailedBatchOps) DeletePublishedBatch(context.Context, []int64) error {
 	return nil
-}
-
-type markBatchContextSnapshot struct {
-	err         error
-	hasDeadline bool
 }
 
 // MarkAsPublishedBatch ctx：上下文（用于取消、超时与链路信息）。
@@ -360,14 +318,6 @@ func TestParallelPublisher_MarkLoopFlushesAndStopsAfterContextCancel(t *testing.
 	require.Equal(t, []int64{1, 2}, batchOps.PublishedIDs())
 }
 
-type recordingAtomicDLQ struct {
-	MockDLQRepository
-
-	mu     sync.Mutex
-	atomic []OutboxEntry[int64]
-	err    error
-}
-
 func (d *recordingAtomicDLQ) MarkFailedAndMoveToDLQ(ctx context.Context, entry OutboxEntry[int64], claimToken string, errorMsg string) error {
 	if d.err != nil {
 		return d.err
@@ -390,238 +340,6 @@ func (d *recordingAtomicDLQ) AtomicMoved() []OutboxEntry[int64] {
 
 var _ IAtomicDLQMover[int64] = (*recordingAtomicDLQ)(nil)
 
-func TestParallelPublisher_MarkLoopBatchFailureUsesAtomicDLQMover(t *testing.T) {
-	batchOps := &recordingBatchOps{}
-	dlq := &recordingAtomicDLQ{}
-	p := &ParallelPublisher[int64]{
-		batchOps:   batchOps,
-		dlq:        dlq,
-		cfg:        OutboxConfig{BatchSize: 10},
-		markCh:     make(chan markOp[int64], 2),
-		markDoneCh: make(chan struct{}),
-		log:        logging.NewNoopLogger(),
-	}
-
-	go p.markLoop(context.Background())
-
-	dlqRetryAt := time.Now().Add(time.Minute)
-	batchRetryAt := time.Now().Add(2 * time.Minute)
-	p.markCh <- markOp[int64]{
-		kind:       markFailed,
-		entryID:    1,
-		claimToken: "claim-dlq",
-		errorMsg:   "dlq failure",
-		nextRetry:  dlqRetryAt,
-		moveToDLQ:  true,
-		entry:      OutboxEntry[int64]{ID: 1, EventID: "event-dlq", RetryCount: 2, Status: OutboxStatusProcessing},
-		dlqEntry:   OutboxEntry[int64]{ID: 1, EventID: "event-dlq", RetryCount: 3, Status: OutboxStatusFailed},
-	}
-	p.markCh <- markOp[int64]{
-		kind:       markFailed,
-		entryID:    2,
-		claimToken: "claim-retry",
-		errorMsg:   "retry failure",
-		nextRetry:  batchRetryAt,
-		moveToDLQ:  false,
-	}
-	close(p.markCh)
-
-	select {
-	case <-p.markDoneCh:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for mark loop to stop")
-	}
-
-	atomicMoved := dlq.AtomicMoved()
-	require.Len(t, atomicMoved, 1)
-	require.Equal(t, int64(1), atomicMoved[0].ID)
-	require.Equal(t, "claim-dlq", atomicMoved[0].ClaimToken)
-	require.Equal(t, "dlq failure", atomicMoved[0].LastError)
-	// 原子 mover 必须收到未自增的原始记录（RetryCount=2），由其内部自增到 3；
-	// 若误传已自增的 dlqEntry（RetryCount=3）则会被再次自增成 4（M14 回归）。
-	require.Equal(t, 2, atomicMoved[0].RetryCount)
-	require.Empty(t, dlq.MovedEntries())
-
-	require.Len(t, batchOps.failed, 1)
-	require.Len(t, batchOps.failed[0], 1)
-	require.Equal(t, int64(2), batchOps.failed[0][0].ID)
-	require.Equal(t, "claim-retry", batchOps.failed[0][0].ClaimToken)
-	require.Equal(t, "retry failure", batchOps.failed[0][0].Error)
-}
-
-func TestParallelPublisher_MarkLoopBatchPublishedFallbackRecoversPerEntryFailure(t *testing.T) {
-	repo := &MockOutboxRepository{
-		markPublishError: errors.NewCode(errors.Database, "mark publish failed"),
-	}
-	batchOps := &recordingBatchOps{
-		markPublishedErr: errors.NewCode(errors.Database, "batch mark publish failed"),
-	}
-	p := &ParallelPublisher[int64]{
-		repo:       repo,
-		batchOps:   batchOps,
-		cfg:        OutboxConfig{BatchSize: 10, RetryInterval: time.Minute, MaxRetries: 3},
-		markCh:     make(chan markOp[int64], 1),
-		markDoneCh: make(chan struct{}),
-		log:        logging.NewNoopLogger(),
-	}
-
-	go p.markLoop(context.Background())
-	p.markCh <- markOp[int64]{
-		kind:       markPublished,
-		entryID:    11,
-		claimToken: "claim-11",
-	}
-	close(p.markCh)
-
-	select {
-	case <-p.markDoneCh:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for mark loop to stop")
-	}
-
-	require.Equal(t, 1, repo.MarkedFailedLen())
-	require.Equal(t, 0, repo.MarkedPublishedLen())
-}
-
-func TestParallelPublisher_MarkLoopPublishedFallbackSurvivesCancellationDuringBatch(t *testing.T) {
-	repo := &contextSensitiveMarkRepo{}
-	batchOps := &cancelDuringPublishedBatchOps{started: make(chan struct{}), release: make(chan struct{})}
-	p := &ParallelPublisher[int64]{
-		repo:       repo,
-		batchOps:   batchOps,
-		cfg:        OutboxConfig{BatchSize: 1, MarkPublishedAttempts: 1},
-		markCh:     make(chan markOp[int64], 1),
-		markDoneCh: make(chan struct{}),
-		log:        logging.NewNoopLogger(),
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	go p.markLoop(ctx)
-	p.markCh <- markOp[int64]{kind: markPublished, entryID: 31, claimToken: "claim-31"}
-	<-batchOps.started
-	cancel()
-	close(batchOps.release)
-	close(p.markCh)
-	select {
-	case <-p.markDoneCh:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for mark loop")
-	}
-	require.Equal(t, int32(1), atomic.LoadInt32(&repo.markPublishedSuccesses))
-}
-
-func TestParallelPublisher_MarkLoopFailedFallbackSurvivesCancellationDuringBatch(t *testing.T) {
-	repo := &recoverMarkFailureRepo{}
-	batchOps := &cancelDuringFailedBatchOps{started: make(chan struct{}), release: make(chan struct{})}
-	p := &ParallelPublisher[int64]{
-		repo:       repo,
-		batchOps:   batchOps,
-		cfg:        OutboxConfig{BatchSize: 1},
-		markCh:     make(chan markOp[int64], 1),
-		markDoneCh: make(chan struct{}),
-		log:        logging.NewNoopLogger(),
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	go p.markLoop(ctx)
-	p.markCh <- markOp[int64]{
-		kind:       markFailed,
-		entryID:    32,
-		claimToken: "claim-32",
-		errorMsg:   "failed",
-		nextRetry:  time.Now().Add(time.Minute),
-		entry:      OutboxEntry[int64]{ID: 32},
-	}
-	<-batchOps.started
-	cancel()
-	close(batchOps.release)
-	close(p.markCh)
-	select {
-	case <-p.markDoneCh:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for mark loop")
-	}
-	require.NoError(t, repo.ctxErr)
-	require.Equal(t, int64(32), repo.failedEntryID)
-}
-
-func TestParallelPublisher_MarkLoopBatchPublishedFallbackIgnoresCanceledStopContext(t *testing.T) {
-	repo := newOneShotOutboxRepo(nil)
-	batchOps := &recordingBatchOps{
-		markPublishedErr: errors.NewCode(errors.Database, "batch mark publish failed"),
-	}
-	stopCtx, stopCancel := context.WithCancel(context.Background())
-	stopCancel()
-	p := &ParallelPublisher[int64]{
-		repo:        repo,
-		batchOps:    batchOps,
-		cfg:         OutboxConfig{BatchSize: 10, RetryInterval: time.Minute, MaxRetries: 3},
-		markCh:      make(chan markOp[int64], 2),
-		markDoneCh:  make(chan struct{}),
-		markStopCtx: stopCtx,
-		log:         logging.NewNoopLogger(),
-	}
-
-	go p.markLoop(context.Background())
-	p.markCh <- markOp[int64]{kind: markPublished, entryID: 21, claimToken: "claim-21"}
-	p.markCh <- markOp[int64]{kind: markPublished, entryID: 22, claimToken: "claim-22"}
-	close(p.markCh)
-
-	select {
-	case <-p.markDoneCh:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for mark loop to stop")
-	}
-
-	pubs, _ := repo.Stats()
-	require.Equal(t, 2, pubs)
-}
-
-func TestParallelPublisher_MarkLoopBatchFailureFallsBackWhenAtomicDLQFails(t *testing.T) {
-	batchOps := &recordingBatchOps{}
-	dlq := &recordingAtomicDLQ{err: errors.NewCode(errors.Database, "atomic dlq failed")}
-	repo := &MockOutboxRepository{}
-	p := &ParallelPublisher[int64]{
-		repo:       repo,
-		batchOps:   batchOps,
-		dlq:        dlq,
-		cfg:        OutboxConfig{BatchSize: 10, RetryInterval: time.Minute, MaxRetries: 3},
-		markCh:     make(chan markOp[int64], 1),
-		markDoneCh: make(chan struct{}),
-		log:        logging.NewNoopLogger(),
-	}
-
-	go p.markLoop(context.Background())
-	p.markCh <- markOp[int64]{
-		kind:       markFailed,
-		entryID:    12,
-		claimToken: "claim-12",
-		errorMsg:   "publish failed",
-		nextRetry:  time.Now().Add(time.Minute),
-		moveToDLQ:  true,
-		dlqEntry:   OutboxEntry[int64]{ID: 12, EventID: "event-12", Status: OutboxStatusFailed},
-	}
-	close(p.markCh)
-
-	select {
-	case <-p.markDoneCh:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for mark loop to stop")
-	}
-
-	require.Empty(t, dlq.AtomicMoved())
-	require.Empty(t, batchOps.failed)
-	require.Equal(t, 1, repo.MarkedFailedLen())
-
-	moved := dlq.MovedEntries()
-	require.Len(t, moved, 1)
-	require.Equal(t, int64(12), moved[0].ID)
-	require.Equal(t, "event-12", moved[0].EventID)
-}
-
-type blockingMarkPublishedRepo struct {
-	MockOutboxRepository
-	calls atomic.Int64
-}
-
 func (r *blockingMarkPublishedRepo) MarkAsPublished(ctx context.Context, entryID int64, claimToken string) error {
 	r.calls.Add(1)
 	<-ctx.Done()
@@ -630,50 +348,6 @@ func (r *blockingMarkPublishedRepo) MarkAsPublished(ctx context.Context, entryID
 
 func (r *blockingMarkPublishedRepo) MarkPublishCalls() int {
 	return int(r.calls.Load())
-}
-
-func TestParallelPublisher_MarkLoopBatchFailureFallsBackToBatchWhenAtomicAndFallbackMarkFail(t *testing.T) {
-	batchOps := &recordingBatchOps{}
-	dlq := &recordingAtomicDLQ{err: errors.NewCode(errors.Database, "atomic dlq failed")}
-	repo := &MockOutboxRepository{
-		markFailedError: errors.NewCode(errors.Database, "fallback mark failed"),
-	}
-	p := &ParallelPublisher[int64]{
-		repo:       repo,
-		batchOps:   batchOps,
-		dlq:        dlq,
-		cfg:        OutboxConfig{BatchSize: 10, RetryInterval: time.Minute, MaxRetries: 3},
-		markCh:     make(chan markOp[int64], 1),
-		markDoneCh: make(chan struct{}),
-		log:        logging.NewNoopLogger(),
-	}
-
-	go p.markLoop(context.Background())
-	p.markCh <- markOp[int64]{
-		kind:       markFailed,
-		entryID:    13,
-		claimToken: "claim-13",
-		errorMsg:   "publish failed",
-		nextRetry:  time.Now().Add(time.Minute),
-		moveToDLQ:  true,
-		dlqEntry:   OutboxEntry[int64]{ID: 13, EventID: "event-13", Status: OutboxStatusFailed},
-	}
-	close(p.markCh)
-
-	select {
-	case <-p.markDoneCh:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for mark loop to stop")
-	}
-
-	require.Empty(t, dlq.AtomicMoved())
-	moved := dlq.MovedEntries()
-	require.Len(t, moved, 1)
-	require.Equal(t, int64(13), moved[0].ID)
-	require.Len(t, batchOps.failed, 1)
-	require.Len(t, batchOps.failed[0], 1)
-	require.Equal(t, int64(13), batchOps.failed[0][0].ID)
-	require.Equal(t, 0, repo.MarkedFailedLen())
 }
 
 // TestParallelPublisher_BatchMarking_PrefersBatchOps 验证 ParallelPublisher BatchMarking PrefersBatchOps。

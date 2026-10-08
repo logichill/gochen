@@ -11,24 +11,11 @@ import (
 	secscoped "gochen/app/security/scoped"
 	authaction "gochen/auth/action"
 	authscoped "gochen/auth/scoped"
-	"gochen/domain"
 	"gochen/domain/audited"
 	domcrud "gochen/domain/crud"
 	"gochen/errors"
 	"gochen/testkit"
 )
-
-// 装饰器**可选能力保持**回归（审计发现的缺陷 2）。
-//
-// api/rest 在 Application 上做类型断言决定路由与装配：
-//
-//	appcrud.IBatchWriter          → 批量路由
-//	audited 能力面                 → purge / restore / 审计轨迹路由
-//	IServiceConfigUpdatable 等     → 装配期 config / validator / hooks 注入
-//
-// 装饰器一旦只实现 IApplication 本体，这些断言会全部失败：批量与审计路由
-// 静默消失，装配期注入直接报错。此前的测试完全没有覆盖"装饰器 + 能力探测"
-// 这个组合，所以缺陷在全绿状态下潜伏。
 
 type capOrder struct {
 	domcrud.Entity[int64]
@@ -42,18 +29,13 @@ func (o *capOrder) Validate() error { return nil }
 // 刻意在这里重新声明而不是 import：gochen 不依赖 runtime，
 // 而 Go 的接口断言是结构化的——本地声明能等价地验证 REST 侧探测会不会成功。
 type restAuditedSurface[T any, ID comparable] interface {
+	HasPurgeCapability() bool
 	Delete(ctx context.Context, id ID) error
 	Purge(ctx context.Context, id ID) error
 	Restore(ctx context.Context, id ID, by string) error
 	ListDeleted(ctx context.Context, offset, limit int) ([]T, error)
 	AuditTrail(ctx context.Context, id ID, offset, limit int) ([]audited.AuditRecord, error)
 	AuditStore() audited.IAuditStore
-}
-
-type assemblyAware[T domain.IEntity[ID], ID comparable] interface {
-	appcrud.IServiceConfigUpdatable
-	appcrud.IValidatorAware
-	appcrud.IHooksAware[T, ID]
 }
 
 func newCapApp(t *testing.T, scoped bool) appcrud.IApplication[*capOrder, int64] {
@@ -63,7 +45,7 @@ func newCapApp(t *testing.T, scoped bool) appcrud.IApplication[*capOrder, int64]
 		opts = append(opts, testkit.WithMemoryScope[*capOrder, int64]("order"))
 	}
 	repo := testkit.NewMemoryRepository[*capOrder, int64](testkit.NewInt64Sequence(1), opts...)
-	app, err := appcrud.NewApplication[*capOrder, int64](repo, nil, nil)
+	app, err := appcrud.NewApplication[*capOrder, int64](repo, nil)
 	require.NoError(t, err)
 	return app
 }
@@ -94,7 +76,7 @@ func (denyChecker) RequireAction(_ context.Context, code string) error {
 	return errors.NewCode(errors.Forbidden, "denied").WithContext("action", code)
 }
 
-// L1 装饰后，批量写与装配期注入能力必须仍可被探测到。
+// L1 保留批量业务能力，不向外暴露装配仓储。
 func TestActionDecoratorPreservesOptionalCapabilities(t *testing.T) {
 	inner := newCapApp(t, false)
 	secured, err := secaction.New[*capOrder, int64](inner, &allowChecker{}, capPolicy())
@@ -103,8 +85,8 @@ func TestActionDecoratorPreservesOptionalCapabilities(t *testing.T) {
 	_, ok := any(secured).(appcrud.IBatchWriter[*capOrder, int64])
 	require.True(t, ok)
 
-	_, ok = any(secured).(assemblyAware[*capOrder, int64])
-	require.True(t, ok)
+	_, ok = any(secured).(appcrud.IRepositoryProvider[*capOrder, int64])
+	require.False(t, ok, "secured applications must not expose raw repositories")
 }
 
 // 批量入口不是旁路：它同样要过动作校验。
@@ -157,8 +139,8 @@ func TestScopedDecoratorPreservesOptionalCapabilities(t *testing.T) {
 	_, ok := any(secured).(appcrud.IBatchWriter[*capOrder, int64])
 	require.True(t, ok)
 
-	_, ok = any(secured).(assemblyAware[*capOrder, int64])
-	require.True(t, ok)
+	_, ok = any(secured).(appcrud.IRepositoryProvider[*capOrder, int64])
+	require.False(t, ok, "secured applications must not expose raw repositories")
 }
 
 // allowAllAuthorizer 一律放行，并把目标资源原样授权。

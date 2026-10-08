@@ -131,9 +131,10 @@ func TestCache_Clear_OnEvictCanObserveExistingSize(t *testing.T) {
 	cache.Clear()
 
 	assert.Equal(t, 2, len(sizes))
-	for _, size := range sizes {
-		assert.GreaterOrEqual(t, size, 0)
-	}
+	// Clear 在锁外触发 OnEvict，回调应能安全观察到清空后的 size（0）；
+	// 回调被持锁调用会死锁，若回调先于清空（或 items 未重置）触发则观察值为非零——
+	// 上述语义回归均会被本断言捕获（stats.Size 字段由 Stats() 重算，不在观测面）。
+	assert.Equal(t, []int{0, 0}, sizes)
 	assert.Equal(t, 0, cache.Size())
 }
 

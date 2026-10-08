@@ -88,7 +88,7 @@ func (t *MemoryTransport) Publish(ctx context.Context, message messaging.IMessag
 	if ctx == nil {
 		return errors.NewCode(errors.InvalidInput, "ctx is nil")
 	}
-	if message == nil {
+	if messaging.IsNilMessage(message) {
 		return errors.NewCode(errors.InvalidInput, "message is nil")
 	}
 	if strings.TrimSpace(message.GetType()) == "" {
@@ -134,7 +134,7 @@ func (t *MemoryTransport) PublishAll(ctx context.Context, messages []messaging.I
 	}
 
 	for _, message := range messages {
-		if message == nil {
+		if messaging.IsNilMessage(message) {
 			return errors.NewCode(errors.InvalidInput, "message is nil")
 		}
 		if strings.TrimSpace(message.GetType()) == "" {

@@ -8,16 +8,18 @@
 | --- | --- |
 | `app/crud` | CRUD、校验、查询分页、批量操作与 Hooks |
 | `app/audited` | 审计轨迹、软删除、恢复与已删除查询 |
-| `app/eventsourced` | 领域事件持久化、事件溯源仓储与命令服务 |
+| `app/eventsourced` | 事件溯源仓储与命令服务；默认持久化位于 eventstore 子包，事件订阅辅助位于 subscriber 子包 |
 | `app/query` | Filter、QuerySchema、分页、排序与字段选择协议 |
-| `app/operation` | 写操作结果、状态跟踪与 SSE |
+| `app/operation` | 写操作结果、状态跟踪；SSE 适配位于 Runtime |
 | `app/security` | Action / Scoped 应用层保护 |
 
 基础 `crud`、`audited`、`eventsourced` 模板不依赖 `auth`。安全策略通过 Application 装饰器装配，详见[分层授权](../docs/architecture/layered-authz.md)。
 
 ## CRUD 装配
 
-`crud.NewApplication(repository, validator, config)` 返回 `(*Application[T, ID], error)`。仓储是必需依赖，validator 与 config 可为空；查询、批量等可选仓储能力在使用前探测。
+`crud.NewApplication(repository, options)` 返回 `(*Application[T, ID], error)`。仓储是必需依赖，options 为 nil 时使用默认配置；查询、批量等可选仓储能力在使用前探测。
+
+`crud.Options[T, ID]` 在构造期注入 Config、Validator 和 Hooks。Config 和 Hooks 被复制，构造后不会随调用方修改而变化；Validator 与钩子闭包引用的对象仍由调用方保证并发安全。`IApplication` 只包含读写用例，批量和审计属于可选业务能力。
 
 以下函数展示给已有仓储配置 Hook 的完整写法：
 
@@ -39,25 +41,22 @@ type User struct {
 }
 
 func NewUsers(repo domcrud.IRepository[*User, int64]) (*crud.Application[*User, int64], error) {
-	app, err := crud.NewApplication(repo, nil, nil)
-	if err != nil {
-		return nil, err
-	}
-	app.SetHooks(&crud.Hooks[*User, int64]{
-		BeforeCreate: func(ctx context.Context, user *User) error {
-			if strings.TrimSpace(user.Name) == "" {
-				return errors.NewCode(errors.Validation, "user name is required")
-			}
-			return nil
+	return crud.NewApplication(repo, &crud.Options[*User, int64]{
+		Hooks: &crud.Hooks[*User, int64]{
+			BeforeCreate: func(ctx context.Context, user *User) error {
+				if strings.TrimSpace(user.Name) == "" {
+					return errors.NewCode(errors.Validation, "user name is required")
+				}
+				return nil
+			},
 		},
 	})
-	return app, nil
 }
 ```
 
 ## Hooks 与事务
 
-写入扩展统一通过 `SetHooks`、Runtime `rest.WithHooks` 或 builder 的 `Hooks` 注入。
+写入扩展统一通过构造参数 `Options.Hooks` 注入。REST 注册只配置传输行为，不修改应用；HTTP、Worker 和 CLI 调用同一应用时遵循同一组校验与钩子。
 
 | 阶段 | 执行位置 | 失败语义 |
 | --- | --- | --- |
@@ -69,14 +68,21 @@ func NewUsers(repo domcrud.IRepository[*User, int64]) (*crud.Application[*User, 
 
 ## 审计型 CRUD
 
-`audited.NewApplication(repo, validator, config, auditStore)` 在构造期要求实体实现 `domain/audited.IAuditedEntity`，仓储支持事务、包含软删读取与已删除列表，auditStore 非空。
+`audited.NewApplication(repo, auditStore, options)` 复用 `crud.Options[T, ID]`，在构造期要求实体实现 `domain/audited.IAuditedEntity`，仓储支持事务、包含软删读取与已删除列表，auditStore 非空。`IAuditOperations.HasPurgeCapability()` 报告硬删除能力，REST 据此注册 purge 路由，无需访问仓储。
 
 业务写与审计写必须同库同事务。调用方根据已认证身份通过 `contextx` 注入 operator；缺失时在持久化前失败。REST 审计端点还需配置 `RouteConfig.Audit.OperatorExtractor`。审计时间使用真实墙钟。
 
 ## 事件溯源与写操作协议
 
-事件溯源按 `DomainEventStore → EventSourcedRepository → EventSourcedService` 装配，详见[事件溯源速查](../docs/reference/ddd-eventsourcing-quick-reference.md)。
+事件溯源按 `eventstore.DomainEventStore → EventSourcedRepository → EventSourcedService` 装配，详见[事件溯源速查](../docs/reference/ddd-eventsourcing-quick-reference.md)。
 
 普通写入可直接返回业务结果；需要统一信封或延迟收敛跟踪时使用 [Operation](operation/README.md)。多步骤补偿与流程推进见 [process](../process/README.md)。
 
 完整 CRUD、审计与事件溯源示例位于 `gochen-runtime` 仓库 `examples/domain/`。
+
+## 接入迁移
+
+- 原构造参数 validator/config 与后续的 `SetHooks`、`SetValidator`、`UpdateConfig` 合并到 `crud.Options`；需要另一套业务行为时构造另一个应用。
+- REST 的 `Service`、`Hooks`、`WithHooks`、`WithValidator` 已移除。应用策略在构造期注入；HTTP 请求体验证继续使用 `WithCustomValidator`。
+- `rest.WithBatchOperations(n)` 仅限制该组 HTTP 批量请求。业务批量上限通过 `Options.Config.MaxBatchSize` 设置，两层限制独立生效。
+- 自定义 L3 应用在组合根提供 `IRepositoryProvider`，可通过 `IConfigProvider` 提供授权前批量上限；未提供配置时使用默认 1000。先装配 scoped，再装配 action，或使用 Runtime `security.Profile.Build`。安全外壳不转发仓储、配置或独立 Validate 方法。

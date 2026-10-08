@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"gochen/domain"
+	"gochen/errors"
 )
 
 type userCreatedV1 struct{ Name string }
@@ -105,6 +106,13 @@ func (a *badDuplicateHandlerAggregate) Handle1(e *userCreatedV1) {}
 // 参数：
 func (a *badDuplicateHandlerAggregate) Handle2(e *userCreatedV1) {}
 
+type badNonErrorHandlerAggregate struct {
+	*EventSourcedAggregate[int64]
+}
+
+// OnUserCreated 单非 error 返回值（bool）不是合法的事件处理器签名。
+func (a *badNonErrorHandlerAggregate) OnUserCreated(e *userCreatedV1) bool { return false }
+
 // TestEventSourcedAggregate_AutoApply_SameEventTypeDifferentGoTypes 验证 EventSourcedAggregate AutoApply SameEventTypeDifferentGoTypes。
 func TestEventSourcedAggregate_AutoApply_SameEventTypeDifferentGoTypes(t *testing.T) {
 	agg := newAutoApplyAggregate(1)
@@ -178,6 +186,39 @@ func TestMetadata_ScanDuplicateHandler_Fails(t *testing.T) {
 	}
 }
 
+// TestMetadata_ScanNonErrorSingleReturnHandler_Fails 验证装配期拒绝
+// 「单非 error 返回值」的事件处理器：该形态此前被静默注册且返回值被丢弃，
+// 必须与重复处理器一样在发现阶段 fail-fast（InvalidInput）。
+func TestMetadata_ScanNonErrorSingleReturnHandler_Fails(t *testing.T) {
+	_, err := ScanMetadata(&badNonErrorHandlerAggregate{}, "BadNonErrorHandler")
+	if err == nil {
+		t.Fatal("expected ScanMetadata to reject a bool-returning event handler")
+	}
+	if !errors.Is(err, errors.InvalidInput) {
+		t.Fatalf("expected InvalidInput, got %v", err)
+	}
+
+	registry := NewMetadataRegistry()
+	if _, err := registry.Register(&badNonErrorHandlerAggregate{}, "BadNonErrorHandler"); err == nil {
+		t.Fatal("expected MetadataRegistry.Register to reject a bool-returning event handler")
+	}
+}
+
 var _ domain.IDomainEvent = (*userCreatedV1)(nil)
 var _ domain.IDomainEvent = (*userCreatedV2)(nil)
 var _ domain.IDomainEvent = (*panickyEvent)(nil)
+
+// Concrete error return values do not match the handler's error-interface contract.
+type valueHandlerError struct{}
+
+func (valueHandlerError) Error() string { return "handler failed" }
+
+type concreteErrorHandler struct{}
+
+func (*concreteErrorHandler) OnCreated(*userCreatedV1) valueHandlerError { return valueHandlerError{} }
+func TestMetadataRejectsConcreteErrorReturn(t *testing.T) {
+	_, err := ScanMetadata(&concreteErrorHandler{}, "ConcreteError")
+	if !errors.Is(err, errors.InvalidInput) {
+		t.Fatalf("want InvalidInput, got %v", err)
+	}
+}

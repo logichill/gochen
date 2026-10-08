@@ -268,19 +268,11 @@ func (b *RouteBuilder) executeMiddlewareChain(ctx IContext, middlewares []Middle
 		return handler(ctx)
 	}
 
-	var nextCalled bool
-	err := middlewares[0](ctx, func() error {
-		nextCalled = true
+	// 链的中止语义由中间件自身与 ctx（IsAborted）承担：中间件可以不调用 next
+	// 并返回 nil 来终止链；本函数只负责顺序调用与错误透传，不额外区分中止。
+	return middlewares[0](ctx, func() error {
 		return b.executeMiddlewareChain(ctx, middlewares[1:], handler)
 	})
-	if err != nil {
-		return err
-	}
-
-	if ctx.IsAborted() || !nextCalled {
-		return nil
-	}
-	return nil
 }
 
 // wrapHandler 包装处理器，注入权限检查和中间件。

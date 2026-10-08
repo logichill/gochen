@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	"gochen/db"
 	"gochen/errors"
 	"gochen/eventing"
 )
@@ -38,122 +37,25 @@ func IsStreamNotSupported(err error, operation string) bool {
 	return ok && op == operation
 }
 
-// IEventStore 定义事件存储的核心接口。
-//
-// 事件存储是事件溯源架构的核心组件，负责持久化和检索领域事件。
-// 该接口统一承载聚合级读写、按类型读取以及存在性/版本检查能力，
-// 避免调用方在多个可选接口之间做动态探测。
-//
-// 核心方法：
-//   - AppendEvents: 追加事件到聚合的事件流，支持乐观锁并发控制。
-//   - LoadEvents: 加载聚合的事件历史，支持增量加载。
-//
-// 最佳实践：
-//   - 实现应保证事件的原子性和持久性（ACID）
-//   - 使用乐观锁（expectedVersion）防止并发冲突。
-//   - 支持幂等性，重复追加相同事件应被忽略。
-//
-// 类型参数：
-//   - ID: 聚合根 ID 类型，必须是可比较类型（如 int64、string、uuid 等）
+// IEventStore 提供聚合事件的完整读写能力。
+// expectedVersion 为上次提交版本，新聚合为 0；版本检查与追加必须原子执行。
+// 流仍位于该批次末尾时，相同事件的完整重试应幂等成功；不承诺过期历史批次的重试成功。
+// 不同事件占用同一版本返回 Concurrency；重复事件 ID 的内容冲突必须拒绝。
+// 只读消费者应依赖 IEventReader、IAggregateEventReader 或 IEventStreamReader。
 type IEventStore[ID comparable] interface {
-	// AppendEvents 追加事件到指定聚合的事件流
-	//
-	// 参数：
-	//   - ctx: 上下文，用于超时控制和取消
-	//   - aggregateID: 聚合根ID
-	//   - events: 待追加的事件列表
-	//   - expectedVersion:
-	//       - 表示当前持久化事件流的“上一次已提交版本号”
-	//       - 0 表示新聚合（尚无任何事件被持久化）
-	//       - 实现应将其与存储中的当前版本做精确比较，用于乐观锁控制
-	//
-	// 返回：
-	//   - error: 版本冲突返回 ConcurrencyError，其他错误返回 EventStoreError
+	IEventReader[ID]
+	// AppendEvents 按预期版本原子追加完整批次。
 	AppendEvents(ctx context.Context, aggregateType string, aggregateID ID, events []eventing.IStorableEvent[ID], expectedVersion uint64) error
-
-	// LoadEvents 加载聚合的事件历史
-	//
-	// 参数：
-	//   - ctx: 上下文
-	//   - aggregateID: 聚合根ID
-	//   - afterVersion: 起始版本号（不包含该版本），0表示从头加载
-	//
-	// 返回：
-	//   - []Event: 事件列表，按版本号升序排列
-	//   - error: 加载失败时返回错误
-	LoadEvents(ctx context.Context, aggregateType string, aggregateID ID, afterVersion uint64) ([]eventing.Event[ID], error)
-
-	// HasAggregate 检查指定聚合是否存在
-	//
-	// 返回：
-	//   - bool: true表示聚合存在
-	//   - error: 查询失败时返回错误
+	// HasAggregate 检查指定聚合事件流是否存在。
 	HasAggregate(ctx context.Context, aggregateType string, aggregateID ID) (bool, error)
-
-	// GetAggregateVersion 获取聚合 ID 的当前最大版本号。
-	//
-	// 返回：
-	//   - uint64: 版本号，0表示聚合不存在
-	//   - error: 查询失败时返回错误
-	GetAggregateVersion(ctx context.Context, aggregateType string, aggregateID ID) (uint64, error)
 }
 
-// ITransactionalEventStore 在核心事件存储契约上增加使用调用方数据库作用域追加的能力。
-//
-// database 可以是普通数据库或已开启的事务；实现必须保证版本检查与事件写入在同一事务中完成。
-// 该接口供 Outbox 等需要把领域事件与其他记录原子提交的组件使用。
-type ITransactionalEventStore[ID comparable] interface {
-	IEventStore[ID]
-	AppendEventsWithDB(ctx context.Context, database db.IDatabase, aggregateType string, aggregateID ID, events []eventing.IStorableEvent[ID], expectedVersion uint64) error
-}
-
-// IEventStreamStore 全局事件流存储接口。
-//
-// 用途：
-// - 为投影管理器、历史查询、监控等需要全局扫描的场景提供流式访问能力；
-// - 支持游标分页和聚合顺序流两种扫描模式；
-// - 相比基础的 IEventStore，增加了高效的批量查询和流式处理能力。
-//
-// 设计原则：
-// - 聚合级操作（Append/Load）依赖基础 IEventStore[ID]；
-// - 全局流查询功能集中在本接口，避免概念混淆。
+// IEventStreamStore 组合完整聚合读写与两种扫描能力，供完整后端和缓存装饰器使用。
+// 恢复、历史和投影消费者各自依赖最小读取契约，不要求实现这个组合接口。
 type IEventStreamStore[ID comparable] interface {
 	IEventStore[ID]
-
-	// StreamEvents 使用游标获取全局事件流（分页语义）。
-	//
-	// 用途：
-	//   - 投影重建：按时间窗口批量加载事件
-	//   - 事件归档：分页导出历史事件
-	//   - 监控分析：按类型过滤事件流
-	//
-	// 参数：
-	//   - ctx: 上下文
-	//   - opts: 查询选项（游标、限制、过滤条件等）
-	//
-	// 返回：
-	//   - *StreamResult: 查询结果（事件列表、下一页游标、是否有更多数据）
-	//   - error: 查询失败时返回错误
-	StreamEvents(ctx context.Context, opts *StreamOptions) (*StreamResult[ID], error)
-
-	// StreamAggregate 按聚合顺序流式读取事件。
-	//
-	// 用途：
-	//   - 为上层 Repository/Service 提供更高效的"按版本片段读取"能力
-	//   - 避免在应用层一次性加载聚合全部事件再做内存分页
-	//
-	// 参数：
-	//   - ctx: 上下文
-	//   - opts: 聚合流查询选项（聚合标识 + 版本 + 限制）
-	//
-	// 返回：
-	//   - *AggregateStreamResult: 查询结果（事件列表、下一版本号、是否有更多数据）
-	//   - error: 查询失败时返回错误
-	//
-	// 注意：
-	//   - 该接口不关心业务分页语义（page/pageSize），仅提供基于版本的 limit/游标能力
-	//   - 业务分页应在仓储或 Service 层基于 NextVersion/HasMore 实现
-	StreamAggregate(ctx context.Context, opts *AggregateStreamOptions[ID]) (*AggregateStreamResult[ID], error)
+	IAggregateEventReader[ID]
+	IEventStreamReader[ID]
 }
 
 // StreamOptions 全局事件流查询选项。
@@ -213,4 +115,21 @@ type AggregateStreamResult[ID comparable] struct {
 	Events      []eventing.Event[ID] // 事件列表
 	NextVersion uint64               // 下一个版本号
 	HasMore     bool                 // 是否有更多数据
+}
+
+// EventAppend 表示一个聚合事件流的追加请求。
+// Events 为空时只严格校验 ExpectedVersion，与本批写入共同构成可串行化事务。
+type EventAppend[ID comparable] struct {
+	AggregateType   string
+	AggregateID     ID
+	Events          []eventing.IStorableEvent[ID]
+	ExpectedVersion uint64
+}
+
+// IAtomicEventStore 支持跨聚合事件流的原子追加。
+// 任一项校验、并发检查或写入失败时，整批不得产生可见的部分写入。
+// 单项版本与幂等语义与 AppendEvents 相同；空批次不写入。
+type IAtomicEventStore[ID comparable] interface {
+	// AppendEventsBatch 在同一原子边界内校验并追加多个聚合事件流。
+	AppendEventsBatch(ctx context.Context, batch []EventAppend[ID]) error
 }

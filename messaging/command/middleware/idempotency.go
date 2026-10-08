@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -99,6 +100,23 @@ func DefaultIdempotencyConfig() *IdempotencyConfig {
 	}
 }
 
+// isNilClock 判断时钟是否为空，并识别「接口非 nil 而底层指针为 nil」的 typed-nil。
+//
+// 与 messaging.isNilMessageClock 保持同一约定：typed-nil 时钟按未注入处理，
+// 否则中间件会以 nil 接收者调用 Now/NewTicker 触发 panic（清理协程中的 panic 会崩溃整个进程）。
+func isNilClock(clk clock.IClock) bool {
+	if clk == nil {
+		return true
+	}
+	value := reflect.ValueOf(clk)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
+}
+
 // NewIdempotencyMiddleware 创建一个基于命令 ID 去重的内存幂等中间件。
 func NewIdempotencyMiddleware(config *IdempotencyConfig) *IdempotencyMiddleware {
 	if config == nil {
@@ -113,7 +131,7 @@ func NewIdempotencyMiddleware(config *IdempotencyConfig) *IdempotencyMiddleware 
 	if config.MaxProcessed <= 0 {
 		config.MaxProcessed = defaultMaxProcessed
 	}
-	if config.Clock == nil {
+	if isNilClock(config.Clock) {
 		config.Clock = clock.NewRealClock()
 	}
 

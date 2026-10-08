@@ -63,6 +63,8 @@ Update 的授权输入来自仓储中的真实资源边界，不能信任客户�
 
 L3 构造期检查 `HasScopeDeclaration`、`ResourceKind` 和 `ValidateWriteConstraintSupport`；资源类型必须与装饰器一致。安全装饰器保留 Application 实际具有的 Batch / Audited 能力。Repository 使用构造选项，禁止包装窄 `IRepository` 导致可选能力丢失或被假冒。
 
+组合根通过 `crud.IRepositoryProvider` 向 L3 提供实际仓储；`crud.IConfigProvider` 可提供构造期批量上限，L3 在授权前执行该限制，缺省为 1000。基础 CRUD / Audited 模板均提供这两项装配能力，安全外壳不向调用方转发；手工组合必须先 scoped 后 action，`security.Profile.Build` 已固定此顺序。业务调用方仅依赖 `IApplication` 与所需的可选业务能力。
+
 写入未命中时，仓储按构造期 `WriteMissMode` 决定是否用诊断探针区分不存在、越界和版本冲突；探针只服务错误分类，不参与替代原子约束。
 
 ## 默认判定器

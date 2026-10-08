@@ -235,6 +235,8 @@ func InitAggregate[T comparable](registry *MetadataRegistry, self any, id T, agg
 // - - 方法签名：func(receiver, *EventType) 或 func(receiver, *EventType) error
 // - - 参数类型必须实现 IDomainEvent 接口。
 // - - 以事件的 Go 类型（参数类型）作为映射 key，避免跨版本同名 EventType() 冲突。
+// - - 单非 error 返回值（如 bool）不是合法处理器签名：返回值会被应用阶段丢弃，
+// -   发现即报装配错误（InvalidInput），不做静默注册。
 func discoverEventHandlers(t reflect.Type) (map[reflect.Type]*EventHandler, error) {
 	handlers := make(map[reflect.Type]*EventHandler)
 
@@ -264,7 +266,19 @@ func discoverEventHandlers(t reflect.Type) (map[reflect.Type]*EventHandler, erro
 			continue
 		}
 
-		hasError := mt.NumOut() == 1 && mt.Out(0).Implements(errorInterface)
+		hasError := false
+		if mt.NumOut() == 1 {
+			if mt.Out(0) != errorInterface {
+				// 非 error 返回值在应用阶段会被丢弃；静默注册会让开发者误以为
+				// 返回值有语义（是否接受/失败），与其他装配期校验一样 fail-fast。
+				return nil, errors.NewCode(errors.InvalidInput, "event handler must return error or nothing").
+					WithContext("handler", method.Name).
+					WithContext("aggregate_type", t.String()).
+					WithContext("event_type", paramType.String()).
+					WithContext("return_type", mt.Out(0).String())
+			}
+			hasError = true
+		}
 		if existing, exists := handlers[paramType]; exists {
 			return nil, errors.NewCode(errors.Conflict, "duplicate event handler").
 				WithContext("event_type", paramType.String()).

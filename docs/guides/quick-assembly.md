@@ -1,6 +1,6 @@
 # Quick 装配与列名约定
 
-`gochen-runtime/quick` 提供 Repo、Application、REST 和 Host 的常用装配入口。它调用对应模块的正式实现，安全能力仍需明确声明。复杂配置使用 Runtime 的 Repo options、`security.Profile` 和 Host builder。
+`gochen-runtime/quick` 提供 Repo、Application、事件溯源、REST 和 Host 的常用装配入口。它调用对应模块的正式实现，安全能力仍需明确声明。复杂配置使用 Runtime 的 Repo options、`security.Profile` 和 Host builder。
 
 ## 仓储与 Application
 
@@ -18,6 +18,38 @@
 上述构造函数均返回 error。`scopeFn` 的类型为 `func(T) int64`，必须返回资源实际管理范围。`ScopedRepo` 只开启 L3；需要 L2 时另外传入 `repo.WithIsolation`。`AuditedRepo` 不会创建审计 Store 或审计 Application，完整审计链路仍需 `app/audited`。
 
 Scoped 默认从 Principal 的 ActiveScopeID 解析单范围，系统主体使用全局范围；没有有效身份时拒绝。动作前缀 `order` 派生 `order:api:create/read/update/delete/list`。可通过 `WithScopedPolicy`、`WithScopedScopeResolver`、`WithScopedEvaluator`、`WithScopedActionChecker`、`WithScopedAuthorizer` 定制策略；恢复、物理删除、审计查询等额外动作须显式配置对应权限。
+
+## 事件溯源
+
+| 入口 | 输入与行为 |
+| --- | --- |
+| `quick.EventSourced(opts)` | 组合领域事件存储与单聚合仓储 |
+| `quick.AtomicEventSourced(opts)` | 组合原子领域事件存储与批量仓储；要求 PersistOnly 和原子后端 |
+
+两者接收 `quick.EventSourcedOptions[T, ID]`，均返回 error。`Store` 使用 Core 的 `eventstore.DomainEventStoreOptions[ID]`；聚合类型只在 `Store.AggregateType` 声明一次。`Sample`、`Factory`、`MetadataRegistry` 沿用领域仓储配置。以下片段假设已定义 BankAccount 聚合、事件注册表和工厂：
+
+```go
+repository, err := quick.EventSourced(quick.EventSourcedOptions[*BankAccount, int64]{
+    Store: esstore.DomainEventStoreOptions[int64]{
+        AggregateType:    "BankAccount",
+        PublishMode:      esstore.PublishModePersistOnly,
+        EventStore:       memoryStore,
+        EventIDGenerator: uuid.NewGenerator(),
+        EventRegistry:    eventRegistry,
+        UpgraderRegistry: upgraders,
+    },
+    Sample:           &BankAccount{},
+    Factory:          factory,
+    MetadataRegistry: metadataRegistry,
+})
+if err != nil {
+    return err
+}
+```
+
+发布模式没有隐式默认值；Direct、Outbox 仍须提供对应依赖，见[存储适配契约](../../app/eventsourced/eventstore/README.md)。普通入口不暴露原子批量能力；原子入口在模式或后端不支持时于构造期报错。`Store.SnapshotManager` 只负责恢复，保存后创建快照仍需显式装配快照仓储装饰器。
+
+完整可运行示例位于 Runtime 仓库：`go run ./examples/domain/eventsourced`。它使用内存存储，演示命令、保存、恢复与领域规则拒绝，无需数据库或后台服务。
 
 ## 列名约定
 

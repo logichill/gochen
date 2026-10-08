@@ -457,6 +457,41 @@ func TestMemoryTransport_Publish_NilGuards(t *testing.T) {
 	require.True(t, errors.Is(err, errors.InvalidInput))
 }
 
+// callPublishWithoutPanic 在同一 goroutine 内执行发布调用，把 panic 转为用例失败信息，
+// 避免 typed-nil 用例直接终止测试进程、掩盖其余用例结果。
+func callPublishWithoutPanic(t *testing.T, name string, call func() error) (err error) {
+	t.Helper()
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("%s: unexpected panic: %v", name, r)
+		}
+	}()
+	return call()
+}
+
+// TestMemoryTransport_TypedNilMessageRejected 验证内存传输 Publish/PublishAll 拒绝 typed-nil 消息
+// （接口非 nil 而底层指针为 nil），返回 InvalidInput 而非在 GetType 处 nil 解引用 panic。
+func TestMemoryTransport_TypedNilMessageRejected(t *testing.T) {
+	tpt := NewMemoryTransportForTest(4)
+	ctx := context.Background()
+	require.NoError(t, tpt.Start(ctx))
+	t.Cleanup(func() { _ = tpt.Stop(context.Background()) })
+
+	var nilMessage *messaging.Message
+
+	err := callPublishWithoutPanic(t, "Publish(typed-nil)", func() error {
+		return tpt.Publish(ctx, nilMessage)
+	})
+	require.Error(t, err)
+	require.True(t, errors.Is(err, errors.InvalidInput))
+
+	err = callPublishWithoutPanic(t, "PublishAll(typed-nil)", func() error {
+		return tpt.PublishAll(ctx, []messaging.IMessage{nilMessage})
+	})
+	require.Error(t, err)
+	require.True(t, errors.Is(err, errors.InvalidInput))
+}
+
 func TestMemoryTransport_Subscribe_NilGuards(t *testing.T) {
 	tpt := NewMemoryTransportForTest(4)
 	ctx := context.Background()
@@ -803,7 +838,9 @@ func TestMemoryTransport_PublishAllDoesNotWaitForCapacity(t *testing.T) {
 	})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, errors.Queue))
-	require.Less(t, time.Since(started), 50*time.Millisecond)
+	// 队列永远不会被消费，阻塞型回归会一直等待；用宽松上界只拦截“等待容量”语义回归，
+	// 避免 50ms 级墙钟裕度在 2 核/race 负载下产生假失败。
+	require.Less(t, time.Since(started), 2*time.Second)
 	require.NoError(t, tpt.Stop(ctx))
 }
 

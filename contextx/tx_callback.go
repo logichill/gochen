@@ -28,11 +28,6 @@ type afterCommitEntry struct {
 	fn  AfterCommitFunc
 }
 
-// AfterCommitError 表示“数据库已提交，但提交后回调失败”。
-type AfterCommitError struct {
-	cause error
-}
-
 type afterCommitDispatcherKey struct{}
 
 type txLifecycleState struct {
@@ -42,7 +37,31 @@ type txLifecycleState struct {
 }
 
 type txLifecycleStateKey struct{}
+
 type txLifecycleOwnerKey struct{}
+
+type withoutTxLifecycleContext struct {
+	context.Context
+}
+
+func (c withoutTxLifecycleContext) Value(key any) any {
+	switch key.(type) {
+	case txLifecycleStateKey, txLifecycleOwnerKey, afterCommitDispatcherKey:
+		return nil
+	default:
+		return c.Context.Value(key)
+	}
+}
+
+// WithoutTxLifecycle 派生不携带事务生命周期或提交后分发器的上下文。
+// 保留其他值、截止时间和取消信号；不提交、回滚或修改原事务状态。
+// 底层数据库事务句柄应由其所属包一并移除。
+func WithoutTxLifecycle(ctx context.Context) (context.Context, error) {
+	if _, err := Ensure(ctx); err != nil {
+		return nil, err
+	}
+	return withoutTxLifecycleContext{Context: ctx}, nil
+}
 
 func txLifecycleStateFromContext(ctx context.Context) (*txLifecycleState, bool, bool) {
 	if ctx == nil {
@@ -70,30 +89,6 @@ func afterCommitDispatcherFromContext(ctx context.Context) (IAfterCommitDispatch
 // NewAfterCommitDispatcher 创建一个可复用的提交后回调分发器。
 func NewAfterCommitDispatcher() *AfterCommitDispatcher {
 	return &AfterCommitDispatcher{}
-}
-
-// Error 实现 error 接口。
-func (e *AfterCommitError) Error() string {
-	if e == nil || e.cause == nil {
-		return "after-commit callback failed"
-	}
-	return "after-commit callback failed: " + e.cause.Error()
-}
-
-func (e *AfterCommitError) Unwrap() error { return e.cause }
-
-// WrapAfterCommitError 把提交后回调错误标记为“提交已成功”。
-func WrapAfterCommitError(err error) error {
-	if err == nil || IsAfterCommitError(err) {
-		return err
-	}
-	return &AfterCommitError{cause: err}
-}
-
-// IsAfterCommitError 判断 err 是否表示“提交成功但回调失败”。
-func IsAfterCommitError(err error) bool {
-	var target *AfterCommitError
-	return errors.As(err, &target)
 }
 
 // WithAfterCommitDispatcher 将外部事务回调分发器写入 ctx。

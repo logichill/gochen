@@ -439,6 +439,80 @@ func TestRouteBuilder_MiddlewareChain(t *testing.T) {
 	}, order)
 }
 
+// TestRouteBuilder_MiddlewareChainStopSemantics 验证中间件链的中止语义：
+// 中间件不调用 next 或 ctx.Abort() 中止链时返回 nil（中止由中间件与 ctx
+// 承担，链执行器不额外区分——历史缺陷是尾部分支与 fallthrough 同体的死条件）。
+func TestRouteBuilder_MiddlewareChainStopSemantics(t *testing.T) {
+	t.Run("middleware without next stops chain with nil", func(t *testing.T) {
+		group := newMockRouteGroup()
+		handlerCalled := false
+
+		builder := NewRouteBuilder(group).Route(RouteConfig{
+			Path:        "/stop",
+			Method:      "GET",
+			Handler:     func(ctx IContext) error { handlerCalled = true; return nil },
+			Middlewares: []Middleware{func(ctx IContext, next func() error) error { return nil }},
+		})
+		require.NoError(t, builder.Build())
+
+		h := group.routes["GET"]["/stop"]
+		require.NotNil(t, h)
+		require.NoError(t, h(&stubContext{}))
+		assert.False(t, handlerCalled)
+	})
+
+	t.Run("aborted context without next stops chain with nil", func(t *testing.T) {
+		group := newMockRouteGroup()
+		handlerCalled := false
+
+		builder := NewRouteBuilder(group).Route(RouteConfig{
+			Path:   "/abort",
+			Method: "GET",
+			Handler: func(ctx IContext) error {
+				handlerCalled = true
+				return nil
+			},
+			Middlewares: []Middleware{func(ctx IContext, next func() error) error {
+				ctx.Abort()
+				return nil
+			}},
+		})
+		require.NoError(t, builder.Build())
+
+		h := group.routes["GET"]["/abort"]
+		require.NotNil(t, h)
+		ctx := &stubContext{}
+		require.NoError(t, h(ctx))
+		assert.True(t, ctx.IsAborted())
+		assert.False(t, handlerCalled)
+	})
+
+	t.Run("middleware error propagates and stops chain", func(t *testing.T) {
+		group := newMockRouteGroup()
+		handlerCalled := false
+
+		builder := NewRouteBuilder(group).Route(RouteConfig{
+			Path:   "/fail",
+			Method: "GET",
+			Handler: func(ctx IContext) error {
+				handlerCalled = true
+				return nil
+			},
+			Middlewares: []Middleware{func(ctx IContext, next func() error) error {
+				return errors.NewCode(errors.Internal, "boom")
+			}},
+		})
+		require.NoError(t, builder.Build())
+
+		h := group.routes["GET"]["/fail"]
+		require.NotNil(t, h)
+		gotErr := h(&stubContext{})
+		require.Error(t, gotErr)
+		assert.True(t, errors.Is(gotErr, errors.Internal))
+		assert.False(t, handlerCalled)
+	})
+}
+
 func TestRouteBuilder_PermissionDenied_StopsHandler(t *testing.T) {
 	group := newMockRouteGroup()
 	checker := newMockPermissionChecker()

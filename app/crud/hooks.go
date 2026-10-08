@@ -12,7 +12,7 @@ import (
 // - Before* 在写入前执行，失败会阻断后续校验/写入；
 // - After* 在 repository 写入后、事务提交前执行，失败会回滚本次写入；
 // - PostCommit* 在事务提交后执行，失败不会回滚已提交写入；
-// - 未配置的 hook 为 no-op；CRUD 扩展只通过 SetHooks / rest.WithHooks 显式注入。
+// - 未配置的 hook 为 no-op；CRUD 扩展只通过 Options.Hooks 在构造期显式注入。
 type Hooks[T domain.IEntity[ID], ID comparable] struct {
 	// BeforeCreate 在 Create 写入前执行。
 	BeforeCreate func(ctx context.Context, entity T) error

@@ -56,10 +56,20 @@ func WithTxSession(ctx context.Context, session IOrmSession, owned bool) (contex
 	return ctx, nil
 }
 
+// WithoutTxSession 派生不携带 ORM 事务会话、生命周期和提交后分发器的上下文。
+// 供提交后的独立操作使用，保留其他值、截止时间与取消信号，不修改原事务。
+func WithoutTxSession(ctx context.Context) (context.Context, error) {
+	ctx, err := contextx.WithoutTxLifecycle(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return context.WithValue(ctx, txSessionStateKey{}, txSessionState{}), nil
+}
+
 // TxSessionFromContext 从 ctx 取出事务会话及 owned 标记。
 // 返回：
-// - owned：是否满足条件。
-// - ok：是否满足条件。
+// - owned：该事务是否由当前作用域负责提交/回滚（false 表示复用外层事务）。
+// - ok：是否命中事务会话（ctx 为空或未写入会话时为 false）。
 func TxSessionFromContext(ctx context.Context) (session IOrmSession, owned bool, ok bool) {
 	if ctx == nil {
 		return nil, false, false

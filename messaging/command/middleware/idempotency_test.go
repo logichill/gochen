@@ -301,6 +301,32 @@ func TestIdempotencyMiddleware_TTLExpiration(t *testing.T) {
 	assert.Equal(t, 2, executionCount)
 }
 
+// TestIdempotencyMiddleware_TypedNilClockDoesNotCrashCleanupWorker 验证 typed-nil 时钟按未注入处理：
+// 构造期应归一化为默认时钟，避免清理协程以 nil 接收者调用 NewTicker 触发 SIGSEGV 崩溃整个进程。
+func TestIdempotencyMiddleware_TypedNilClockDoesNotCrashCleanupWorker(t *testing.T) {
+	var typedNil *clock.ManualClock
+	middleware := NewIdempotencyMiddleware(&IdempotencyConfig{
+		TTL:             time.Hour,
+		CleanupInterval: time.Minute,
+		Clock:           typedNil,
+	})
+	defer func() { _ = middleware.Stop(context.Background()) }()
+
+	if _, ok := middleware.clock.(*clock.RealClock); !ok {
+		t.Fatalf("typed-nil clock should be normalized to default clock, got %T", middleware.clock)
+	}
+
+	executed := false
+	cmd := command.NewCommand("cmd-1", "CreateUser", "1", "User", nil)
+	err := middleware.Handle(context.Background(), cmd, func(ctx context.Context, msg messaging.IMessage) error {
+		executed = true
+		return nil
+	})
+	assert.NoError(t, err)
+	assert.True(t, executed)
+	assert.Equal(t, 1, middleware.GetProcessedCount())
+}
+
 // TestIdempotencyMiddleware_FailedCommand 验证 IdempotencyMiddleware FailedCommand。
 func TestIdempotencyMiddleware_FailedCommand(t *testing.T) {
 	middleware := NewIdempotencyMiddleware(nil)

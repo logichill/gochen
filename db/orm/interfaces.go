@@ -3,9 +3,9 @@ package orm
 import (
 	"context"
 	"database/sql"
+	coredialect "gochen/db/dialect"
 
 	"gochen/db"
-	"gochen/db/dialect"
 )
 
 // IOrm 表示 ORM 适配器入口。
@@ -37,7 +37,7 @@ type IModel interface {
 	Meta() *ModelMeta
 	Capabilities() Capabilities
 	// Dialect 返回模型绑定数据库的方言能力，必须为非 nil。
-	Dialect() dialect.IDialect
+	Dialect() coredialect.IDialect
 
 	First(ctx context.Context, dest any, opts ...QueryOption) error
 	Find(ctx context.Context, dest any, opts ...QueryOption) error

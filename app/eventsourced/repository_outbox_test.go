@@ -3,6 +3,7 @@ package eventsourced
 import (
 	"context"
 	"fmt"
+	esstore "gochen/app/eventsourced/eventstore"
 	"testing"
 	"time"
 
@@ -140,7 +141,8 @@ func TestOutboxAwareRepository_Save_UsesOutboxAndMarksCommitted(t *testing.T) {
 	require.NoError(t, reg.Register("ValueSet", func() any { return &valueSetOutboxEvent{} }))
 	mox := &mockOutboxRepo{}
 
-	storeWithOutbox, err := NewDomainEventStore(DomainEventStoreOptions[*outboxAggregate, int64]{
+	storeWithOutbox, err := esstore.NewDomainEventStore(esstore.DomainEventStoreOptions[int64]{
+		PublishMode:      esstore.PublishModeOutbox,
 		AggregateType:    "OutboxAggregate",
 		EventIDGenerator: testEventIDGenerator(),
 		EventStore:       baseStore,
@@ -175,7 +177,8 @@ func TestOutboxAwareRepository_MemoryOutboxPersistsEventStream(t *testing.T) {
 	reg, upgraders := newTestRegistryAndUpgraders()
 	require.NoError(t, reg.Register("ValueSet", func() any { return &valueSetOutboxEvent{} }))
 
-	storeWithOutbox, err := NewDomainEventStore(DomainEventStoreOptions[*outboxAggregate, int64]{
+	storeWithOutbox, err := esstore.NewDomainEventStore(esstore.DomainEventStoreOptions[int64]{
+		PublishMode:      esstore.PublishModeOutbox,
 		AggregateType:    "OutboxAggregate",
 		EventIDGenerator: testEventIDGenerator(),
 		EventStore:       baseStore,
@@ -209,7 +212,8 @@ func TestOutboxAwareRepository_Save_PropagatesOutboxError(t *testing.T) {
 		saveErr: fmt.Errorf("outbox save failed"),
 	}
 
-	storeWithOutbox, err := NewDomainEventStore(DomainEventStoreOptions[*outboxAggregate, int64]{
+	storeWithOutbox, err := esstore.NewDomainEventStore(esstore.DomainEventStoreOptions[int64]{
+		PublishMode:      esstore.PublishModeOutbox,
 		AggregateType:    "OutboxAggregate",
 		EventIDGenerator: testEventIDGenerator(),
 		EventStore:       baseStore,

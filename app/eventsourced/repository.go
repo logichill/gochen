@@ -2,7 +2,11 @@ package eventsourced
 
 import (
 	"context"
+	"strings"
 
+	"gochen/app/eventsourced/internal/aggregatecheck"
+	"gochen/app/internal/depcheck"
+	"gochen/contextx"
 	deventsourced "gochen/domain/eventsourced"
 	"gochen/errors"
 )
@@ -22,7 +26,7 @@ type RepositoryOptions[T deventsourced.IEventSourcedAggregate[ID], ID comparable
 //   - domain/eventsourced.IEventSourcedAggregate[ID]：聚合根；
 //   - domain/eventsourced.IDomainEventStore[ID]：领域事件存储接口。
 //
-// 具体的事件存储/快照/Outbox/EventBus 等能力由上层通过 IEventStore 适配器提供（例如 app/eventsourced.DomainEventStore）。
+// 具体的事件存储/快照/Outbox/EventBus 等能力由上层通过 IEventStore 适配器提供（由 app/eventsourced/eventstore.NewDomainEventStore 构造）。
 //
 // 反射支持（复用 domain/eventsourced 的元数据机制）：
 //   - metadata 优先复用装配期通过 MetadataRegistry / 模块 Aggregates 预注册的结果；
@@ -43,21 +47,21 @@ type EventSourcedRepository[T deventsourced.IEventSourcedAggregate[ID], ID compa
 	metadata *deventsourced.Metadata
 }
 
-// NewEventSourcedRepository 创建事件Sourced仓储。
+// NewEventSourcedRepository 校验依赖并预编译聚合元数据。
 func NewEventSourcedRepository[T deventsourced.IEventSourcedAggregate[ID], ID comparable](
 	opts RepositoryOptions[T, ID],
 ) (*EventSourcedRepository[T, ID], error) {
-	aggregateType := opts.AggregateType
+	aggregateType := strings.TrimSpace(opts.AggregateType)
 	if aggregateType == "" {
 		return nil, errors.NewCode(errors.InvalidInput, "aggregate type cannot be empty")
 	}
-	if err := validateAggregateSample(opts.Sample, aggregateType); err != nil {
+	if err := aggregatecheck.ValidateSample(opts.Sample, aggregateType); err != nil {
 		return nil, err
 	}
 	if opts.Factory == nil {
 		return nil, errors.NewCode(errors.InvalidInput, "aggregate factory cannot be nil")
 	}
-	if opts.Store == nil {
+	if depcheck.IsNil(opts.Store) {
 		return nil, errors.NewCode(errors.InvalidInput, "event store cannot be nil")
 	}
 	if opts.MetadataRegistry == nil {
@@ -86,7 +90,7 @@ func (r *EventSourcedRepository[T, ID]) newAggregate(id ID) (T, error) {
 		var zero T
 		return zero, err
 	}
-	if err := validateAggregateInstance(aggregate, r.aggregateType); err != nil {
+	if err := aggregatecheck.ValidateInstance(aggregate, r.aggregateType); err != nil {
 		var zero T
 		return zero, err
 	}
@@ -110,7 +114,7 @@ func (r *EventSourcedRepository[T, ID]) Save(ctx context.Context, aggregate T) e
 	if ctx == nil {
 		return errors.NewCode(errors.InvalidInput, "ctx is nil")
 	}
-	if err := validateAggregateInstance(aggregate, r.aggregateType); err != nil {
+	if err := aggregatecheck.ValidateInstance(aggregate, r.aggregateType); err != nil {
 		return err
 	}
 	events := aggregate.GetUncommittedEvents()
@@ -119,6 +123,9 @@ func (r *EventSourcedRepository[T, ID]) Save(ctx context.Context, aggregate T) e
 	}
 
 	if err := r.store.AppendEvents(ctx, aggregate.GetID(), events, aggregate.GetExpectedVersion()); err != nil {
+		if contextx.IsAfterCommitError(err) {
+			aggregate.MarkEventsAsCommitted()
+		}
 		return err
 	}
 

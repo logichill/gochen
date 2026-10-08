@@ -19,7 +19,7 @@
 
 等待并发清理或在途处理时遵循释放上下文的取消与超时；停用后等待超时会保留资源供重试，不启动后台清理。底层订阅释放函数也须遵循传入的 context。
 
-`app/eventsourced.EventSourcedAutoRegistrar.RegisterProjections` 返回各次注册的释放函数；即使批次出错也必须处理返回的函数，可交给 `UnregisterProjections(ctx, releases...)` 逆序释放。批量清理会尝试全部释放函数并聚合错误，失败后可重试同一组函数。
+`app/eventsourced/subscriber.EventSourcedAutoRegistrar.RegisterProjections` 返回各次注册的释放函数；即使批次出错也必须处理返回的函数，可交给 `UnregisterProjections(ctx, releases...)` 逆序释放。批量清理会尝试全部释放函数并聚合错误，失败后可重试同一组函数。
 
 ## 两种运行方式
 
@@ -28,7 +28,7 @@
 | 未启用 checkpoint | EventBus 回调交给投影 Handle | 同一投影不重入；不承诺崩溃恢复 |
 | 启用 checkpoint | 在线消息唤醒运行器，从 EventStore 按游标追赶 | 从持久 checkpoint 恢复 |
 
-通过 `WithCheckpointStore` 启用 checkpoint 时必须提供 `IEventStreamStore`。投影同时满足 `ICheckpointingProjection` 和 `IRebuildCheckpointingProjection`，确保增量与重建都能将读模型写入和 checkpoint 保存放在同一原子边界。
+通过 `WithCheckpointStore` 启用 checkpoint 时必须提供 `IEventStreamReader`，仅要求全局事件扫描。投影同时满足 `ICheckpointingProjection` 和 `IRebuildCheckpointingProjection`，确保增量与重建都能将读模型写入和 checkpoint 保存放在同一原子边界。
 
 普通投影可用 `NewCheckpointingProjector(inner, txRunner)` 包装。Runtime `eventing/projection/sqlstore.NewSQLCheckpointTxRunner(orm)` 提供 ORM 事务执行器，SQLCheckpointStore 读取同一 context 中的事务 session。投影的业务 SQL 也必须使用该事务 session，不能绕回独立连接。
 

@@ -145,6 +145,17 @@ func TestSimpleSpan_SetAttribute(t *testing.T) {
 	})
 
 	span.End()
+
+	simple, ok := span.(*simpleSpan)
+	if !ok {
+		t.Fatalf("expected *simpleSpan, got %T", span)
+	}
+	assert.Equal(t, map[string]any{
+		"string_key": "value",
+		"int_key":    42,
+		"float_key":  3.14,
+		"bool_key":   true,
+	}, simple.attrs)
 }
 
 // TestSimpleSpan_AddEvent 验证 SimpleSpan AddEvent。
@@ -158,6 +169,16 @@ func TestSimpleSpan_AddEvent(t *testing.T) {
 	span.AddEvent("event2", map[string]any{"key": "value"})
 
 	span.End()
+
+	simple, ok := span.(*simpleSpan)
+	if !ok {
+		t.Fatalf("expected *simpleSpan, got %T", span)
+	}
+	assert.Len(t, simple.events, 2)
+	assert.Equal(t, "event1", simple.events[0].name)
+	assert.Nil(t, simple.events[0].attrs)
+	assert.Equal(t, "event2", simple.events[1].name)
+	assert.Equal(t, map[string]any{"key": "value"}, simple.events[1].attrs)
 }
 
 // TestSimpleSpan_RecordError 验证 SimpleSpan RecordError。
@@ -171,14 +192,31 @@ func TestSimpleSpan_RecordError(t *testing.T) {
 	span.RecordError(err)
 
 	span.End()
+
+	simple, ok := span.(*simpleSpan)
+	if !ok {
+		t.Fatalf("expected *simpleSpan, got %T", span)
+	}
+	assert.Error(t, simple.err)
+	assert.Equal(t, "error", simple.status)
+	assert.Equal(t, "test error", simple.statusMsg)
 }
 
+// TestSimpleSpan_RecordErrorNilNoops 验证 SimpleSpan RecordError 对 nil 错误不产生状态变更。
 func TestSimpleSpan_RecordErrorNilNoops(t *testing.T) {
 	tracer := NewSimpleTracer("test-service")
 	_, span := tracer.StartSpan(context.Background(), "test.operation")
 
 	span.RecordError(nil)
 	span.End()
+
+	simple, ok := span.(*simpleSpan)
+	if !ok {
+		t.Fatalf("expected *simpleSpan, got %T", span)
+	}
+	assert.Nil(t, simple.err)
+	assert.Equal(t, "", simple.status)
+	assert.Equal(t, "", simple.statusMsg)
 }
 
 func TestSimpleSpan_EndIsIdempotent(t *testing.T) {

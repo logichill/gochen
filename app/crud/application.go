@@ -4,323 +4,58 @@ package crud
 import (
 	"context"
 	"gochen/app/internal/writeflow"
-	"gochen/app/query"
+
 	"gochen/domain"
 	"gochen/domain/crud"
 	"gochen/errors"
 	"gochen/validate"
-	"sync"
 )
-
-// IReader 表示 CRUD 场景下的读能力集合。
-type IReader[T domain.IEntity[ID], ID comparable] interface {
-	Get(ctx context.Context, id ID) (T, error)
-	List(ctx context.Context, offset, limit int) ([]T, error)
-	Count(ctx context.Context) (int64, error)
-	Exists(ctx context.Context, id ID) (bool, error)
-	ListByQuery(ctx context.Context, query *query.QueryRequest) ([]T, error)
-	ListPage(ctx context.Context, request *query.PaginationOptions) (*query.PagedResult[T], error)
-	CountByQuery(ctx context.Context, query *query.QueryRequest) (int64, error)
-}
-
-// IWriter 表示 CRUD 场景下的写能力集合。
-type IWriter[T domain.IEntity[ID], ID comparable] interface {
-	Create(ctx context.Context, e T) error
-	Update(ctx context.Context, e T) error
-	Delete(ctx context.Context, id ID) error
-}
-
-// IBatchWriter 表示批量写能力。
-type IBatchWriter[T domain.IEntity[ID], ID comparable] interface {
-	CreateAll(ctx context.Context, entities []T) error
-	UpdateAll(ctx context.Context, entities []T) error
-	DeleteAll(ctx context.Context, ids []ID) error
-}
-
-// IRepositoryProvider 暴露底层仓储。
-type IRepositoryProvider[T domain.IEntity[ID], ID comparable] interface {
-	Repository() crud.IRepository[T, ID]
-}
-
-// IQueryRepositoryProvider 暴露底层查询仓储扩展。
-type IQueryRepositoryProvider[T domain.IEntity[ID], ID comparable] interface {
-	QueryRepository() (crud.IQueryRepository[T, ID], bool)
-}
-
-// IEntityValidator 定义实体校验能力接口。
-type IEntityValidator[T domain.IEntity[ID], ID comparable] interface {
-	Validate(entity T) error
-}
-
-// IConfigProvider 暴露服务配置。
-type IConfigProvider interface {
-	Config() *ServiceConfig
-}
-
-// IApplication 抽象Application能力接口。
-type IApplication[T domain.IEntity[ID], ID comparable] interface {
-	IReader[T, ID]
-	IWriter[T, ID]
-	IRepositoryProvider[T, ID]
-	IQueryRepositoryProvider[T, ID]
-	IEntityValidator[T, ID]
-	IConfigProvider
-}
-
-// ServiceConfig 服务配置。
-type ServiceConfig struct {
-	// 自动验证
-	AutoValidate bool
-
-	// 最大批量操作数量
-	MaxBatchSize int
-
-	// 最大单页大小（分页查询）
-	MaxPageSize int
-}
-
-const (
-	defaultMaxBatchSize = 1000
-	defaultMaxPageSize  = 1000
-)
-
-func DefaultServiceConfig() *ServiceConfig {
-	return &ServiceConfig{
-		AutoValidate: true,
-		MaxBatchSize: defaultMaxBatchSize,
-		MaxPageSize:  defaultMaxPageSize,
-	}
-}
 
 // Application 应用服务实现。
 type Application[T domain.IEntity[ID], ID comparable] struct {
 	repository  crud.IRepository[T, ID]
-	stateMu     sync.RWMutex
 	validator   validate.IValidator
 	config      *ServiceConfig
 	hooks       *Hooks[T, ID]
 	batchWriter *BatchWriter[T, ID]
 }
 
-// IServiceConfigUpdatable 抽象服务配置Updatable能力接口。
-type IServiceConfigUpdatable interface {
-	UpdateConfig(*ServiceConfig)
-}
-
-// IValidatorAware 抽象ValidatorAware能力接口。
-type IValidatorAware interface {
-	SetValidator(validate.IValidator)
-}
-
-// IHooksAware 抽象钩子集合Aware能力接口。
-type IHooksAware[T domain.IEntity[ID], ID comparable] interface {
-	SetHooks(*Hooks[T, ID])
-}
-
-// RunBeforeDelete 执行显式 Hooks.BeforeDelete；未配置则 no-op。
-func (s *Application[T, ID]) RunBeforeDelete(ctx context.Context, id ID) error {
-	return s.runBeforeDelete(ctx, id)
-}
-
-// RunAfterDelete 执行显式 Hooks.AfterDelete；未配置则 no-op。
-func (s *Application[T, ID]) RunAfterDelete(ctx context.Context, id ID) error {
-	return s.runAfterDelete(ctx, id)
-}
-
 // NewApplication 创建应用服务实例。
 //
 // 参数：
 // - repository：实体仓储（承载 CRUD 的实际读写与查询）。
-// - validator：可选校验器（配合 AutoValidate 在写入前执行实体校验）。
-// - config：服务配置（nil 表示使用默认配置）。
+// - options：构造期配置（nil 使用默认值）；配置和钩子均复制后持有。
 //
 // 返回：
 // - err：repository 为空等输入错误会返回 err。
 func NewApplication[T domain.IEntity[ID], ID comparable](
 	repository crud.IRepository[T, ID],
-	validator validate.IValidator,
-	config *ServiceConfig,
+	options *Options[T, ID],
 ) (*Application[T, ID], error) {
 	if repository == nil {
 		return nil, errors.NewCode(errors.InvalidInput, "repository cannot be nil")
 	}
-	if config == nil {
-		config = DefaultServiceConfig()
+	var opts Options[T, ID]
+	if options != nil {
+		opts = *options
 	}
-	copyCfg := *config
+	if opts.Config == nil {
+		opts.Config = DefaultServiceConfig()
+	}
+	copyCfg := *opts.Config
 	normalizeServiceConfig(&copyCfg)
 
 	app := &Application[T, ID]{
 		repository: repository,
-		validator:  validator,
+		validator:  opts.Validator,
 		config:     &copyCfg,
+	}
+	if opts.Hooks != nil {
+		hooks := *opts.Hooks
+		app.hooks = &hooks
 	}
 	app.batchWriter = NewBatchWriter(app)
 	return app, nil
-}
-
-func (s *Application[T, ID]) Config() *ServiceConfig {
-	s.stateMu.RLock()
-	defer s.stateMu.RUnlock()
-	return cloneServiceConfig(s.config)
-}
-
-// UpdateConfig 更新服务配置（会复制一份，避免外部后续修改影响运行中实例）。
-func (s *Application[T, ID]) UpdateConfig(config *ServiceConfig) {
-	if config == nil {
-		return
-	}
-	copyCfg := *config
-	normalizeServiceConfig(&copyCfg)
-	s.stateMu.Lock()
-	defer s.stateMu.Unlock()
-	s.config = &copyCfg
-}
-
-// SetValidator 设置实体校验器（用于写入前校验）。
-func (s *Application[T, ID]) SetValidator(v validate.IValidator) {
-	s.stateMu.Lock()
-	defer s.stateMu.Unlock()
-	s.validator = v
-}
-
-// SetHooks 设置生命周期钩子（用于在 CRUD 写入前后扩展业务逻辑）。
-func (s *Application[T, ID]) SetHooks(h *Hooks[T, ID]) {
-	s.stateMu.Lock()
-	defer s.stateMu.Unlock()
-	s.hooks = h
-}
-
-func runBeforeCreateHook[T domain.IEntity[ID], ID comparable](hooks *Hooks[T, ID], ctx context.Context, entity T) error {
-	if hooks == nil || hooks.BeforeCreate == nil {
-		return nil
-	}
-	return hooks.BeforeCreate(ctx, entity)
-}
-
-func runAfterCreateHook[T domain.IEntity[ID], ID comparable](hooks *Hooks[T, ID], ctx context.Context, entity T) error {
-	if hooks == nil || hooks.AfterCreate == nil {
-		return nil
-	}
-	return hooks.AfterCreate(ctx, entity)
-}
-
-func postCommitCreateHook[T domain.IEntity[ID], ID comparable](hooks *Hooks[T, ID], entity T) func(context.Context) error {
-	if hooks == nil || hooks.PostCommitCreate == nil {
-		return nil
-	}
-	return func(ctx context.Context) error {
-		return hooks.PostCommitCreate(ctx, entity)
-	}
-}
-
-func runBeforeUpdateHook[T domain.IEntity[ID], ID comparable](hooks *Hooks[T, ID], ctx context.Context, entity T) error {
-	if hooks == nil || hooks.BeforeUpdate == nil {
-		return nil
-	}
-	return hooks.BeforeUpdate(ctx, entity)
-}
-
-func runAfterUpdateHook[T domain.IEntity[ID], ID comparable](hooks *Hooks[T, ID], ctx context.Context, entity T) error {
-	if hooks == nil || hooks.AfterUpdate == nil {
-		return nil
-	}
-	return hooks.AfterUpdate(ctx, entity)
-}
-
-func postCommitUpdateHook[T domain.IEntity[ID], ID comparable](hooks *Hooks[T, ID], entity T) func(context.Context) error {
-	if hooks == nil || hooks.PostCommitUpdate == nil {
-		return nil
-	}
-	return func(ctx context.Context) error {
-		return hooks.PostCommitUpdate(ctx, entity)
-	}
-}
-
-func runBeforeDeleteHook[T domain.IEntity[ID], ID comparable](hooks *Hooks[T, ID], ctx context.Context, id ID) error {
-	if hooks == nil || hooks.BeforeDelete == nil {
-		return nil
-	}
-	return hooks.BeforeDelete(ctx, id)
-}
-
-func runAfterDeleteHook[T domain.IEntity[ID], ID comparable](hooks *Hooks[T, ID], ctx context.Context, id ID) error {
-	if hooks == nil || hooks.AfterDelete == nil {
-		return nil
-	}
-	return hooks.AfterDelete(ctx, id)
-}
-
-func postCommitDeleteHook[T domain.IEntity[ID], ID comparable](hooks *Hooks[T, ID], id ID) func(context.Context) error {
-	if hooks == nil || hooks.PostCommitDelete == nil {
-		return nil
-	}
-	return func(ctx context.Context) error {
-		return hooks.PostCommitDelete(ctx, id)
-	}
-}
-
-// runBeforeCreate 执行显式配置的 BeforeCreate hook；未配置则 no-op。
-func (s *Application[T, ID]) runBeforeCreate(ctx context.Context, entity T) error {
-	return runBeforeCreateHook(s.hooksSnapshot(), ctx, entity)
-}
-
-// runAfterCreate 执行显式配置的 AfterCreate hook；未配置则 no-op。
-func (s *Application[T, ID]) runAfterCreate(ctx context.Context, entity T) error {
-	return runAfterCreateHook(s.hooksSnapshot(), ctx, entity)
-}
-
-func (s *Application[T, ID]) postCommitCreate(entity T) func(context.Context) error {
-	return postCommitCreateHook(s.hooksSnapshot(), entity)
-}
-
-// runBeforeUpdate 执行显式配置的 BeforeUpdate hook；未配置则 no-op。
-func (s *Application[T, ID]) runBeforeUpdate(ctx context.Context, entity T) error {
-	return runBeforeUpdateHook(s.hooksSnapshot(), ctx, entity)
-}
-
-// runAfterUpdate 执行显式配置的 AfterUpdate hook；未配置则 no-op。
-func (s *Application[T, ID]) runAfterUpdate(ctx context.Context, entity T) error {
-	return runAfterUpdateHook(s.hooksSnapshot(), ctx, entity)
-}
-
-func (s *Application[T, ID]) postCommitUpdate(entity T) func(context.Context) error {
-	return postCommitUpdateHook(s.hooksSnapshot(), entity)
-}
-
-// runBeforeDelete 执行显式配置的 BeforeDelete hook；未配置则 no-op。
-func (s *Application[T, ID]) runBeforeDelete(ctx context.Context, id ID) error {
-	return runBeforeDeleteHook(s.hooksSnapshot(), ctx, id)
-}
-
-// runAfterDelete 执行显式配置的 AfterDelete hook；未配置则 no-op。
-func (s *Application[T, ID]) runAfterDelete(ctx context.Context, id ID) error {
-	return runAfterDeleteHook(s.hooksSnapshot(), ctx, id)
-}
-
-func (s *Application[T, ID]) postCommitDelete(id ID) func(context.Context) error {
-	return postCommitDeleteHook(s.hooksSnapshot(), id)
-}
-
-func (s *Application[T, ID]) postCommitCreateCallbacks(entities []T) []func(context.Context) error {
-	hooks := s.hooksSnapshot()
-	return writeflow.CallbacksFor(entities, func(entity T) func(context.Context) error {
-		return postCommitCreateHook(hooks, entity)
-	})
-}
-
-func (s *Application[T, ID]) postCommitUpdateCallbacks(entities []T) []func(context.Context) error {
-	hooks := s.hooksSnapshot()
-	return writeflow.CallbacksFor(entities, func(entity T) func(context.Context) error {
-		return postCommitUpdateHook(hooks, entity)
-	})
-}
-
-func (s *Application[T, ID]) postCommitDeleteCallbacks(ids []ID) []func(context.Context) error {
-	hooks := s.hooksSnapshot()
-	return writeflow.CallbacksFor(ids, func(id ID) func(context.Context) error {
-		return postCommitDeleteHook(hooks, id)
-	})
 }
 
 func (s *Application[T, ID]) transactionalRepository() (ITransactional, bool) {
@@ -402,6 +137,7 @@ func (s *Application[T, ID]) List(ctx context.Context, offset, limit int) ([]T, 
 	return repo.List(ctx, offset, limit)
 }
 
+// Count 返回当前实体的总记录数。
 func (s *Application[T, ID]) Count(ctx context.Context) (int64, error) {
 	repo, ok := s.QueryRepository()
 	if !ok {
@@ -468,21 +204,7 @@ func cloneServiceConfig(config *ServiceConfig) *ServiceConfig {
 	return &copyCfg
 }
 
-func normalizeServiceConfig(config *ServiceConfig) {
-	if config == nil {
-		return
-	}
-	if config.MaxBatchSize <= 0 {
-		config.MaxBatchSize = defaultMaxBatchSize
-	}
-	if config.MaxPageSize <= 0 {
-		config.MaxPageSize = defaultMaxPageSize
-	}
-}
-
 func (s *Application[T, ID]) serviceConfig() ServiceConfig {
-	s.stateMu.RLock()
-	defer s.stateMu.RUnlock()
 	if s.config == nil {
 		return *DefaultServiceConfig()
 	}
@@ -502,13 +224,9 @@ func (s *Application[T, ID]) maxPageSize() int {
 }
 
 func (s *Application[T, ID]) validatorSnapshot() validate.IValidator {
-	s.stateMu.RLock()
-	defer s.stateMu.RUnlock()
 	return s.validator
 }
 
 func (s *Application[T, ID]) hooksSnapshot() *Hooks[T, ID] {
-	s.stateMu.RLock()
-	defer s.stateMu.RUnlock()
 	return s.hooks
 }

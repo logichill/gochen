@@ -3,7 +3,7 @@
 //
 // 设计要点：
 //   - 装饰 crud.IApplication 这一宽接口，并通过 security/internal/capability
-//     按内层实际能力组合外壳，保住批量写、审计扩展与装配期注入等可选能力接口；
+//     按内层实际能力组合外壳，保住批量写与审计扩展等可选能力接口；
 //     批量与审计高危操作各自做资源授权，绝不裸转发（见 capability_decorator.go）；
 //   - 基础 Application（crud / audited / eventsourced）对约束零感知、零依赖：
 //     约束不进入任何公共接口，只经 auth/scoped 的受控 ctx 通道传递；
@@ -49,9 +49,11 @@ type Config struct {
 
 // application 是带资源授权与约束投放的 crud.IApplication 装饰器。
 type application[T domain.IEntity[ID], ID comparable] struct {
-	inner      crud.IApplication[T, ID]
-	authorizer authscoped.IAuthorizer
-	config     Config
+	inner        crud.IApplication[T, ID]
+	repository   domcrud.IRepository[T, ID]
+	maxBatchSize int
+	authorizer   authscoped.IAuthorizer
+	config       Config
 }
 
 var _ crud.IApplication[domain.IEntity[int64], int64] = (*application[domain.IEntity[int64], int64])(nil)
@@ -62,7 +64,10 @@ var _ crud.IApplication[domain.IEntity[int64], int64] = (*application[domain.IEn
 //   - app / authorizer 非空；
 //   - EntityType 非空（否则约束无法定向投放）；
 //   - Policy 中权限码合法；
+//   - app 提供 crud.IRepositoryProvider 装配能力；
 //   - 底层仓储已声明范围列（防静默降级）。
+//
+// crud.IConfigProvider 可提供授权前的批量上限；未提供时使用默认 1000。
 func New[T domain.IEntity[ID], ID comparable](
 	app crud.IApplication[T, ID],
 	authorizer authscoped.IAuthorizer,
@@ -80,10 +85,21 @@ func New[T domain.IEntity[ID], ID comparable](
 	if err := config.Policy.Validate(); err != nil {
 		return nil, err
 	}
-	if err := requireScopeDeclaration[T, ID](app, config.EntityType); err != nil {
+	provider, ok := app.(crud.IRepositoryProvider[T, ID])
+	if !ok {
+		return nil, errors.NewCode(errors.Unsupported, "L3 assembly requires IRepositoryProvider; apply scoped before action")
+	}
+	repo := provider.Repository()
+	if err := requireScopeDeclaration[T, ID](repo, config.EntityType); err != nil {
 		return nil, err
 	}
-	core := &application[T, ID]{inner: app, authorizer: authorizer, config: config}
+	core := &application[T, ID]{inner: app, repository: repo, authorizer: authorizer, config: config}
+	core.maxBatchSize = crud.DefaultServiceConfig().MaxBatchSize
+	if provider, ok := app.(crud.IConfigProvider); ok {
+		if cfg := provider.Config(); cfg != nil && cfg.MaxBatchSize > 0 {
+			core.maxBatchSize = cfg.MaxBatchSize
+		}
+	}
 	return composeCapabilities[T, ID](core, app), nil
 }
 
@@ -93,7 +109,7 @@ func composeCapabilities[T domain.IEntity[ID], ID comparable](
 	inner crud.IApplication[T, ID],
 ) crud.IApplication[T, ID] {
 	detected := capability.Detect[T, ID](inner)
-	parts := capability.Parts[T, ID]{Core: core, Aware: detected.Aware}
+	parts := capability.Parts[T, ID]{Core: core}
 	if detected.Batch != nil {
 		parts.Batch = &batchWriter[T, ID]{app: core, inner: detected.Batch}
 	}
@@ -105,10 +121,9 @@ func composeCapabilities[T domain.IEntity[ID], ID comparable](
 
 // requireScopeDeclaration 断言底层仓储确实会消费写约束，且真的执行得了约束写。
 func requireScopeDeclaration[T domain.IEntity[ID], ID comparable](
-	app crud.IApplication[T, ID],
+	repo domcrud.IRepository[T, ID],
 	entityType string,
 ) error {
-	repo := app.Repository()
 	probe, ok := any(repo).(authscoped.IScopeDeclarationProbe)
 	if !ok {
 		return errors.NewCode(errors.Unsupported,
@@ -313,7 +328,7 @@ func (a *application[T, ID]) Delete(ctx context.Context, id ID) error {
 //
 // 这是**前置资源解析**（正常授权输入），不是事后错误分类探针。
 func (a *application[T, ID]) resolveBoundary(ctx context.Context, id ID) (any, error) {
-	if reader, ok := any(a.inner.Repository()).(authscoped.IResourceBoundaryReader[ID]); ok {
+	if reader, ok := any(a.repository).(authscoped.IResourceBoundaryReader[ID]); ok {
 		resource, err := reader.ResolveResourceByID(ctx, id)
 		if err != nil {
 			return nil, err
@@ -334,7 +349,7 @@ func (a *application[T, ID]) resolveBoundary(ctx context.Context, id ID) (any, e
 // 用常规探针解析会被 `deleted_at IS NULL` 过滤掉，授权还没开始就先 404。
 // 按可用性依次降级，全都不可用时退回常规解析（非软删实体本就等价）。
 func (a *application[T, ID]) resolveDeletedBoundary(ctx context.Context, id ID) (any, error) {
-	if reader, ok := any(a.inner.Repository()).(authscoped.IDeletedResourceBoundaryReader[ID]); ok {
+	if reader, ok := any(a.repository).(authscoped.IDeletedResourceBoundaryReader[ID]); ok {
 		resource, err := reader.ResolveResourceByIDIncludingDeleted(ctx, id)
 		if err != nil {
 			return nil, err
@@ -417,15 +432,3 @@ func (a *application[T, ID]) CountByQuery(ctx context.Context, quer *query.Query
 	}
 	return a.inner.CountByQuery(scopedCtx, quer)
 }
-
-// --- 非请求路径能力：原样转发 ---
-
-func (a *application[T, ID]) Repository() domcrud.IRepository[T, ID] { return a.inner.Repository() }
-
-func (a *application[T, ID]) QueryRepository() (domcrud.IQueryRepository[T, ID], bool) {
-	return a.inner.QueryRepository()
-}
-
-func (a *application[T, ID]) Validate(entity T) error { return a.inner.Validate(entity) }
-
-func (a *application[T, ID]) Config() *crud.ServiceConfig { return a.inner.Config() }

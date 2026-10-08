@@ -6,81 +6,18 @@ import (
 	"testing"
 	"time"
 
-	"gochen/testkit/require"
-
 	"gochen/app/operation"
-	deventsourced "gochen/domain/eventsourced"
 	"gochen/errors"
-	"gochen/eventing/store"
 	"gochen/messaging"
 	"gochen/messaging/command"
 	"gochen/messaging/transport/memory"
+	"gochen/testkit/require"
 )
 
-// 测试用领域事件与聚合
-type setEvent struct{ V int }
-
-// EventType 返回事件类型标识。
-//
-// 返回：
-// - result：文本结果
-func (e *setEvent) EventType() string { return "Set" }
-
-type serviceAggregate struct {
-	*deventsourced.EventSourcedAggregate[int64]
-	Value int
-}
-
-// newServiceAggregate id：对象/实体标识。
-//
-// 参数：
-//
-// 返回：
-// - result：返回的实例（类型：*serviceAggregate）
-func newServiceAggregate(id int64) *serviceAggregate {
-	a := &serviceAggregate{}
-	agg, err := deventsourced.InitAggregate[int64](testMetadataRegistry, a, id, "ServiceAggregate")
-	if err != nil {
-		panic(err)
-	}
-	a.EventSourcedAggregate = agg
-	return a
-}
-
-// ApplySetEvent 应用 setEvent。
-func (a *serviceAggregate) ApplySetEvent(evt *setEvent) {
-	a.Value = evt.V
-}
-
-type setCommand struct {
-	ID int64
-	V  int
-}
-
-// AggregateID 返回聚合标识。
-//
-// 返回：
-// - result：数量/计数
-func (c *setCommand) AggregateID() int64 { return c.ID }
-
-// TestEventSourcedService_ExecuteCommand_Success 验证 EventSourcedService ExecuteCommand Success。
 func TestEventSourcedService_ExecuteCommand_Success(t *testing.T) {
 	ctx := context.Background()
 
-	eventStore := store.NewMemoryEventStore[int64]()
-	reg, upgraders := newTestRegistryAndUpgraders()
-	require.NoError(t, reg.Register("Set", func() any { return &setEvent{} }))
-	adapter, err := NewDomainEventStore(DomainEventStoreOptions[*serviceAggregate, int64]{
-		AggregateType:    "ServiceAggregate",
-		EventIDGenerator: testEventIDGenerator(),
-		EventStore:       eventStore,
-		EventRegistry:    reg,
-		UpgraderRegistry: upgraders,
-	})
-	require.NoError(t, err)
-
-	repo, err := newTestEventSourcedRepository[*serviceAggregate, int64]("ServiceAggregate", &serviceAggregate{}, AdaptAggregateFactory(newServiceAggregate), adapter)
-	require.NoError(t, err)
+	repo := newCommandServiceRepository(t)
 
 	service, err := NewEventSourcedService[*serviceAggregate, int64](repo, nil)
 	require.NoError(t, err)
@@ -98,24 +35,10 @@ func TestEventSourcedService_ExecuteCommand_Success(t *testing.T) {
 	require.Equal(t, 42, loaded.Value)
 }
 
-// TestEventSourcedService_AsCommandMessageHandler 验证 EventSourcedService AsCommandMessageHandler。
 func TestEventSourcedService_AsCommandMessageHandler(t *testing.T) {
 	ctx := context.Background()
 
-	eventStore := store.NewMemoryEventStore[int64]()
-	reg, upgraders := newTestRegistryAndUpgraders()
-	require.NoError(t, reg.Register("Set", func() any { return &setEvent{} }))
-	adapter, err := NewDomainEventStore(DomainEventStoreOptions[*serviceAggregate, int64]{
-		AggregateType:    "ServiceAggregate",
-		EventIDGenerator: testEventIDGenerator(),
-		EventStore:       eventStore,
-		EventRegistry:    reg,
-		UpgraderRegistry: upgraders,
-	})
-	require.NoError(t, err)
-
-	repo, err := newTestEventSourcedRepository[*serviceAggregate, int64]("ServiceAggregate", &serviceAggregate{}, AdaptAggregateFactory(newServiceAggregate), adapter)
-	require.NoError(t, err)
+	repo := newCommandServiceRepository(t)
 
 	service, err := NewEventSourcedService[*serviceAggregate, int64](repo, nil)
 	require.NoError(t, err)
@@ -156,20 +79,7 @@ func TestEventSourcedService_AsCommandMessageHandler(t *testing.T) {
 func TestEventSourcedService_ExecuteCommandWithOperation(t *testing.T) {
 	ctx := context.Background()
 
-	eventStore := store.NewMemoryEventStore[int64]()
-	reg, upgraders := newTestRegistryAndUpgraders()
-	require.NoError(t, reg.Register("Set", func() any { return &setEvent{} }))
-	adapter, err := NewDomainEventStore(DomainEventStoreOptions[*serviceAggregate, int64]{
-		AggregateType:    "ServiceAggregate",
-		EventIDGenerator: testEventIDGenerator(),
-		EventStore:       eventStore,
-		EventRegistry:    reg,
-		UpgraderRegistry: upgraders,
-	})
-	require.NoError(t, err)
-
-	repo, err := newTestEventSourcedRepository[*serviceAggregate, int64]("ServiceAggregate", &serviceAggregate{}, AdaptAggregateFactory(newServiceAggregate), adapter)
-	require.NoError(t, err)
+	repo := newCommandServiceRepository(t)
 
 	service, err := NewEventSourcedService[*serviceAggregate, int64](repo, nil)
 	require.NoError(t, err)
@@ -196,20 +106,7 @@ func TestEventSourcedService_ExecuteCommandWithOperation(t *testing.T) {
 func TestEventSourcedService_ExecuteCommandWithOperationRejectsTrackedWithoutRunner(t *testing.T) {
 	ctx := context.Background()
 
-	eventStore := store.NewMemoryEventStore[int64]()
-	reg, upgraders := newTestRegistryAndUpgraders()
-	require.NoError(t, reg.Register("Set", func() any { return &setEvent{} }))
-	adapter, err := NewDomainEventStore(DomainEventStoreOptions[*serviceAggregate, int64]{
-		AggregateType:    "ServiceAggregate",
-		EventIDGenerator: testEventIDGenerator(),
-		EventStore:       eventStore,
-		EventRegistry:    reg,
-		UpgraderRegistry: upgraders,
-	})
-	require.NoError(t, err)
-
-	repo, err := newTestEventSourcedRepository[*serviceAggregate, int64]("ServiceAggregate", &serviceAggregate{}, AdaptAggregateFactory(newServiceAggregate), adapter)
-	require.NoError(t, err)
+	repo := newCommandServiceRepository(t)
 
 	service, err := NewEventSourcedService[*serviceAggregate, int64](repo, nil)
 	require.NoError(t, err)
@@ -231,20 +128,7 @@ func TestEventSourcedService_ExecuteCommandWithOperationRejectsTrackedWithoutRun
 func TestEventSourcedService_ExecuteCommandWithResolvedOperation(t *testing.T) {
 	ctx := context.Background()
 
-	eventStore := store.NewMemoryEventStore[int64]()
-	reg, upgraders := newTestRegistryAndUpgraders()
-	require.NoError(t, reg.Register("Set", func() any { return &setEvent{} }))
-	adapter, err := NewDomainEventStore(DomainEventStoreOptions[*serviceAggregate, int64]{
-		AggregateType:    "ServiceAggregate",
-		EventIDGenerator: testEventIDGenerator(),
-		EventStore:       eventStore,
-		EventRegistry:    reg,
-		UpgraderRegistry: upgraders,
-	})
-	require.NoError(t, err)
-
-	repo, err := newTestEventSourcedRepository[*serviceAggregate, int64]("ServiceAggregate", &serviceAggregate{}, AdaptAggregateFactory(newServiceAggregate), adapter)
-	require.NoError(t, err)
+	repo := newCommandServiceRepository(t)
 
 	runner := operation.NewRunner(&operation.RunnerOptions{
 		IDGenerator: func() string { return "op_7" },
@@ -297,20 +181,7 @@ func TestEventSourcedService_ExecuteCommandWithResolvedOperation(t *testing.T) {
 func TestEventSourcedService_ExecuteCommandWithResolvedOperationFallsBackWhenSpecNil(t *testing.T) {
 	ctx := context.Background()
 
-	eventStore := store.NewMemoryEventStore[int64]()
-	reg, upgraders := newTestRegistryAndUpgraders()
-	require.NoError(t, reg.Register("Set", func() any { return &setEvent{} }))
-	adapter, err := NewDomainEventStore(DomainEventStoreOptions[*serviceAggregate, int64]{
-		AggregateType:    "ServiceAggregate",
-		EventIDGenerator: testEventIDGenerator(),
-		EventStore:       eventStore,
-		EventRegistry:    reg,
-		UpgraderRegistry: upgraders,
-	})
-	require.NoError(t, err)
-
-	repo, err := newTestEventSourcedRepository[*serviceAggregate, int64]("ServiceAggregate", &serviceAggregate{}, AdaptAggregateFactory(newServiceAggregate), adapter)
-	require.NoError(t, err)
+	repo := newCommandServiceRepository(t)
 
 	service, err := NewEventSourcedService[*serviceAggregate, int64](repo, &EventSourcedServiceOptions[*serviceAggregate, int64]{
 		OperationSpecResolver: func(ctx context.Context, cmd IEventSourcedCommand[int64]) (*operation.Spec, error) {

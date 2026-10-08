@@ -261,6 +261,72 @@ func TestMessageBus_PublishAll_NilMessage_FailFast(t *testing.T) {
 	}
 }
 
+// callPublishWithoutPanic 在同一 goroutine 内执行发布调用，把 panic 转为用例失败信息，
+// 避免 typed-nil 用例直接终止测试进程、掩盖其余用例结果。
+func callPublishWithoutPanic(t *testing.T, name string, call func() error) (err error) {
+	t.Helper()
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("%s: unexpected panic: %v", name, r)
+		}
+	}()
+	return call()
+}
+
+// TestMessageBus_Publish_TypedNilMessageRejected 验证 Publish 拒绝 typed-nil 消息
+// （`var m *Message` 经接口传参：接口非 nil 而底层指针为 nil），返回 InvalidInput 而非 nil 解引用 panic。
+func TestMessageBus_Publish_TypedNilMessageRejected(t *testing.T) {
+	transport := direct.NewSyncTransport()
+	require.NoError(t, transport.Start(context.Background()))
+	t.Cleanup(func() { require.NoError(t, transport.Stop(context.Background())) })
+	bus := messaging.NewMessageBus(transport)
+
+	var nilMessage *messaging.Message
+	err := callPublishWithoutPanic(t, "bus.Publish(typed-nil *Message)", func() error {
+		return bus.Publish(context.Background(), nilMessage)
+	})
+	require.Error(t, err)
+	require.True(t, errors.Is(err, errors.InvalidInput))
+
+	var nilCustom *testMessage
+	err = callPublishWithoutPanic(t, "bus.Publish(typed-nil custom message)", func() error {
+		return bus.Publish(context.Background(), nilCustom)
+	})
+	require.Error(t, err)
+	require.True(t, errors.Is(err, errors.InvalidInput))
+}
+
+// TestMessageBus_PublishAll_TypedNilMessageRejected 验证 PublishAll 的单条与多条路径均拒绝 typed-nil 消息，
+// 返回 InvalidInput（多条路径应带出错 index），而不是在中间件链入口 nil 解引用 panic。
+func TestMessageBus_PublishAll_TypedNilMessageRejected(t *testing.T) {
+	transport := direct.NewSyncTransport()
+	require.NoError(t, transport.Start(context.Background()))
+	t.Cleanup(func() { require.NoError(t, transport.Stop(context.Background())) })
+	bus := messaging.NewMessageBus(transport)
+	ctx := context.Background()
+
+	var nilMessage *messaging.Message
+	valid := &messaging.Message{ID: "ok-1", Type: "typed-nil-check"}
+
+	single := callPublishWithoutPanic(t, "bus.PublishAll(single typed-nil)", func() error {
+		return bus.PublishAll(ctx, []messaging.IMessage{nilMessage})
+	})
+	require.Error(t, single)
+	require.True(t, errors.Is(single, errors.InvalidInput))
+
+	firstInvalid := callPublishWithoutPanic(t, "bus.PublishAll(typed-nil at index 0)", func() error {
+		return bus.PublishAll(ctx, []messaging.IMessage{nilMessage, valid})
+	})
+	require.Error(t, firstInvalid)
+	require.True(t, errors.Is(firstInvalid, errors.InvalidInput))
+
+	secondInvalid := callPublishWithoutPanic(t, "bus.PublishAll(typed-nil at index 1)", func() error {
+		return bus.PublishAll(ctx, []messaging.IMessage{valid, nilMessage})
+	})
+	require.Error(t, secondInvalid)
+	require.True(t, errors.Is(secondInvalid, errors.InvalidInput))
+}
+
 func TestMessageBus_PublishAll_MemoryTransportBatchCapacityNoPartialEnqueue(t *testing.T) {
 	ctx := context.Background()
 	transport := memory.NewMemoryTransportForTest(2)
@@ -282,6 +348,9 @@ func TestMessageBus_PublishAll_MemoryTransportBatchCapacityNoPartialEnqueue(t *t
 	}
 	if !errors.Is(err, errors.Queue) {
 		t.Fatalf("expected queue error, got: %#v", err)
+	}
+	if errors.Code(err) != errors.Queue {
+		t.Fatalf("expected errors.Code(err) to be Queue, got %v", errors.Code(err))
 	}
 
 	pending, stopErr := transport.StopWithSnapshot(ctx)

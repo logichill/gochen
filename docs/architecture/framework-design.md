@@ -23,7 +23,7 @@ Gochen 通过接口和组合根组织领域建模、应用编排与基础设施�
 | `auth` / `app/security` | 安全契约与应用层保护；只有 `app/security` 允许依赖 `auth`，基础应用模板不依赖它 |
 | `eventing` | 事件模型、存储、Outbox、投影、订阅与监控；通过 `messaging` 进行投递 |
 | `messaging` | 消息信封、总线、中间件、Transport 与命令执行；不依赖 `eventing` |
-| `db` / `httpx` | 数据库、ORM 与 HTTP 契约；SQL、服务监听和 REST 注册在 Runtime |
+| `db` / `httpx` | 数据库、ORM 与 HTTP 契约；SQL 方言契约保留 Core；具体方言渲染、SQL 扫描、服务监听和 REST 注册在 Runtime |
 | `process` / `policy` | Saga、Workflow、锁与任务监督；重试、限流、熔断属于 `policy` |
 | 基础包 | `clock`、`codec`、`gen`、`validate` 只依赖标准库、`gochen/errors` 与自身子树，彼此协作使用最小接口 |
 
@@ -61,6 +61,10 @@ Runtime `security.Profile.Build` 固定 `Action(Scoped(app))` 的装饰顺序。
 
 事件流由 `(aggregate_type, aggregate_id)` 定位，版本用于乐观并发控制。载荷消费统一经过 registry / upcast；启用 checkpoint 时，投影写入与 checkpoint 保存必须共享原子边界。Outbox 和重放均要求消费者幂等。细节集中在 [messaging](../../messaging/README.md)、[EventStore](../../eventing/store/README.md)、[Outbox](../../eventing/outbox/README.md)和[Projection](../../eventing/projection/README.md)。
 
+事件存储按消费者拆分能力：领域适配需要追加、聚合版本与聚合分页；历史分页只读聚合版本与分页；投影只扫描全局流。`IEventStreamStore` 是完整后端与缓存的组合契约，不作为所有消费者的必需接口。原子批量能力只要求 `AppendEventsBatch`，不得以循环单项追加模拟。SQL Outbox 的事务追加端口由 Runtime `eventing/outbox/sqlstore` 定义，Core EventStore 不接收数据库句柄。
+
+后端通过 Core `eventing/store/contracttest` 共享行为测试验证版本冲突、重试、分页与回滚语义；内存实现和 Runtime 两种 SQL 游标模式均执行同一套契约，驱动特有行为由各实现补充验证。
+
 ## 装配与生命周期
 
 组合根创建 DB、HTTP server、Transport、总线、ID 生成器、日志及配置，再通过构造函数或 option 注入。Runtime `quick` 提供常用装配入口，完整 Host / Repo API 支持定制；见 [Quick 装配](../guides/quick-assembly.md)。
@@ -87,6 +91,18 @@ Runtime `security.Profile.Build` 固定 `Action(Scoped(app))` 的装饰顺序。
 
 ## 验证与文档维护
 
-各仓库独立执行 build、vet、test；Core 使用 `GOWORK=off` 验证零第三方依赖。默认测试不得依赖真实外部服务或开发机固定路径；Runtime 的内存 / 临时文件 SQLite 测试可进入默认测试集。真实数据库、消息队列、Docker 等环境测试使用 `integration` build tag，并说明资源与清理方式。
+各仓库独立执行 build、vet、test；Core 使用 `GOWORK=off` 验证零第三方依赖。默认测试使用内存或临时 SQLite，不依赖外部服务或开发机固定路径。真实数据库、消息队列、设备等测试必须显式启用（`integration` build tag 或测试注明的环境变量），并说明资源和清理方式。
 
 文档只描述现行契约、使用方式和限制。架构边界在本文说明，包级细节放模块 README，接入步骤放 guides，规格放 SPEC；同一内容用链接引用，避免重复维护 API 和 DDL。
+
+## 可选适配与提交结果
+
+事件溯源核心模板位于 `app/eventsourced`；默认存储/快照/历史适配位于 `app/eventsourced/eventstore`，订阅/投影辅助位于 `app/eventsourced/subscriber`。核心模板不反向依赖这些默认适配，组合根按需装配。
+
+Operation SSE 位于 Runtime `http/operation`；监控端点策略及公开响应整形位于 Runtime `eventing/monitoring`。Core 监控包保留指标、健康与快照模型。方言接口和值类型仍在 Core `db/dialect`，标准方言与 SQL 词法实现分别位于 Runtime `db/dialect` 和 `db/sqlscan`。Outbox 表名与 SQL 映射由 Runtime SQL 仓储负责，Core DTO 不携带 GORM 标签。
+
+`contextx.AfterCommitError` 统一表示主操作成功、后续步骤失败。ES 仓储据此更新提交基线，命令重试排除该类错误，Operation 使用 degraded 表达 handler 的提交后失败。若业务成功但 Operation 结果记录失败，则保留幂等预占并返回原结果供核对和补存。
+
+`app/crud.IApplication` 只包含 CRUD 读写用例。配置、校验器与 Hooks 通过 `crud.Options` 在构造时确定，REST 注册不修改应用。安全外壳仅按实际 Batch / Audited 业务能力组合，不向外转发裸仓储或配置；L3 在构造时通过装配接口读取仓储与批量限制。
+
+审计运行能力以 `app/audited.IAuditOperations` 为唯一方法集，Application、安全包装和 REST 能力探测共同消费。`HasPurgeCapability()` 报告硬删除能力，传输层不穿透 Application 探测 Repository。HTTP 的批量/分页限制与应用业务限制分别配置，传输层不能放宽业务限制。

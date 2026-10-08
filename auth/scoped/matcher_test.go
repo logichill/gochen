@@ -89,6 +89,49 @@ func TestSplitByTargetsPrefersExactMatchOverKindFallback(t *testing.T) {
 	require.Equal(t, int64(900), fallback.ManagedScopeID)
 }
 
+// 回归（R1e2-F01）：matcher 的"exact 优先"语义与旧注释宣称的"取最小未占用
+// 下标"并不等价。约束 [下标0: 无 ID scope900, 下标1: ID=2 scope102]：
+//   - 目标 [2,2]：最小下标贪心会把下标 0 先给目标 2、下标 1 给第二个目标，
+//     得到 scope 串位的 [900,102]；实际精确优先必须得到 [102,900]。
+//   - 目标 [2,5]：最小下标贪心先用下标 0 接走目标 2，再判目标 5 无约束可用而
+//     Forbidden；实际实现整批合法拆分成功。
+//
+// 若未来按旧注释"还原"为最小下标贪心，本用例会失败。
+func TestSplitByTargetsExactPriorityNotEquivalentToMinUnoccupiedIndex(t *testing.T) {
+	constraint := scoped.WriteConstraint{Resources: []scoped.ResourceConstraint{
+		{Kind: "order", ManagedScopeID: 900},
+		{Kind: "order", ResourceID: "2", ManagedScopeID: 102},
+	}}
+
+	t.Run("duplicate target keeps exact constraint on the matching target", func(t *testing.T) {
+		split, err := constraint.SplitByTargets(targetsOf("order", "2", "2"))
+		require.NoError(t, err)
+		require.Equal(t, 2, len(split))
+		require.Equal(t, []string{"2", ""}, splitResourceIDs(t, split))
+
+		exact, ok := split[0].Single()
+		require.True(t, ok)
+		require.Equal(t, int64(102), exact.ManagedScopeID)
+		fallback, ok := split[1].Single()
+		require.True(t, ok)
+		require.Equal(t, int64(900), fallback.ManagedScopeID)
+	})
+
+	t.Run("min-index greedy would forbid an otherwise valid batch", func(t *testing.T) {
+		split, err := constraint.SplitByTargets(targetsOf("order", "2", "5"))
+		require.NoError(t, err)
+		require.Equal(t, 2, len(split))
+		require.Equal(t, []string{"2", ""}, splitResourceIDs(t, split))
+
+		exact, ok := split[0].Single()
+		require.True(t, ok)
+		require.Equal(t, int64(102), exact.ManagedScopeID)
+		fallback, ok := split[1].Single()
+		require.True(t, ok)
+		require.Equal(t, int64(900), fallback.ManagedScopeID)
+	})
+}
+
 // 同一 ID 有多条约束时按声明顺序逐条取用，不得重复取同一条。
 func TestSplitByTargetsConsumesDuplicateResourceIDsInOrder(t *testing.T) {
 	constraint := scoped.WriteConstraint{Resources: []scoped.ResourceConstraint{

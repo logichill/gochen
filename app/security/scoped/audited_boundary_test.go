@@ -71,7 +71,7 @@ func (r *deletedAwareRepo) boundary(id int64) authscoped.Resource {
 
 // auditedInner 给普通 CRUD Application 补上审计能力面，并记录收到的调用。
 type auditedInner struct {
-	appcrud.IApplication[*doc, int64]
+	*appcrud.Application[*doc, int64]
 
 	purged   []int64
 	restored []int64
@@ -99,9 +99,9 @@ func (a *auditedInner) AuditStore() audited.IAuditStore { return nil }
 
 func newAuditedL3App(t *testing.T, repo *deletedAwareRepo) (appcrud.IApplication[*doc, int64], *auditedInner) {
 	t.Helper()
-	plain, err := appcrud.NewApplication[*doc, int64](repo, nil, nil)
+	plain, err := appcrud.NewApplication[*doc, int64](repo, nil)
 	require.NoError(t, err)
-	inner := &auditedInner{IApplication: plain}
+	inner := &auditedInner{Application: plain}
 
 	evaluator := authscoped.EvaluatorFunc(
 		func(_ context.Context, _ string, resources []authscoped.Resource) (authscoped.Decision, error) {
@@ -165,6 +165,9 @@ func TestRestoreResolvesDeletedBoundary(t *testing.T) {
 func TestPurgeResolvesDeletedBoundary(t *testing.T) {
 	repo := newDeletedAwareRepo(7)
 	secured, inner := newAuditedL3App(t, repo)
+	probe, ok := secured.(interface{ HasPurgeCapability() bool })
+	require.True(t, ok)
+	require.True(t, probe.HasPurgeCapability())
 
 	err := auditedSurfaceOf(t, secured).Purge(context.Background(), 7)
 
@@ -188,7 +191,7 @@ func TestAuditTrailResolvesDeletedBoundary(t *testing.T) {
 // 装饰器的 EntityType 与仓储资源类型不一致时，约束恒匹配不到 → 构造期就该拒绝。
 func TestNewRejectsEntityTypeMismatchingRepositoryKind(t *testing.T) {
 	repo := newDeletedAwareRepo()
-	plain, err := appcrud.NewApplication[*doc, int64](repo, nil, nil)
+	plain, err := appcrud.NewApplication[*doc, int64](repo, nil)
 	require.NoError(t, err)
 	authorizer, err := authscoped.NewAuthorizer(nil,
 		authscoped.EvaluatorFunc(func(context.Context, string, []authscoped.Resource) (authscoped.Decision, error) {
@@ -204,3 +207,5 @@ func TestNewRejectsEntityTypeMismatchingRepositoryKind(t *testing.T) {
 	require.Error(t, err)
 	require.True(t, errors.Is(err, errors.InvalidInput))
 }
+
+func (a *auditedInner) HasPurgeCapability() bool { return true }

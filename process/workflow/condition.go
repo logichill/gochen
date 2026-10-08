@@ -2,7 +2,10 @@ package workflow
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"math"
+	"math/big"
 	"strconv"
 	"strings"
 
@@ -74,10 +77,12 @@ func (e *DefaultConditionEvaluator) Evaluate(ctx context.Context, condition stri
 				return false, nil
 			case string:
 				return v != "", nil
-			case int, int8, int16, int32, int64:
-				return fmt.Sprintf("%v", v) != "0", nil
-			case float32, float64:
-				return fmt.Sprintf("%v", v) != "0", nil
+			case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64, json.Number:
+				number, ok := conditionNumber(v)
+				if !ok {
+					return false, errors.NewCode(errors.InvalidInput, "workflow condition value is not a finite number")
+				}
+				return number.Sign() != 0, nil
 			default:
 				return true, nil
 			}
@@ -173,6 +178,12 @@ func splitCondition(cond string) (leftKey string, op string, rightValue string, 
 
 func compareValues(left any, op string, rightStr string) (bool, error) {
 	rightStr = unquoteString(rightStr)
+	switch left.(type) {
+	case float32, float64, json.Number:
+		if _, ok := conditionNumber(left); !ok {
+			return false, errors.NewCode(errors.InvalidInput, "workflow condition value is not a finite number")
+		}
+	}
 
 	// 布尔比较
 	if rightBool, err := strconv.ParseBool(rightStr); err == nil {
@@ -189,21 +200,22 @@ func compareValues(left any, op string, rightStr string) (bool, error) {
 	}
 
 	// 数值比较
-	if rightNum, err := strconv.ParseFloat(rightStr, 64); err == nil {
-		if leftNum, ok := toFloat64(left); ok {
+	if rightNum, ok := conditionNumber(rightStr); ok {
+		if leftNum, ok := conditionNumber(left); ok {
+			comparison := leftNum.Cmp(rightNum)
 			switch op {
 			case "==":
-				return leftNum == rightNum, nil
+				return comparison == 0, nil
 			case "!=":
-				return leftNum != rightNum, nil
+				return comparison != 0, nil
 			case ">":
-				return leftNum > rightNum, nil
+				return comparison > 0, nil
 			case ">=":
-				return leftNum >= rightNum, nil
+				return comparison >= 0, nil
 			case "<":
-				return leftNum < rightNum, nil
+				return comparison < 0, nil
 			case "<=":
-				return leftNum <= rightNum, nil
+				return comparison <= 0, nil
 			default:
 				return false, errors.NewCode(errors.InvalidInput, fmt.Sprintf("unsupported operator %s for number", op))
 			}
@@ -235,39 +247,33 @@ func unquoteString(s string) string {
 	return s
 }
 
-func toFloat64(v any) (float64, bool) {
-	if v == nil {
-		return 0, false
-	}
+// conditionNumber 按十进制值比较数值，避免 int64/uint64 先转 float64 后丢失低位。
+// 浮点数采用其最短可往返文本，保留常用十进制比较（如 0.1 == 0.1）的语义。
+// json.Number 与 HTTP JSON 解码器的默认数值类型保持一致。
+func conditionNumber(v any) (*big.Rat, bool) {
+	var text string
 	switch n := v.(type) {
-	case int:
-		return float64(n), true
-	case int8:
-		return float64(n), true
-	case int16:
-		return float64(n), true
-	case int32:
-		return float64(n), true
-	case int64:
-		return float64(n), true
-	case uint:
-		return float64(n), true
-	case uint8:
-		return float64(n), true
-	case uint16:
-		return float64(n), true
-	case uint32:
-		return float64(n), true
-	case uint64:
-		return float64(n), true
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		text = fmt.Sprint(n)
 	case float32:
-		return float64(n), true
+		text = strconv.FormatFloat(float64(n), 'g', -1, 32)
 	case float64:
-		return n, true
+		text = strconv.FormatFloat(n, 'g', -1, 64)
+	case json.Number:
+		text = n.String()
 	case string:
-		f, err := strconv.ParseFloat(n, 64)
-		return f, err == nil
+		text = n
 	default:
-		return 0, false
+		return nil, false
 	}
+	// 先校验现有数字字面量语法，避免把 Rat 支持的 1/2 等形式意外当作数值。
+	number, err := strconv.ParseFloat(text, 64)
+	if err != nil || math.IsNaN(number) || math.IsInf(number, 0) {
+		return nil, false
+	}
+	// Rat 的整数字面量会按前缀推断进制；小数形式强制保留 ParseFloat 的十进制语义。
+	if !strings.ContainsAny(text, ".eEpP") {
+		text += ".0"
+	}
+	return new(big.Rat).SetString(text)
 }

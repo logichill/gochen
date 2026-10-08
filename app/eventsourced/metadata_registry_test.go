@@ -16,9 +16,6 @@ func newAppTestMetadataRegistry() *deventsourced.MetadataRegistry {
 	mustRegister(&autoBindAggregate{}, "AutoBindAggregate")
 	mustRegister(&outboxAggregate{}, "OutboxAggregate")
 	mustRegister(&serviceAggregate{}, "ServiceAggregate")
-	mustRegister(&snapshotAggregate{}, "SnapAggregate")
-	mustRegister(&autoAgg{}, "AutoAgg")
-	mustRegister(&benchAggregate{}, "BenchAggregate")
 	return registry
 }
 

@@ -104,7 +104,7 @@ func newBatchApp(t *testing.T, repo domcrud.IRepository[*order, int64], maxBatch
 	t.Helper()
 	cfg := crud.DefaultServiceConfig()
 	cfg.MaxBatchSize = maxBatch
-	app, err := crud.NewApplication[*order, int64](repo, nil, cfg)
+	app, err := crud.NewApplication[*order, int64](repo, &crud.Options[*order, int64]{Config: cfg})
 	require.NoError(t, err)
 	return app
 }

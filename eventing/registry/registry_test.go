@@ -3,10 +3,69 @@ package registry
 import (
 	"encoding/json"
 	"testing"
+
+	"gochen/errors"
 )
 
 type sampleEvent struct {
 	Name string `json:"name"`
+}
+
+// TestRegistry_RegisterWithVersion_RejectsTypedNilFactory 回归 R1d2-F01：
+// 工厂返回「底层指针为 nil 的具名指针」（typed-nil 接口陷阱）时曾绕过注册期 nil 校验
+// 静默成功，HasEvent 为 true 且不报错，但每次反序列化都必然失败并延迟到运行期才暴露；
+// 注册期必须与字面 nil 工厂一样直接拒绝（InvalidInput），且不留下半注册状态。
+func TestRegistry_RegisterWithVersion_RejectsTypedNilFactory(t *testing.T) {
+	r := NewRegistry()
+
+	// 对照组：字面 nil 工厂在修复前也已被拒绝（守卫存在，只是对 typed-nil 失效）。
+	if err := r.RegisterWithVersion("LiteralNilEvent", 1, func() any { return nil }); err == nil {
+		t.Fatal("expected literal-nil factory to be rejected, got nil error")
+	} else if code := errors.Code(err); code != errors.InvalidInput {
+		t.Fatalf("unexpected error code for literal-nil factory: %v", code)
+	}
+	if r.HasEvent("LiteralNilEvent") {
+		t.Fatal("literal-nil factory must not leave a registered event type")
+	}
+
+	// 实验组：typed-nil 工厂必须被拒绝。
+	typedNilFactory := func() any {
+		var event *sampleEvent
+		return event
+	}
+	if err := r.RegisterWithVersion("TypedNilEvent", 1, typedNilFactory); err == nil {
+		t.Fatal("expected typed-nil factory to be rejected, got nil error")
+	} else if code := errors.Code(err); code != errors.InvalidInput {
+		t.Fatalf("unexpected error code for typed-nil factory: %v", code)
+	}
+	if r.HasEvent("TypedNilEvent") {
+		t.Fatal("typed-nil factory must not leave a registered event type")
+	}
+
+	// Register 默认版本入口同样覆盖。
+	if err := r.Register("TypedNilViaRegister", typedNilFactory); err == nil {
+		t.Fatal("expected typed-nil factory via Register to be rejected, got nil error")
+	} else if code := errors.Code(err); code != errors.InvalidInput {
+		t.Fatalf("unexpected error code for typed-nil factory via Register: %v", code)
+	}
+
+	// 拒绝必须是无副作用的：注册表仍为空。
+	if types := r.ListRegisteredTypes(); len(types) != 0 {
+		t.Fatalf("registry must stay empty after rejections, got %v", types)
+	}
+
+	// 拒绝后事件类型名未被占用，可重新以合法工厂注册并正常反序列化。
+	if err := r.RegisterWithVersion("TypedNilEvent", 1, func() any { return &sampleEvent{} }); err != nil {
+		t.Fatalf("re-register with valid factory: %v", err)
+	}
+	typed, err := r.DeserializeFromMap("TypedNilEvent", map[string]any{"name": "demo"})
+	if err != nil {
+		t.Fatalf("deserialize after valid re-registration: %v", err)
+	}
+	ev, ok := typed.(*sampleEvent)
+	if !ok || ev.Name != "demo" {
+		t.Fatalf("unexpected instance %#v", typed)
+	}
 }
 
 // TestRegistry_RegisterAndDeserialize 验证 Registry RegisterAndDeserialize。

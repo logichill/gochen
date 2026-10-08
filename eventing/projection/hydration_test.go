@@ -120,7 +120,11 @@ func TestProjectionManager_Replay_HydratesPayloadBestEffort(t *testing.T) {
 	messageBus := messaging.NewMessageBus(transport)
 	eventBus := bus.NewEventBus(messageBus)
 
-	pm, err := NewProjectionManager[int64](eventStore, eventBus, reg, upgraders)
+	// 投影只拿到扫描端口，无需聚合读取或追加权限。
+	scanner := struct {
+		store.IEventStreamReader[int64]
+	}{eventStore}
+	pm, err := NewProjectionManager[int64](scanner, eventBus, reg, upgraders)
 	require.NoError(t, err)
 	pm, err = pm.WithCheckpointStore(NewMemoryCheckpointStore())
 	require.NoError(t, err)

@@ -2,10 +2,10 @@ package action
 
 import (
 	"context"
+	appaudited "gochen/app/audited"
 
 	authaction "gochen/auth/action"
 
-	"gochen/app/security/internal/capability"
 	"gochen/domain"
 	"gochen/domain/audited"
 )
@@ -56,7 +56,7 @@ func (b *batchWriter[T, ID]) DeleteAll(ctx context.Context, ids []ID) error {
 // 三类都有独立动作码，不复用基础 CRUD 的 delete / read。
 type auditedSurface[T domain.IEntity[ID], ID comparable] struct {
 	app   *application[T, ID]
-	inner capability.IAuditedSurface[T, ID]
+	inner appaudited.IAuditOperations[T, ID]
 }
 
 func (s *auditedSurface[T, ID]) Purge(ctx context.Context, id ID) error {
@@ -89,3 +89,6 @@ func (s *auditedSurface[T, ID]) AuditTrail(ctx context.Context, id ID, offset, l
 
 // AuditStore 不是请求路径，原样暴露供 REST 能力探测使用。
 func (s *auditedSurface[T, ID]) AuditStore() audited.IAuditStore { return s.inner.AuditStore() }
+
+// HasPurgeCapability 保留内层硬删除能力声明；实际调用仍执行动作授权。
+func (s *auditedSurface[T, ID]) HasPurgeCapability() bool { return s.inner.HasPurgeCapability() }

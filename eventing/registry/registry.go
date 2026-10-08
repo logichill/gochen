@@ -56,7 +56,7 @@ func (r *Registry) RegisterWithVersion(eventType string, schemaVersion int, fact
 	}
 
 	instance := factory()
-	if instance == nil {
+	if isNilInstance(instance) {
 		return errors.NewCode(errors.InvalidInput, "event factory returned nil").WithContext("event_type", eventType)
 	}
 
@@ -168,6 +168,22 @@ func (r *Registry) EventSchemaVersion(eventType string) int {
 		return version
 	}
 	return 1
+}
+
+// isNilInstance 判断工厂返回的实例是否为空，包括底层指针为 nil 的 typed-nil 接口值。
+// 反序列化会把实例直接作为 json.Unmarshal 的目标，typed-nil 实例必然导致运行期失败，
+// 故在注册期统一拦截（对齐 eventing/bus.isNilEventHandler 的反射式判别）。
+func isNilInstance(instance any) bool {
+	if instance == nil {
+		return true
+	}
+	value := reflect.ValueOf(instance)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
 }
 
 // NOTE:

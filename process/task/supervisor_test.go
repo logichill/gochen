@@ -58,13 +58,8 @@ func TestTaskSupervisor_GoLoop(t *testing.T) {
 		t.Fatalf("GoLoop returned error: %v", err)
 	}
 
-	time.Sleep(50 * time.Millisecond)
+	waitUntil(t, func() bool { return atomic.LoadInt32(&counter) >= 2 }, "at least 2 loop executions")
 	_ = gm.Stop(context.Background())
-
-	count := atomic.LoadInt32(&counter)
-	if count < 2 {
-		t.Errorf("expected at least 2 executions, got %d", count)
-	}
 }
 
 func TestTaskSupervisor_GoLoop_StopSignal(t *testing.T) {
@@ -80,7 +75,7 @@ func TestTaskSupervisor_GoLoop_StopSignal(t *testing.T) {
 		t.Fatalf("GoLoop returned error: %v", err)
 	}
 
-	time.Sleep(25 * time.Millisecond)
+	waitUntil(t, func() bool { return atomic.LoadInt32(&counter) >= 1 }, "first loop execution")
 	_ = gm.Stop(context.Background())
 
 	finalCount := atomic.LoadInt32(&counter)
@@ -106,7 +101,7 @@ func TestTaskSupervisor_GoLoop_ContextCancellation(t *testing.T) {
 		t.Fatalf("GoLoop returned error: %v", err)
 	}
 
-	time.Sleep(25 * time.Millisecond)
+	waitUntil(t, func() bool { return atomic.LoadInt32(&counter) >= 1 }, "first loop execution")
 	cancel() // 取消 context
 
 	time.Sleep(30 * time.Millisecond)

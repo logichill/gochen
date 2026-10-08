@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"gochen/contextx"
 	"gochen/errors"
 	"gochen/policy/retry"
 )
@@ -58,7 +59,7 @@ func DefaultIsConcurrencyError(err error) bool {
 	if err == nil {
 		return false
 	}
-	return errors.Is(err, errors.Concurrency)
+	return !contextx.IsAfterCommitError(err) && errors.Is(err, errors.Concurrency)
 }
 
 // normalizeRetryConfig 规范化重试配置。
@@ -113,7 +114,7 @@ func (cfg *RetryConfig) toPolicyConfig(isConcurrencyError IsConcurrencyError) re
 		MaxDelay:      cfg.MaxBackoff,
 		JitterRatio:   cfg.JitterRatio,
 		RetryIf: func(err error) bool {
-			return isConcurrencyError(err)
+			return !contextx.IsAfterCommitError(err) && isConcurrencyError(err)
 		},
 	}
 }

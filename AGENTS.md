@@ -59,6 +59,7 @@
    | domain                           | errors                                                                                                |
    | errors                           | （无）                                                                                                |
    | eventing                         | clock, codec, contextx, db, errors, gen, internal, messaging, observe, policy, process                |
+   | internal                         | errors（基础辅助不得依赖上层能力域）                                                 |
    | httpx                            | contextx, errors                                                                                      |
    | messaging                        | clock, contextx, errors, internal, observe, validate                                                  |
    | observe                          | contextx                                                                                              |
@@ -71,3 +72,6 @@
 3. **依赖地板**：`domain` 非测试代码只依赖标准库与 `gochen/errors`（及自身子树）；基础叶子（clock/codec/gen/validate）只依赖标准库、`gochen/errors` 与本包子树。
 4. **`app/security` 单向依赖 `auth`**：`app/security/*` 是应用层安全 PEP 装饰器，其职责即把 `auth` 的安全契约应用到 Application 编排中，故允许 `app/security → auth`。该边**严格单向**（`auth` 禁止 import 任何 `app` 包），且基础业务包 `app/crud` / `app/audited` / `app/eventsourced` 必须保持对 `auth` 零依赖。
 5. **安全能力落点**：装饰器只用于接口宽的 Application 层；Repository 层（`domain/crud.IRepository` 仅 4 个方法，其余能力靠类型断言探测）一律用**构造期显式选项**表达安全约束，禁止包装 `IRepository`——否则可选能力接口会丢失或被假冒。具体契约见[分层授权](docs/architecture/layered-authz.md)。
+
+6. **具体协作边**：`eventing → process` 仅允许 `eventing/outbox → process/task`；`process → eventing` 仅允许 `process/saga → eventing` / `eventing/bus`。任务监督不反向依赖事件能力。
+7. **默认适配分包**：`app/eventsourced` 保留领域仓储与命令用例；`app/eventsourced/eventstore` 承载事件持久化/快照/历史适配，`app/eventsourced/subscriber` 承载事件处理/投影/注册。核心模板禁止反向依赖这两个可选子包，组合根负责装配。

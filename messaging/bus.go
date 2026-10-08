@@ -167,7 +167,7 @@ func (bus *MessageBus) Publish(ctx context.Context, message IMessage) error {
 	if ctx == nil {
 		return errors.NewCode(errors.InvalidInput, "ctx is nil")
 	}
-	if message == nil {
+	if IsNilMessage(message) {
 		return errors.NewCode(errors.InvalidInput, "message is nil")
 	}
 	finalHandler := func(ctx context.Context, msg IMessage) error {
@@ -193,24 +193,23 @@ func (bus *MessageBus) PublishAll(ctx context.Context, messages []IMessage) erro
 
 	if len(messages) == 1 {
 		message := messages[0]
-		if message == nil {
+		if IsNilMessage(message) {
 			return errors.NewCode(errors.InvalidInput, "message is nil").WithContext("index", 0)
 		}
 
 		err := bus.executeMiddlewares(ctx, message, func(ctx context.Context, msg IMessage) error {
-			if msg == nil {
+			if IsNilMessage(msg) {
 				return errors.NewCode(errors.InvalidInput, "middleware produced nil message").
 					WithContext("index", 0).
 					WithContext("message_id", message.GetID())
 			}
-			return bus.transport.PublishAll(ctx, []IMessage{msg})
+			if err := bus.transport.PublishAll(ctx, []IMessage{msg}); err != nil {
+				return wrapPublishError(err, errors.Dependency, "failed to publish batch").WithContext("message_count", 1)
+			}
+			return nil
 		})
 		if err != nil {
-			var appErr *errors.AppError
-			if errors.As(err, &appErr) && appErr != nil {
-				return appErr.WithContext("index", 0).WithContext("message_id", message.GetID())
-			}
-			return errors.Wrap(err, errors.Internal, "failed to publish message").
+			return wrapPublishError(err, errors.Internal, "failed to publish message").
 				WithContext("index", 0).
 				WithContext("message_id", message.GetID())
 		}
@@ -240,12 +239,12 @@ func (bus *MessageBus) PublishAll(ctx context.Context, messages []IMessage) erro
 	}
 
 	for index, message := range messages {
-		if message == nil {
+		if IsNilMessage(message) {
 			return errors.NewCode(errors.InvalidInput, "message is nil").WithContext("index", index)
 		}
 
 		err := bus.executeMiddlewaresWith(ctx, message, func(ctx context.Context, msg IMessage) error {
-			if msg == nil {
+			if IsNilMessage(msg) {
 				return errors.NewCode(errors.InvalidInput, "middleware produced nil message").
 					WithContext("index", index).
 					WithContext("message_id", message.GetID())
@@ -254,11 +253,7 @@ func (bus *MessageBus) PublishAll(ctx context.Context, messages []IMessage) erro
 			return nil
 		}, middlewares)
 		if err != nil {
-			var appErr *errors.AppError
-			if errors.As(err, &appErr) && appErr != nil {
-				return appErr.WithContext("index", index).WithContext("message_id", message.GetID())
-			}
-			return errors.Wrap(err, errors.Internal, "failed to publish message").
+			return wrapPublishError(err, errors.Internal, "failed to publish message").
 				WithContext("index", index).
 				WithContext("message_id", message.GetID())
 		}
@@ -269,13 +264,26 @@ func (bus *MessageBus) PublishAll(ctx context.Context, messages []IMessage) erro
 	}
 
 	if err := bus.transport.PublishAll(ctx, batched); err != nil {
-		return errors.Wrap(err, errors.Dependency, "failed to publish batch").
+		return wrapPublishError(err, errors.Dependency, "failed to publish batch").
 			WithContext("message_count", len(batched))
 	}
 
 	finishBatch(true)
 	batchFinished = true
 	return nil
+}
+
+// wrapPublishError 保留完整错误链及显式错误码，未分类错误使用所在边界的默认码。
+func wrapPublishError(err error, fallback errors.ErrorCode, message string) errors.IAppError {
+	if appErr, ok := err.(*errors.AppError); ok && appErr != nil {
+		return appErr
+	}
+	// Normalize 仅为可识别的错误附加业务码；普通错误保持原样。
+	var appErr *errors.AppError
+	if normalized := errors.Normalize(err); errors.As(normalized, &appErr) && appErr != nil {
+		fallback = errors.Code(normalized)
+	}
+	return errors.Wrap(err, fallback, message)
 }
 
 // executeMiddlewares 隔离继承的批次状态，再构建并执行即时投递处理链。

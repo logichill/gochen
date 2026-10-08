@@ -55,6 +55,9 @@ type IEventSourcedRepository[T IEventSourcedAggregate[ID], ID comparable] interf
 //
 // 类型参数：
 //   - ID: 聚合根 ID 类型，必须是可比较类型（如 int64、string、uuid.UUID 等）
+//
+// 实现返回 contextx.AfterCommitError 时表示事件已经持久化，仅后续步骤失败；
+// 调用方应保留该错误类别并更新聚合提交基线，而不重复追加这批事件。
 type IDomainEventStore[ID comparable] interface {
 	// AppendEvents 追加领域事件到聚合的事件流中。
 	AppendEvents(ctx context.Context, aggregateID ID, events []domain.IDomainEvent, expectedVersion uint64) error
@@ -94,4 +97,28 @@ type RestoreResult struct {
 
 	// Exists 聚合是否存在（version > 0）。
 	Exists bool
+}
+
+// IAtomicEventSourcedRepository 支持多个聚合的事件一次原子提交。
+// 未提交失败时不得清除未提交事件；AfterCommitError 表示已提交，必须更新提交基线。
+// 同一调用不允许重复聚合 ID。接口实现必须在构造时具备原子能力。
+type IAtomicEventSourcedRepository[T IEventSourcedAggregate[ID], ID comparable] interface {
+	IEventSourcedRepository[T, ID]
+	SaveAll(ctx context.Context, aggregates []T) error
+}
+
+// DomainEventAppend 表示一个聚合的待追加事件与乐观锁版本。
+// 空 Events 表示严格版本守卫，必须与整批写入一起校验。
+type DomainEventAppend[ID comparable] struct {
+	AggregateID     ID
+	Events          []domain.IDomainEvent
+	ExpectedVersion uint64
+}
+
+// IAtomicDomainEventStore 支持多个聚合事件流的一次原子追加。
+// 实现此接口即承诺当前配置支持原子提交；不支持的装配应在构造时拒绝。
+// 禁止通过循环单项追加降级实现。
+type IAtomicDomainEventStore[ID comparable] interface {
+	IDomainEventStore[ID]
+	AppendEventsBatch(ctx context.Context, batch []DomainEventAppend[ID]) error
 }

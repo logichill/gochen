@@ -24,7 +24,6 @@ import (
 	"gochen/app/query"
 	"gochen/app/security/internal/capability"
 	"gochen/domain"
-	domcrud "gochen/domain/crud"
 	"gochen/errors"
 )
 
@@ -65,7 +64,7 @@ func composeCapabilities[T domain.IEntity[ID], ID comparable](
 	inner crud.IApplication[T, ID],
 ) crud.IApplication[T, ID] {
 	detected := capability.Detect[T, ID](inner)
-	parts := capability.Parts[T, ID]{Core: core, Aware: detected.Aware}
+	parts := capability.Parts[T, ID]{Core: core}
 	if detected.Batch != nil {
 		parts.Batch = &batchWriter[T, ID]{app: core, inner: detected.Batch}
 	}
@@ -158,26 +157,4 @@ func (a *application[T, ID]) CountByQuery(ctx context.Context, quer *query.Query
 		return 0, err
 	}
 	return a.inner.CountByQuery(ctx, quer)
-}
-
-// --- 非请求路径能力：原样转发，不做动作校验 ---
-
-// Repository 转发底层仓储。
-//
-// 注意：调用方持有裸 Repository 后可绕过本装饰器直写。这属于 §4.4 定义的
-// 进程内可信代码边界，由代码评审而非运行时防御覆盖。
-func (a *application[T, ID]) Repository() domcrud.IRepository[T, ID] {
-	return a.inner.Repository()
-}
-
-func (a *application[T, ID]) QueryRepository() (domcrud.IQueryRepository[T, ID], bool) {
-	return a.inner.QueryRepository()
-}
-
-func (a *application[T, ID]) Validate(entity T) error {
-	return a.inner.Validate(entity)
-}
-
-func (a *application[T, ID]) Config() *crud.ServiceConfig {
-	return a.inner.Config()
 }

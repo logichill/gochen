@@ -1,6 +1,6 @@
 .PHONY: help telemetry-off test test-core integration coverage coverage-core coverage-check race race-core bench bench-core test-all downstream-smoke check-downstream clean docs fmt vet lint lint-full check quality-local stats
 
-CORE_PACKAGES := ./domain/eventsourced ./app/eventsourced ./eventing/projection ./eventing/outbox
+CORE_PACKAGES := ./domain/eventsourced ./app/eventsourced/... ./eventing/projection ./eventing/outbox
 COVERAGE_MIN ?= 55
 export DOWNSTREAM_ROOT ?= ..
 DOWNSTREAM_PROJECTS ?= gochen-contrib gochen-iam gochen-llm alife ems erp

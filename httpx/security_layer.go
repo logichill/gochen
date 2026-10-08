@@ -12,6 +12,7 @@ const (
 
 type securityLayerKey struct{}
 
+// RequestSecurityLayer 从请求上下文中提取安全层标识（如 api 或 web）。
 func RequestSecurityLayer(ctx IRequestContext) SecurityLayer {
 	if ctx == nil {
 		return ""
@@ -24,6 +25,7 @@ func RequestSecurityLayer(ctx IRequestContext) SecurityLayer {
 	return ""
 }
 
+// WithSecurityLayer 将指定安全层标识注入到请求上下文中。
 func WithSecurityLayer(ctx IRequestContext, layer SecurityLayer) IRequestContext {
 	if ctx == nil {
 		return nil

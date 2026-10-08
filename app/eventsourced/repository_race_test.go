@@ -2,6 +2,7 @@ package eventsourced
 
 import (
 	"context"
+	esstore "gochen/app/eventsourced/eventstore"
 	"sync"
 	"testing"
 
@@ -20,7 +21,8 @@ func TestEventSourcedRepository_ConcurrentSaveDifferentAggregates(t *testing.T) 
 	reg, upgraders := newTestRegistryAndUpgraders()
 	require.NoError(t, reg.Register("ValueSet", func() any { return &valueSetEvent{} }))
 
-	storeAdapter, err := NewDomainEventStore(DomainEventStoreOptions[*testAggregate, int64]{
+	storeAdapter, err := esstore.NewDomainEventStore(esstore.DomainEventStoreOptions[int64]{
+		PublishMode:      esstore.PublishModePersistOnly,
 		AggregateType:    "TestAggregate",
 		EventIDGenerator: testEventIDGenerator(),
 		EventStore:       eventStore,
@@ -73,7 +75,8 @@ func TestEventSourcedRepository_ConcurrentSaveSameAggregate_Conflict(t *testing.
 	reg, upgraders := newTestRegistryAndUpgraders()
 	require.NoError(t, reg.Register("ValueSet", func() any { return &valueSetEvent{} }))
 
-	storeAdapter, err := NewDomainEventStore(DomainEventStoreOptions[*testAggregate, int64]{
+	storeAdapter, err := esstore.NewDomainEventStore(esstore.DomainEventStoreOptions[int64]{
+		PublishMode:      esstore.PublishModePersistOnly,
 		AggregateType:    "TestAggregate",
 		EventIDGenerator: testEventIDGenerator(),
 		EventStore:       eventStore,
@@ -141,7 +144,8 @@ func TestEventSourcedRepository_ConcurrentReadWrite(t *testing.T) {
 	reg, upgraders := newTestRegistryAndUpgraders()
 	require.NoError(t, reg.Register("ValueSet", func() any { return &valueSetEvent{} }))
 
-	storeAdapter, err := NewDomainEventStore(DomainEventStoreOptions[*testAggregate, int64]{
+	storeAdapter, err := esstore.NewDomainEventStore(esstore.DomainEventStoreOptions[int64]{
+		PublishMode:      esstore.PublishModePersistOnly,
 		AggregateType:    "TestAggregate",
 		EventIDGenerator: testEventIDGenerator(),
 		EventStore:       eventStore,

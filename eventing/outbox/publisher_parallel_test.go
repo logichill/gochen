@@ -3,42 +3,16 @@ package outbox
 import (
 	"context"
 	"fmt"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"gochen/testkit/assert"
-	"gochen/testkit/require"
-
-	"gochen/errors"
 	"gochen/eventing"
 	"gochen/eventing/bus"
 	"gochen/messaging"
 	"gochen/observe/logging"
+	"gochen/testkit/require"
 )
-
-// 并发安全的 Outbox 仓储 mock，用于 ParallelPublisher 并发测试。
-type concurrentOutboxRepo struct {
-	mu        sync.Mutex
-	entries   map[int64]*OutboxEntry[int64]
-	published map[int64]int // entryID -> 次数
-	failed    map[int64]int // entryID -> 次数
-}
-
-func newConcurrentOutboxRepo(entries []OutboxEntry[int64]) *concurrentOutboxRepo {
-	m := &concurrentOutboxRepo{
-		entries:   make(map[int64]*OutboxEntry[int64], len(entries)),
-		published: make(map[int64]int),
-		failed:    make(map[int64]int),
-	}
-	for i := range entries {
-		e := entries[i]
-		ee := e
-		m.entries[ee.ID] = &ee
-	}
-	return m
-}
 
 // SaveWithEvents ctx：上下文（用于取消、超时与链路信息）。
 //
@@ -167,11 +141,6 @@ func (r *concurrentOutboxRepo) stats() (published, failed int) {
 	return
 }
 
-// 并发安全的事件总线 mock：仅计数 PublishEvent 次数。
-type concurrentEventBus struct {
-	count int32
-}
-
 // PublishEvent 发布事件到事件总线。
 //
 // 参数：
@@ -199,8 +168,6 @@ func (b *concurrentEventBus) PublishEvents(ctx context.Context, events []eventin
 	}
 	return nil
 }
-
-// 以下为 bus.IEventBus 其余方法的 no-op 实现
 
 // Publish 发布消息到消息总线。
 //
@@ -276,18 +243,6 @@ func (b *concurrentEventBus) SubscribeEvent(ctx context.Context, eventType strin
 // - err：错误信息（nil 表示成功）
 func (b *concurrentEventBus) SubscribeHandler(ctx context.Context, handler bus.IEventHandler) (messaging.UnsubscribeFunc, error) {
 	return func(ctx context.Context) error { return nil }, nil
-}
-
-// 其余 bus 接口为本测试不关心的 no-op
-
-// dlqRecordingRepo 用于验证 ParallelPublisher 在失败时的 DLQ 语义。
-type dlqRecordingRepo struct {
-	mu     sync.Mutex
-	failed []struct {
-		id        int64
-		errorMsg  string
-		nextRetry time.Time
-	}
 }
 
 // SaveWithEvents ctx：上下文（用于取消、超时与链路信息）。
@@ -373,11 +328,6 @@ func (r *dlqRecordingRepo) FailedCount() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return len(r.failed)
-}
-
-type dlqRecordingDLQ struct {
-	mu    sync.Mutex
-	moved []OutboxEntry[int64]
 }
 
 // MoveToDLQ ctx：上下文（用于取消、超时与链路信息）。
@@ -521,57 +471,6 @@ func TestParallelPublisher_ConcurrentWorkers_SinglePublishPerEntry(t *testing.T)
 	}
 }
 
-// TestParallelPublisher_MarkFailed_MovesToDLQWhenMaxRetriesExceeded 验证 ParallelPublisher MarkFailed MovesToDLQWhenMaxRetriesExceeded。
-func TestParallelPublisher_MarkFailed_MovesToDLQWhenMaxRetriesExceeded(t *testing.T) {
-	repo := &dlqRecordingRepo{}
-	bus := &concurrentEventBus{}
-
-	cfg := OutboxConfig{
-		RetryInterval: 30 * time.Second,
-		MaxRetries:    3,
-	}
-
-	reg := newTestRegistry(t)
-	upgraders := newTestUpgraders()
-	p, err := NewParallelPublisher(repo, bus, cfg, logging.NewNoopLogger(), 1, reg, upgraders)
-	require.NoError(t, err)
-	dlq := &dlqRecordingDLQ{}
-	require.NoError(t, p.SetDLQRepository(dlq))
-
-	entry := OutboxEntry[int64]{
-		ID:         42,
-		RetryCount: cfg.MaxRetries - 1, // 再失败一次即达到上限
-	}
-
-	ctx := context.Background()
-	require.NoError(t, p.markFailure(ctx, p.core().buildFailureMark(entry, "test-error")))
-
-	// 应该调用 MarkAsFailed 一次
-	require.Equal(t, 1, repo.FailedCount())
-
-	// 且应移入 DLQ
-	moved := dlq.Moved()
-	require.Len(t, moved, 1)
-	assert.Equal(t, int64(42), moved[0].ID)
-	assert.Equal(t, cfg.MaxRetries, moved[0].RetryCount)
-	assert.Equal(t, "test-error", moved[0].LastError)
-}
-
-type aggregateOrderBus struct {
-	mu sync.Mutex
-
-	versions []uint64
-	v1Seen   chan struct{}
-	allowV1  chan struct{}
-}
-
-func newAggregateOrderBus() *aggregateOrderBus {
-	return &aggregateOrderBus{
-		v1Seen:  make(chan struct{}),
-		allowV1: make(chan struct{}),
-	}
-}
-
 // PublishEvent 在老实现（共享 workCh + 多 worker）下可稳定制造“同一聚合乱序”；
 // 在新实现（按聚合分片）下会触发超时并保持顺序，从而避免测试 flake。
 func (b *aggregateOrderBus) PublishEvent(ctx context.Context, evt eventing.IEvent) error {
@@ -620,17 +519,23 @@ func (b *aggregateOrderBus) PublishEvents(ctx context.Context, events []eventing
 func (b *aggregateOrderBus) Publish(ctx context.Context, message messaging.IMessage) error {
 	return nil
 }
+
 func (b *aggregateOrderBus) PublishAll(ctx context.Context, messages []messaging.IMessage) error {
 	return nil
 }
+
 func (b *aggregateOrderBus) Subscribe(ctx context.Context, msgType string, handler messaging.IMessageHandler) (messaging.UnsubscribeFunc, error) {
 	return func(ctx context.Context) error { return nil }, nil
 }
-func (b *aggregateOrderBus) Use(middleware messaging.IMiddleware)  {}
+
+func (b *aggregateOrderBus) Use(middleware messaging.IMiddleware) {}
+
 func (b *aggregateOrderBus) Handlers() []messaging.IMessageHandler { return nil }
+
 func (b *aggregateOrderBus) SubscribeEvent(ctx context.Context, eventType string, handler bus.IEventHandler) (messaging.UnsubscribeFunc, error) {
 	return func(ctx context.Context) error { return nil }, nil
 }
+
 func (b *aggregateOrderBus) SubscribeHandler(ctx context.Context, handler bus.IEventHandler) (messaging.UnsubscribeFunc, error) {
 	return func(ctx context.Context) error { return nil }, nil
 }
@@ -686,63 +591,10 @@ func TestParallelPublisher_PreservesOrderWithinAggregate(t *testing.T) {
 	require.Equal(t, []uint64{1, 2}, bus.Versions())
 }
 
-func TestParallelPublisher_StopDrainsQueuedWork(t *testing.T) {
-	const entryCount = 20
-
-	entries := make([]OutboxEntry[int64], 0, entryCount)
-	for i := 0; i < entryCount; i++ {
-		evt := newTestEvent(1, uint64(i+1), fmt.Sprintf("e-%d", i+1), map[string]any{"i": i})
-		e, err := EventToOutboxEntry(evt.AggregateID, evt)
-		require.NoError(t, err)
-		e.ID = int64(i + 1)
-		e.Status = OutboxStatusPending
-		entries = append(entries, *e)
-	}
-
-	repo := newOneShotOutboxRepo(entries)
-	slowBus := &slowPublishBus{delay: 10 * time.Millisecond}
-
-	cfg := OutboxConfig{
-		PublishInterval: 24 * time.Hour, // 测试中手动触发
-		BatchSize:       entryCount,
-		RetryInterval:   30 * time.Second,
-		RetentionPeriod: time.Minute,
-		MaxRetries:      3,
-		CleanupInterval: 24 * time.Hour,
-	}
-
-	reg := newTestRegistry(t)
-	upgraders := newTestUpgraders()
-	p, err := NewParallelPublisher(repo, slowBus, cfg, logging.NewNoopLogger(), 1, reg, upgraders)
-	require.NoError(t, err)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	require.NoError(t, p.Start(ctx))
-	require.NoError(t, p.PublishPending(ctx))
-	stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
-	defer stopCancel()
-	require.NoError(t, p.Stop(stopCtx))
-
-	require.Equal(t, int32(entryCount), atomic.LoadInt32(&slowBus.count))
-}
-
-type slowPublishBus struct {
-	concurrentEventBus
-	delay time.Duration
-}
-
 func (b *slowPublishBus) PublishEvent(ctx context.Context, evt eventing.IEvent) error {
 	time.Sleep(b.delay)
 	atomic.AddInt32(&b.count, 1)
 	return nil
-}
-
-type cancelAwarePublishBus struct {
-	concurrentEventBus
-	started  chan struct{}
-	canceled chan struct{}
 }
 
 func (b *cancelAwarePublishBus) PublishEvent(ctx context.Context, evt eventing.IEvent) error {
@@ -751,133 +603,6 @@ func (b *cancelAwarePublishBus) PublishEvent(ctx context.Context, evt eventing.I
 	<-ctx.Done()
 	closeOnce(b.canceled)
 	return ctx.Err()
-}
-
-func closeOnce(ch chan struct{}) {
-	select {
-	case <-ch:
-	default:
-		close(ch)
-	}
-}
-
-func TestParallelPublisher_StopTimeoutCancelsRunningPublishContext(t *testing.T) {
-	evt := newTestEvent(1, 1, "cancel-on-stop", map[string]any{"i": 1})
-	entry, err := EventToOutboxEntry(evt.AggregateID, evt)
-	require.NoError(t, err)
-	entry.ID = 1
-	entry.Status = OutboxStatusPending
-
-	repo := newOneShotOutboxRepo([]OutboxEntry[int64]{*entry})
-	blockingBus := &cancelAwarePublishBus{
-		started:  make(chan struct{}),
-		canceled: make(chan struct{}),
-	}
-	cfg := OutboxConfig{
-		PublishInterval: 24 * time.Hour,
-		BatchSize:       1,
-		RetryInterval:   30 * time.Second,
-		RetentionPeriod: time.Minute,
-		MaxRetries:      3,
-		CleanupInterval: 24 * time.Hour,
-	}
-
-	p, err := NewParallelPublisher(repo, blockingBus, cfg, logging.NewNoopLogger(), 1, newTestRegistry(t), newTestUpgraders())
-	require.NoError(t, err)
-	require.NoError(t, p.SetBatchOperations(&recordingBatchOps{}))
-
-	runCtx := context.Background()
-	require.NoError(t, p.Start(runCtx))
-	require.NoError(t, p.PublishPending(runCtx))
-
-	require.Eventually(t, func() bool {
-		select {
-		case <-blockingBus.started:
-			return true
-		default:
-			return false
-		}
-	}, time.Second, time.Millisecond)
-
-	stopCtx, stopCancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer stopCancel()
-	err = p.Stop(stopCtx)
-	require.Error(t, err)
-	require.True(t, errors.Is(err, errors.Timeout))
-
-	require.Eventually(t, func() bool {
-		select {
-		case <-blockingBus.canceled:
-			return true
-		default:
-			return false
-		}
-	}, time.Second, time.Millisecond)
-
-	select {
-	case <-p.markDoneCh:
-	case <-time.After(time.Second):
-		t.Fatal("expected markLoop to stop after Stop timeout")
-	}
-}
-
-func TestParallelPublisher_SettersRejectChangesAfterStart(t *testing.T) {
-	repo := newOneShotOutboxRepo(nil)
-	bus := &concurrentEventBus{}
-	cfg := OutboxConfig{
-		PublishInterval: 24 * time.Hour,
-		BatchSize:       1,
-		RetryInterval:   30 * time.Second,
-		RetentionPeriod: time.Minute,
-		MaxRetries:      3,
-		CleanupInterval: 24 * time.Hour,
-	}
-	p, err := NewParallelPublisher(repo, bus, cfg, logging.NewNoopLogger(), 1, newTestRegistry(t), newTestUpgraders())
-	require.NoError(t, err)
-
-	require.NoError(t, p.SetMetricsRecorder(nil))
-	require.NoError(t, p.SetDLQRepository(nil))
-	require.NoError(t, p.SetBatchOperations(nil))
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	require.NoError(t, p.Start(ctx))
-
-	require.True(t, errors.Is(p.SetMetricsRecorder(nil), errors.FailedPrecondition))
-	require.True(t, errors.Is(p.SetDLQRepository(nil), errors.FailedPrecondition))
-	require.True(t, errors.Is(p.SetBatchOperations(nil), errors.FailedPrecondition))
-
-	stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
-	defer stopCancel()
-	require.NoError(t, p.Stop(stopCtx))
-}
-
-func TestParallelPublisher_MarkPublishedRetriesWithFreshContextAfterSuccessfulPublish(t *testing.T) {
-	entry := newProcessingOutboxEntry(t, 1)
-	repo := &contextSensitiveMarkRepo{}
-	ctx, cancel := context.WithCancel(context.Background())
-	var published int32
-	bus := &MockEventBus{
-		publishEventFunc: func(context.Context, eventing.IEvent) error {
-			atomic.AddInt32(&published, 1)
-			cancel()
-			return nil
-		},
-	}
-	p := &ParallelPublisher[int64]{
-		repo:          repo,
-		bus:           bus,
-		cfg:           DefaultOutboxConfig(),
-		log:           logging.NewNoopLogger(),
-		eventRegistry: newTestRegistry(t),
-		upgraders:     newTestUpgraders(),
-	}
-
-	p.processEntry(ctx, entry)
-
-	require.Equal(t, int32(1), atomic.LoadInt32(&published))
-	require.GreaterOrEqual(t, atomic.LoadInt32(&repo.markPublishedCalls), int32(2))
-	require.Equal(t, int32(1), atomic.LoadInt32(&repo.markPublishedSuccesses))
 }
 
 func TestParallelPublisher_FetchOnceDrainsClaimedEntriesWhenContextCancelsDuringDispatch(t *testing.T) {
@@ -929,77 +654,6 @@ func TestParallelPublisher_FetchOnceDrainsClaimedEntriesWhenContextCancelsDuring
 	require.ErrorIs(t, err, context.Canceled)
 	require.Equal(t, int32(0), atomic.LoadInt32(&bus.count))
 	require.Equal(t, int32(0), atomic.LoadInt32(&repo.markPublishedSuccesses))
-}
-
-func TestParallelPublisher_ProcessEntryPublishedMarkFailureRecoversClaim(t *testing.T) {
-	entry := newProcessingOutboxEntry(t, 21)
-	repo := &MockOutboxRepository{
-		markPublishError: assert.AnError,
-	}
-	bus := &MockEventBus{}
-	p := &ParallelPublisher[int64]{
-		repo:          repo,
-		bus:           bus,
-		cfg:           OutboxConfig{RetryInterval: time.Minute, MaxRetries: 3},
-		log:           logging.NewNoopLogger(),
-		eventRegistry: newTestRegistry(t),
-		upgraders:     newTestUpgraders(),
-	}
-
-	p.processEntry(context.Background(), entry)
-
-	require.Equal(t, 1, bus.PublishedEventsLen())
-	require.Equal(t, 0, repo.MarkedPublishedLen())
-	require.Equal(t, 1, repo.MarkedFailedLen())
-}
-
-func TestParallelPublisher_ProcessEntryRenewFailureStillMarksPublishedAfterSuccessfulPublish(t *testing.T) {
-	repo := &MockOutboxRepository{
-		renewClaimError: errors.NewCode(errors.Dependency, "lease lost"),
-	}
-	bus := &MockEventBus{
-		publishEventFunc: func(ctx context.Context, event eventing.IEvent) error {
-			// 模拟“发布已成功进入 bus，但续租刚好失败并取消了 run 上下文”的竞态：
-			// PublishEvent 仍返回 nil（事件已投递）。
-			<-ctx.Done()
-			return nil
-		},
-	}
-	entry := newProcessingOutboxEntry(t, 7)
-	p := &ParallelPublisher[int64]{
-		repo:          repo,
-		bus:           bus,
-		cfg:           OutboxConfig{BatchSize: 10, RetryInterval: time.Minute, MaxRetries: 3, ClaimLease: 50 * time.Millisecond, ClaimRenewInterval: 5 * time.Millisecond},
-		log:           logging.NewNoopLogger(),
-		eventRegistry: newTestRegistry(t),
-		upgraders:     newTestUpgraders(),
-	}
-
-	p.processEntry(context.Background(), entry)
-
-	// 发布成功即便续租失败也必须 markPublished，避免重复投递；且不得误标为 failed。
-	require.Equal(t, 1, repo.MarkedPublishedLen())
-	require.Equal(t, 0, repo.MarkedFailedLen())
-}
-
-func newProcessingOutboxEntry(t *testing.T, id int64) OutboxEntry[int64] {
-	t.Helper()
-	evt := newTestEvent(id, 1, fmt.Sprintf("event-%d", id), nil)
-	entry, err := EventToOutboxEntry(evt.AggregateID, evt)
-	require.NoError(t, err)
-	entry.ID = id
-	entry.Status = OutboxStatusProcessing
-	entry.ClaimToken = fmt.Sprintf("claim-%d", id)
-	leaseUntil := time.Now().Add(time.Minute)
-	entry.LeaseUntil = &leaseUntil
-	return *entry
-}
-
-type contextSensitiveMarkRepo struct {
-	claimEntries []OutboxEntry[int64]
-
-	markPublishedCalls     int32
-	markPublishedSuccesses int32
 }
 
 func (r *contextSensitiveMarkRepo) SaveWithEvents(context.Context, int64, []eventing.Event[int64]) error {

@@ -113,6 +113,9 @@ func WithOrderBy(column string, desc bool) QueryOption {
 }
 
 // WithLimit 设置查询条数上限。
+//
+// 用于删除路径时，需要方言支持 `DELETE ... LIMIT`；不支持的方言会返回
+// Unsupported 错误，而不是静默忽略 LIMIT 删除全部匹配行。
 func WithLimit(limit int) QueryOption {
 	return func(opts *QueryOptions) {
 		if limit > 0 {

@@ -43,14 +43,18 @@ func TestTrackerRefreshSettlesTrackedOperation(t *testing.T) {
 		}),
 	})
 
-	got, err := tracker.Refresh(context.Background(), &Result{
+	input := &Result{
 		Operation: Operation{
 			ID:     "op_2",
 			Type:   "task.complete",
 			Mode:   ModeTracked,
 			Status: StatusAccepted,
 		},
-	})
+	}
+	if err := store.Put(context.Background(), input); err != nil {
+		t.Fatal(err)
+	}
+	got, err := tracker.Refresh(context.Background(), input)
 	if err != nil {
 		t.Fatalf("refresh: %v", err)
 	}

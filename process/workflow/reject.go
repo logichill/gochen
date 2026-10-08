@@ -45,6 +45,19 @@ func (e *Engine) rejectNode(ctx context.Context, st *State, def *Definition, nod
 	} else {
 		resetNodes = dominatedReachableNodes(def, targetNodeID)
 	}
+	// 驳回会同时撤销目标支配的其他活动分支；每个被撤销的节点都必须执行退出钩子。
+	// 先完成全部钩子，再修改状态，任何分支清理失败均中止此次驳回。
+	for _, activeNodeID := range st.ActiveNodeIDs {
+		if activeNodeID == nodeID {
+			continue // 发起驳回的节点已在上方执行退出钩子。
+		}
+		if _, reset := resetNodes[activeNodeID]; !reset {
+			continue
+		}
+		if err := e.runNodeHooks(ctx, NodeHookExit, ActionReject, st, def, activeNodeID, targetNodeID, now); err != nil {
+			return err
+		}
+	}
 	st.ActiveNodeIDs = removeNodes(st.ActiveNodeIDs, resetNodes)
 	if st.ActiveNodeStartedAt != nil {
 		for resetNode := range resetNodes {

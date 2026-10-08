@@ -12,24 +12,16 @@ import (
 
 // DLQEntry 表示一条从 Outbox 迁移到死信队列的记录。
 type DLQEntry[ID comparable] struct {
-	ID              int64     `json:"id" gorm:"primaryKey;autoIncrement"`
-	OriginalEntryID int64     `json:"original_entry_id" gorm:"index;not null"`
-	AggregateID     ID        `json:"aggregate_id" gorm:"index;not null"`
-	AggregateType   string    `json:"aggregate_type" gorm:"index;not null"`
-	EventID         string    `json:"event_id" gorm:"uniqueIndex;not null"`
-	EventType       string    `json:"event_type" gorm:"index;not null"`
-	EventData       string    `json:"event_data" gorm:"type:text;not null"`
-	FailureReason   string    `json:"failure_reason" gorm:"type:text"`
-	RetryCount      int       `json:"retry_count" gorm:"not null"`
-	MovedAt         time.Time `json:"moved_at" gorm:"index;not null"`
-}
-
-// DefaultOutboxDLQTable 是 DLQ 记录的默认表名。
-const DefaultOutboxDLQTable = "event_outbox_dlq"
-
-// TableName 返回 DLQ 默认使用的表名。
-func (DLQEntry[ID]) TableName() string {
-	return DefaultOutboxDLQTable
+	ID              int64     `json:"id"`
+	OriginalEntryID int64     `json:"original_entry_id"`
+	AggregateID     ID        `json:"aggregate_id"`
+	AggregateType   string    `json:"aggregate_type"`
+	EventID         string    `json:"event_id"`
+	EventType       string    `json:"event_type"`
+	EventData       string    `json:"event_data"`
+	FailureReason   string    `json:"failure_reason"`
+	RetryCount      int       `json:"retry_count"`
+	MovedAt         time.Time `json:"moved_at"`
 }
 
 // ToEvent 将 DLQ 记录转换为事件。

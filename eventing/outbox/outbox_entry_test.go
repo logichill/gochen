@@ -12,13 +12,6 @@ import (
 	"gochen/eventing/upcast"
 )
 
-// TestOutboxEntry_TableName 验证 OutboxEntry TableName。
-func TestOutboxEntry_TableName(t *testing.T) {
-	entry := OutboxEntry[int64]{}
-	assert.Equal(t, "event_outbox", entry.TableName())
-}
-
-// TestOutboxEntry_ToEvent 验证 OutboxEntry ToEvent。
 func TestOutboxEntry_ToEvent(t *testing.T) {
 	evt := newTestEvent(123, 1, "event-1", map[string]any{"value": 100})
 	entry, err := EventToOutboxEntry(123, evt)

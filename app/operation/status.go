@@ -21,3 +21,16 @@ func (s Status) IsValid() bool {
 		return false
 	}
 }
+
+// CanTransitionStatus 判断已有状态是否允许向前推进；终态不可再次变更。
+func CanTransitionStatus(from, to Status) bool {
+	return from == StatusAccepted && (to == StatusProcessing || IsTerminalStatus(to)) ||
+		from == StatusProcessing && IsTerminalStatus(to)
+}
+
+func IsTerminalStatus(status Status) bool {
+	return status == StatusSettled ||
+		status == StatusFailed ||
+		status == StatusTimeout ||
+		status == StatusDegraded
+}

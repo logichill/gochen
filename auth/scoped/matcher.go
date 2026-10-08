@@ -97,8 +97,12 @@ type constraintResourceKey struct {
 
 // newConstraintResourceMatcher 按两段匹配语义把约束分入两张互斥的索引表。
 //
-// 两表互斥（ResourceID 非空 / 为空）是等价性的前提：一条约束只可能被其中
-// 一张表取走，因此各表内按下标升序出队，等同于原先"取最小的未占用下标"。
+// 两表互斥（ResourceID 非空 / 为空）：一条约束只会进入其中一张表。
+// 匹配优先级为 exact 优先于 kind 兜底——take 先弹 exact 表，失配才落到
+// byKind 表；表内按下标升序 FIFO 出队，兜底因此按声明顺序取用。
+// 注意：这与"取最小未占用下标"的贪心语义并不等价。同一目标同时命中精确
+// 约束与兜底约束时取精确约束，即使兜底约束的下标更小；按最小下标贪心会把
+// 精确约束挤给后续目标，可能把本可合法拆分的批量误判为 Forbidden。
 func newConstraintResourceMatcher(resources []ResourceConstraint) *constraintResourceMatcher {
 	matcher := &constraintResourceMatcher{
 		exact:  make(map[constraintResourceKey][]int, len(resources)),

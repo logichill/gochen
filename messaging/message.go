@@ -55,6 +55,7 @@ type Message struct {
 // GetID 返回消息 ID。
 func (m *Message) GetID() string { return m.ID }
 
+// GetKind 返回消息种类（若为空则回退为 KindUnknown）。
 func (m *Message) GetKind() MessageKind {
 	if m.Kind == "" {
 		return KindUnknown
@@ -68,8 +69,10 @@ func (m *Message) GetType() string { return m.Type }
 // GetTimestamp 返回消息时间戳。
 func (m *Message) GetTimestamp() time.Time { return m.Timestamp }
 
+// GetPayload 返回消息有效载荷。
 func (m *Message) GetPayload() Payload { return m.Payload }
 
+// GetMetadata 返回消息元数据实例（若未初始化则自动创建空元数据）。
 func (m *Message) GetMetadata() *Metadata {
 	if m.Metadata == nil {
 		m.Metadata = NewMetadata()
@@ -110,6 +113,24 @@ func isNilMessageClock(clk clock.IClock) bool {
 	switch rv.Kind() {
 	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
 		return rv.IsNil()
+	default:
+		return false
+	}
+}
+
+// IsNilMessage 判断消息是否为空，并识别「接口非 nil 而底层指针为 nil」的 typed-nil。
+//
+// 说明：Go 接口判等无法识别 typed-nil（`var m *Message` 经接口传参时 `m != nil`），
+// 发布路径若直接调用 GetMetadata/GetType 等方法会以 nil 接收者解引用 panic；
+// 该判定与 Subscribe 的 isNilMessageHandler、NewMessageWithClock 的 isNilMessageClock 保持同一约定。
+func IsNilMessage(message IMessage) bool {
+	if message == nil {
+		return true
+	}
+	value := reflect.ValueOf(message)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
 	default:
 		return false
 	}

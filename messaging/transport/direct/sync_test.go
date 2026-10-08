@@ -183,6 +183,44 @@ func TestSyncTransport_PublishAll_NilMessageRejected(t *testing.T) {
 	}
 }
 
+// callPublishWithoutPanic 在同一 goroutine 内执行发布调用，把 panic 转为用例失败信息，
+// 避免 typed-nil 用例直接终止测试进程、掩盖其余用例结果。
+func callPublishWithoutPanic(t *testing.T, name string, call func() error) (err error) {
+	t.Helper()
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("%s: unexpected panic: %v", name, r)
+		}
+	}()
+	return call()
+}
+
+// TestSyncTransport_TypedNilMessageRejected 验证同步传输 Publish/PublishAll 拒绝 typed-nil 消息
+// （接口非 nil 而底层指针为 nil），返回 InvalidInput 而非在 GetType 处 nil 解引用 panic。
+func TestSyncTransport_TypedNilMessageRejected(t *testing.T) {
+	tpt := NewSyncTransport()
+	if err := tpt.Start(context.Background()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer func() { _ = tpt.Stop(context.Background()) }()
+
+	var nilMessage *messaging.Message
+
+	err := callPublishWithoutPanic(t, "Publish(typed-nil)", func() error {
+		return tpt.Publish(context.Background(), nilMessage)
+	})
+	if !errors.Is(err, errors.InvalidInput) {
+		t.Fatalf("expected InvalidInput for typed-nil Publish, got: %v", err)
+	}
+
+	err = callPublishWithoutPanic(t, "PublishAll(typed-nil)", func() error {
+		return tpt.PublishAll(context.Background(), []messaging.IMessage{nilMessage})
+	})
+	if !errors.Is(err, errors.InvalidInput) {
+		t.Fatalf("expected InvalidInput for typed-nil PublishAll, got: %v", err)
+	}
+}
+
 type cancelingHandler struct{ cancel func() }
 
 func (h cancelingHandler) Handle(_ context.Context, _ messaging.IMessage) error {

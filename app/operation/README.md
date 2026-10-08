@@ -1,6 +1,6 @@
 # Operation：写操作结果与状态跟踪
 
-`app/operation` 为应用写入口提供统一结果信封、可选状态存储、幂等协调、Tracker 和 SSE 输出。业务写入仍由回调执行，Runner 本身不调度后台任务。
+`app/operation` 为应用写入口提供统一结果信封、可选状态存储、幂等协调和 Tracker。业务写入仍由回调执行，Runner 本身不调度后台任务。
 
 ## 执行模式
 
@@ -49,9 +49,9 @@ Runner 会同步调用 handler；tracked 表示需要跟踪结果，不会自动
 
 ## 状态查询与 SSE
 
-复用同一个 Store 创建 `NewTracker(&TrackerOptions{Store: store, Settlement: checker})`。`Tracker.Load` 读取状态并调用业务的 `ISettlementChecker`：尚未收敛时将 accepted 推进为 processing，收敛后保存 settled，终态直接返回。
+复用同一个 Store 创建 `NewTracker(&TrackerOptions{Store: store, Settlement: checker})`。`Tracker.Load` 读取状态并调用业务的 `ISettlementChecker`：尚未收敛时将 accepted 推进为 processing，收敛后保存 settled，终态直接返回。配置的 Store 还须实现 `IStatusTransitionStore`：只条件更新状态，保留业务字段；状态不匹配时返回当前结果，记录不存在时返回 NotFound。
 
-HTTP handler 可组合 `PrepareStreamHeaders` 与 `Stream` 输出 SSE，也可直接调用 Tracker 实现轮询。路由、鉴权、操作归属检查和存储保留周期由接入方配置；Runner 的 URL builder 只生成链接，不注册路由。
+HTTP handler 可组合 `gochen-runtime/http/operation` 的 `PrepareStreamHeaders` 与 `Stream` 输出 SSE，也可直接调用 Tracker 实现轮询。路由、鉴权、操作归属检查和存储保留周期由接入方配置；Runner 的 URL builder 只生成链接，不注册路由。
 
 `MemoryStore` 适合测试或单进程短期使用。需要重启后查询时注入持久化 `IStore`；幂等键还要求 `IIdempotencyStore`，多实例避免重复执行需支持预占接口，详见 [SPEC](SPEC.md#存储与幂等)。
 
@@ -60,3 +60,5 @@ HTTP handler 可组合 `PrepareStreamHeaders` 与 `Stream` 输出 SSE，也可�
 - 普通 CRUD 或自定义写入口直接使用 `Runner.Execute(ctx, spec, handler)` 包装。
 - `app/eventsourced.EventSourcedService` 提供 `ExecuteCommandWithOperation` 和 `ExecuteCommandWithResolvedOperation`；tracked 要求显式配置 runner，并由组合根为其配置可查询的 Store。
 - 多步骤补偿和状态机推进使用 [process](../../process/README.md)。
+
+业务已成功但后续步骤失败时返回 `contextx.AfterCommitError`。handler 返回该错误对应 degraded 终态；业务成功后的结果保存失败则返回业务结果与该错误并保留幂等预占。接入方依据 operation ID 核对主操作后，通过 `IResultRecoveryStore.RecoverResult` 补存原结果；已有结果优先，不能以旧信封覆盖新状态，也不应释放预占后重复执行主操作。

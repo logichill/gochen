@@ -138,7 +138,7 @@ func NewAggregateLockMiddleware(config *AggregateLockConfig) *AggregateLockMiddl
 	if config == nil {
 		config = DefaultAggregateLockConfig()
 	}
-	if config.Clock == nil {
+	if isNilClock(config.Clock) {
 		config.Clock = clock.NewRealClock()
 	}
 

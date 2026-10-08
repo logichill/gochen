@@ -47,7 +47,7 @@ func fullPolicy() authaction.OperationPolicy {
 func newApp(t *testing.T) crud.IApplication[*order, int64] {
 	t.Helper()
 	repo := testkit.NewMemoryRepository[*order, int64](testkit.NewInt64Sequence(1))
-	app, err := crud.NewApplication[*order, int64](repo, nil, nil)
+	app, err := crud.NewApplication[*order, int64](repo, nil)
 	require.NoError(t, err)
 	return app
 }
@@ -71,8 +71,9 @@ func TestNewValidatesWiring(t *testing.T) {
 }
 
 func TestDeniedActionBlocksWrite(t *testing.T) {
+	base := newApp(t)
 	checker := &recordingChecker{granted: map[string]bool{}}
-	secured, err := secaction.New[*order, int64](newApp(t), checker, fullPolicy())
+	secured, err := secaction.New[*order, int64](base, checker, fullPolicy())
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -82,7 +83,7 @@ func TestDeniedActionBlocksWrite(t *testing.T) {
 	require.Equal(t, []string{"order:api:create"}, checker.seen)
 
 	// 被拒绝的写不得落库。
-	count, err := secured.Repository().(domcrud.IQueryRepository[*order, int64]).Count(ctx)
+	count, err := base.Count(ctx)
 	require.NoError(t, err)
 	require.Equal(t, int64(0), count)
 }
@@ -154,20 +155,4 @@ func TestReadPathsMapToExpectedActions(t *testing.T) {
 		"order:api:list",
 		"order:api:list",
 	}, checker.seen)
-}
-
-// R5 关键回归：装饰 IApplication（宽接口）不得丢失底层可选能力接口。
-func TestDecoratorPreservesOptionalRepositoryCapabilities(t *testing.T) {
-	checker := &recordingChecker{granted: map[string]bool{}}
-	secured, err := secaction.New[*order, int64](newApp(t), checker, fullPolicy())
-	require.NoError(t, err)
-
-	_, ok := secured.Repository().(domcrud.IQueryRepository[*order, int64])
-	require.True(t, ok, "IQueryRepository 断言必须仍然成立")
-
-	queryRepo, ok := secured.QueryRepository()
-	require.True(t, ok, "QueryRepository() 必须仍可用")
-	require.NotNil(t, queryRepo)
-
-	require.NotNil(t, secured.Config())
 }

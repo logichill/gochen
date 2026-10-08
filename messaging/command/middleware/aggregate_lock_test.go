@@ -451,6 +451,34 @@ func TestAggregateLockMiddleware_EvictsOldestInactiveLocks(t *testing.T) {
 	assert.True(t, has5, "lock 5 should be retained")
 }
 
+// TestAggregateLockMiddleware_TypedNilClockDoesNotPanic 验证 typed-nil 时钟按未注入处理：
+// 构造期应归一化为默认时钟，避免 Handle 期间在 m.clock.Now()（过期清理/时间戳更新）处同步 panic。
+func TestAggregateLockMiddleware_TypedNilClockDoesNotPanic(t *testing.T) {
+	var typedNil *clock.ManualClock
+	middleware := NewAggregateLockMiddleware(&AggregateLockConfig{
+		LockGranularity:   "aggregate",
+		MaxAggregateLocks: 100,
+		LockIdleTimeout:   time.Minute,
+		Clock:             typedNil,
+	})
+
+	if _, ok := middleware.clock.(*clock.RealClock); !ok {
+		t.Fatalf("typed-nil clock should be normalized to default clock, got %T", middleware.clock)
+	}
+
+	executed := false
+	cmd := command.NewCommand("cmd-1", "TestCommand", "agg-1", "Order", nil)
+	err := middleware.Handle(context.Background(), cmd, func(ctx context.Context, msg messaging.IMessage) error {
+		executed = true
+		return nil
+	})
+	assert.NoError(t, err)
+	assert.True(t, executed)
+
+	// 覆盖 PruneExpired 的时钟读取路径（typed-nil 时同样会 panic）。
+	assert.Equal(t, 0, middleware.PruneExpired())
+}
+
 // BenchmarkAggregateLockMiddleware_SameAggregate 用于评估 AggregateLockMiddleware SameAggregate 的性能。
 func BenchmarkAggregateLockMiddleware_SameAggregate(b *testing.B) {
 	middleware := NewAggregateLockMiddleware(nil)

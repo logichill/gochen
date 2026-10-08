@@ -3,6 +3,7 @@ package operation
 import (
 	"context"
 
+	"gochen/app/internal/depcheck"
 	"gochen/errors"
 )
 
@@ -52,10 +53,13 @@ func NewTracker(opts *TrackerOptions) *Tracker {
 
 // Load 从 store 读取并刷新当前 operation 状态。
 func (t *Tracker) Load(ctx context.Context, operationID string) (*Result, error) {
+	if err := contextError(ctx); err != nil {
+		return nil, err
+	}
 	if operationID == "" {
 		return nil, errors.NewCode(errors.InvalidInput, "operation id is required")
 	}
-	if t == nil || t.store == nil {
+	if t == nil || depcheck.IsNil(t.store) {
 		return nil, errors.NewCode(errors.Internal, "operation tracker store is not configured")
 	}
 	result, err := t.store.Get(ctx, operationID)
@@ -66,18 +70,39 @@ func (t *Tracker) Load(ctx context.Context, operationID string) (*Result, error)
 }
 
 // Refresh 依据 settlement checker 推进 tracked operation 的可观察状态。
+// 配置 Store 时只更新已有记录，要求 IStatusTransitionStore；不以刷新隐式补存结果。
 func (t *Tracker) Refresh(ctx context.Context, result *Result) (*Result, error) {
+	if err := contextError(ctx); err != nil {
+		return nil, err
+	}
 	if result == nil {
 		return nil, errors.NewCode(errors.InvalidInput, "operation result cannot be nil")
 	}
 	if IsTerminalStatus(result.Operation.Status) {
 		return result, nil
 	}
+	if !result.Operation.Status.IsValid() {
+		return nil, errors.NewCode(errors.InvalidInput, "operation status is invalid")
+	}
+	var transitions IStatusTransitionStore
+	if t != nil && t.store != nil {
+		if depcheck.IsNil(t.store) {
+			return nil, errors.NewCode(errors.InvalidInput, "operation store contains a nil value")
+		}
+		var ok bool
+		transitions, ok = t.store.(IStatusTransitionStore)
+		if !ok || depcheck.IsNil(transitions) {
+			return nil, errors.NewCode(errors.Unsupported, "operation tracker requires atomic status transitions")
+		}
+		if result.Operation.ID == "" {
+			return nil, errors.NewCode(errors.InvalidInput, "operation id is required")
+		}
+	}
 
 	settled := false
 	var err error
-	if t != nil && t.settlement != nil {
-		settled, err = t.settlement.IsSettled(ctx, result)
+	if t != nil && !depcheck.IsNil(t.settlement) {
+		settled, err = t.settlement.IsSettled(ctx, CloneResult(result))
 		if err != nil {
 			return nil, err
 		}
@@ -90,20 +115,8 @@ func (t *Tracker) Refresh(ctx context.Context, result *Result) (*Result, error) 
 		next.Operation.Status = StatusProcessing
 	}
 
-	// 仅在状态实际变更时写回 store，避免无意义的写放大。
-	if next.Operation.Status != result.Operation.Status {
-		if t != nil && t.store != nil && next.Operation.ID != "" {
-			if err := t.store.Put(ctx, next); err != nil {
-				return nil, err
-			}
-		}
+	if transitions != nil && next.Operation.Status != result.Operation.Status {
+		return transitions.TransitionStatus(ctx, next.Operation.ID, result.Operation.Status, next.Operation.Status)
 	}
 	return next, nil
-}
-
-func IsTerminalStatus(status Status) bool {
-	return status == StatusSettled ||
-		status == StatusFailed ||
-		status == StatusTimeout ||
-		status == StatusDegraded
 }

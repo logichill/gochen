@@ -43,7 +43,7 @@ URL 路径只是示意，实际地址由接入方提供。
 2. tracked 生成非空 ID，并写入 handler 的派生 context；inline 不生成 ID。
 3. 在当前调用栈执行 handler，合并结果；tracked 在配置 Store 时保存信封。
 
-`Operation.ID/Type/Mode` 由 Runner 设置。inline 成功固定为 settled；tracked 默认 accepted，也接受 handler 返回的有效非 failed 状态。handler 返回 error 时统一生成 failed 信封，同时返回原错误；保存失败也返回错误，因此调用方必须检查 error，不能只看结果非空。
+`Operation.ID/Type/Mode` 由 Runner 设置。inline 成功固定为 settled；tracked 默认 accepted，也接受 handler 返回的有效非 failed 状态。handler 返回普通 error 时生成 failed 信封；返回 contextx.AfterCommitError 时生成 degraded 终态，保留错误，表示主操作已完成但后续阶段失败，不应重试整个业务。业务回调成功后结果保存失败，返回原结果与 AfterCommitError，并保留幂等预占；调用方应依据返回的 operation ID 核对业务并补存结果，不能通过释放预占重跑主操作。调用方必须同时检查结果和 error。
 
 | 状态 | 含义 | 终态 |
 | --- | --- | --- |
@@ -74,10 +74,12 @@ Tracker 只负责 accepted → processing 与已收敛 → settled；timeout / d
 - `IIdempotencyReservationReleaseStore` 仅释放相同 operation ID 的未完成预占，不能删除最终结果或他人的占用。
 - 仅实现结果保存原子性，不能保证多个进程不会同时执行业务回调；业务写入仍须满足自身的事务和幂等要求。
 
-`MemoryStore` 使用锁保护数据，Delete 的有界 tombstone 用于阻止近期在途结果重新出现，不提供跨进程持久性。完整接口见 [store.go](store.go)。
+`MemoryStore` 使用锁保护数据，Delete 的有界 tombstone 用于阻止近期在途结果重新出现，不提供跨进程持久性。基础接口见 [store.go](store.go)，条件写入见 [store_transition.go](store_transition.go)。
 
 ## Tracker 与 Stream
 
-`Tracker.Load` 读取并刷新结果；`ISettlementChecker` 由业务判断读模型或外部结果是否已可见。只在状态变化时写回，遇到终态不再调用 checker。Store 与 checker 的错误直接返回。
+`Tracker.Load` 读取并刷新结果；`ISettlementChecker` 由业务判断读模型或外部结果是否已可见。配置 Store 时要求 `IStatusTransitionStore`，只在原状态仍匹配时更新状态，保留存储中的其他字段；状态不匹配时返回当前结果，记录缺失返回 NotFound。Refresh 不再创建记录。遇到终态不调用 checker；checker 接收结果副本，仅作判定。Store 与 checker 的错误直接返回。
 
-`Stream` 通过调用方的 load 函数轮询，首次或结果变化时发送 SSE，空闲时发送 keepalive，终态结束；ctx 取消时停止。接入方负责响应头、路由、鉴权、资源归属与保留周期。默认事件名为 `operation`，轮询间隔为 300ms，keepalive 为 15s，可通过 StreamOptions 调整。
+`IResultRecoveryStore.RecoverResult` 只补存缺失结果或完成同一 ID、原键的预占；同 ID 已有结果优先。普通 Put 是全量替换，不能代替条件推进或并发补存。业务修改收敛依据、身份字段或全量结果时仍须自行协调。
+
+Runtime 的 `gochen-runtime/http/operation.Stream` 通过调用方的 load 函数轮询，首次或结果变化时发送 SSE，空闲时发送 keepalive，终态结束；ctx 取消时停止。接入方负责响应头、路由、鉴权、资源归属与保留周期。默认事件名为 `operation`，轮询间隔为 300ms，keepalive 为 15s，可通过 StreamOptions 调整。

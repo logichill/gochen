@@ -10,18 +10,13 @@ import (
 	"gochen/domain/audited"
 	"gochen/domain/crud"
 	"gochen/errors"
-	"gochen/validate"
 )
 
 // IApplication 抽象Application能力接口。
 type IApplication[T domain.IEntity[ID], ID comparable] interface {
 	appcrud.IApplication[T, ID]
 
-	AuditStore() audited.IAuditStore
-	AuditTrail(ctx context.Context, id ID, offset, limit int) ([]audited.AuditRecord, error)
-	ListDeleted(ctx context.Context, offset, limit int) ([]T, error)
-	Restore(ctx context.Context, id ID, by string) error
-	Purge(ctx context.Context, id ID) error
+	IAuditOperations[T, ID]
 }
 
 // AuditProjector transforms an entity before it is serialized into an audit snapshot.
@@ -53,17 +48,15 @@ type Application[T domain.IEntity[ID], ID comparable] struct {
 //
 // 参数：
 // - repo：实体仓储（承载 audited 的读写与恢复/已删查询能力）。
-// - validator：可选校验器（配合 AutoValidate 在写入前执行实体校验）。
-// - config：服务配置（nil 表示使用默认配置）。
 // - auditStore：审计存储（用于持久化审计记录）。
+// - options：构造期应用配置、校验器和生命周期钩子。
 //
 // 返回：
 // - err：缺少必需依赖/能力时返回错误。
 func NewApplication[T domain.IEntity[ID], ID comparable](
 	repo crud.IRepository[T, ID],
-	validator validate.IValidator,
-	config *appcrud.ServiceConfig,
 	auditStore audited.IAuditStore,
+	options *appcrud.Options[T, ID],
 ) (*Application[T, ID], error) {
 	if repo == nil {
 		return nil, errors.NewCode(errors.InvalidInput, "repository cannot be nil")
@@ -87,7 +80,7 @@ func NewApplication[T domain.IEntity[ID], ID comparable](
 		return nil, errors.NewCode(errors.InvalidInput, "repository must implement audited.IDeletedQueryRepository for audited deleted list")
 	}
 
-	concrete, err := appcrud.NewApplication(repo, validator, config)
+	concrete, err := appcrud.NewApplication(repo, options)
 	if err != nil {
 		return nil, err
 	}
@@ -169,4 +162,10 @@ func (s *Application[T, ID]) ListDeleted(ctx context.Context, offset, limit int)
 // GetWithDeleted 按主键读取实体，并允许命中软删除记录。
 func (s *Application[T, ID]) GetWithDeleted(ctx context.Context, id ID) (T, error) {
 	return s.restoreRepo.GetWithDeleted(ctx, id)
+}
+
+// HasPurgeCapability 报告底层仓储是否支持硬删除。
+func (s *Application[T, ID]) HasPurgeCapability() bool {
+	_, ok := s.Repository().(crud.IPurgeRepository[T, ID])
+	return ok
 }

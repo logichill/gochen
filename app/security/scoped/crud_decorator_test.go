@@ -65,7 +65,7 @@ func newRepo(declared bool) *scopeAwareRepo {
 
 func newApp(t *testing.T, repo domcrud.IRepository[*order, int64]) crud.IApplication[*order, int64] {
 	t.Helper()
-	app, err := crud.NewApplication[*order, int64](repo, nil, nil)
+	app, err := crud.NewApplication[*order, int64](repo, nil)
 	require.NoError(t, err)
 	return app
 }
@@ -315,16 +315,22 @@ func TestExistsMapsToReadAction(t *testing.T) {
 
 // --- 可选能力保持 ---
 
-// R5 关键回归：L3 装饰同样不得丢失底层可选能力接口。
+// L3 保留批量业务能力，同时隐藏裸仓储。
 func TestDecoratorPreservesOptionalCapabilities(t *testing.T) {
 	secured, err := secscoped.New[*order, int64](newApp(t, newRepo(true)), allowAuthorizer(t, 101), config())
 	require.NoError(t, err)
 
-	_, ok := secured.Repository().(domcrud.IQueryRepository[*order, int64])
+	_, ok := secured.(crud.IBatchWriter[*order, int64])
 	require.True(t, ok)
+	_, ok = secured.(crud.IRepositoryProvider[*order, int64])
+	require.False(t, ok)
+}
 
-	queryRepo, ok := secured.QueryRepository()
-	require.True(t, ok)
-	require.NotNil(t, queryRepo)
-	require.NotNil(t, secured.Config())
+func TestScopedAssemblyRequiresRepositoryCollaboration(t *testing.T) {
+	// 自定义应用必须显式保留装配能力，不能仅传入已隐藏仓储的业务外壳。
+	app := struct {
+		crud.IApplication[*order, int64]
+	}{newApp(t, newRepo(true))}
+	_, err := secscoped.New[*order, int64](app, allowAuthorizer(t, 101), config())
+	require.True(t, errors.Is(err, errors.Unsupported))
 }

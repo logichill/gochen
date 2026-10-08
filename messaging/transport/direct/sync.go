@@ -33,7 +33,7 @@ func (t *SyncTransport) Publish(ctx context.Context, message messaging.IMessage)
 	if ctx == nil {
 		return errors.NewCode(errors.InvalidInput, "ctx is nil")
 	}
-	if message == nil {
+	if messaging.IsNilMessage(message) {
 		return errors.NewCode(errors.InvalidInput, "message is nil")
 	}
 	if strings.TrimSpace(message.GetType()) == "" {
@@ -135,7 +135,7 @@ func (t *SyncTransport) PublishAll(ctx context.Context, messages []messaging.IMe
 	}
 
 	for i, message := range messages {
-		if message == nil {
+		if messaging.IsNilMessage(message) {
 			return errors.NewCode(errors.InvalidInput, "message is nil").WithContext("index", i)
 		}
 		if err := t.Publish(ctx, message); err != nil {

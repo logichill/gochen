@@ -2,13 +2,13 @@ package scoped
 
 import (
 	"context"
+	appaudited "gochen/app/audited"
 
 	"gochen/auth/action"
 	authscoped "gochen/auth/scoped"
 
-	"gochen/app/crud"
 	"gochen/app/internal/writeflow"
-	"gochen/app/security/internal/capability"
+
 	"gochen/domain"
 	"gochen/domain/audited"
 	"gochen/errors"
@@ -84,18 +84,10 @@ func (b *batchWriter[T, ID]) DeleteAll(ctx context.Context, ids []ID) error {
 // 内层 Application 也校验同一个上限，但它在 L3 转发之后才执行，而 L3 的
 // 单次批量成本是 N 次边界解析 + N 次 PDP 判定 + N 条授权审计。等内层再拒，
 // 这些成本已经全部付掉了——请求体上限（默认 10MB）折算成 ID 数量是六位数，
-// 足以把一次必然失败的请求放大成一次数据库风暴。上限取自内层配置，
-// 保证两处判据一致，不引入第二个真值来源。
+// 足以把一次必然失败的请求放大成一次数据库风暴。构造时读取内层配置，
+// 标准应用保持同一个上限；未提供配置的自定义应用使用默认上限。
 func (b *batchWriter[T, ID]) requireBatchSize(size int) error {
-	maxSize := 0
-	if cfg := b.app.inner.Config(); cfg != nil {
-		maxSize = cfg.MaxBatchSize
-	}
-	if maxSize <= 0 {
-		// 与内层 normalizeServiceConfig 的兜底保持一致。
-		maxSize = crud.DefaultServiceConfig().MaxBatchSize
-	}
-	return writeflow.ValidateBatchSize(size, maxSize)
+	return writeflow.ValidateBatchSize(size, b.app.maxBatchSize)
 }
 
 // boundariesOf 解析一批 ID 在仓储中的真实授权边界，顺序与入参一致。
@@ -106,7 +98,7 @@ func (b *batchWriter[T, ID]) boundariesOf(ctx context.Context, ids []ID) ([]any,
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	if reader, ok := any(b.app.inner.Repository()).(authscoped.IBatchResourceBoundaryReader[ID]); ok {
+	if reader, ok := any(b.app.repository).(authscoped.IBatchResourceBoundaryReader[ID]); ok {
 		resources, err := reader.ResolveResourcesByID(ctx, ids)
 		if err != nil {
 			return nil, err
@@ -182,7 +174,7 @@ func toTargets[T any](entities []T) []any {
 // auditedSurface 是带资源授权的审计扩展实现（§2.3.3）。
 type auditedSurface[T domain.IEntity[ID], ID comparable] struct {
 	app   *application[T, ID]
-	inner capability.IAuditedSurface[T, ID]
+	inner appaudited.IAuditOperations[T, ID]
 }
 
 // Purge 物理擦除：先解析资源边界再判定，并经通道投放约束。
@@ -239,3 +231,6 @@ func (s *auditedSurface[T, ID]) authorizeTarget(ctx context.Context, op action.O
 	}
 	return s.app.authorizeWrite(ctx, op, target)
 }
+
+// HasPurgeCapability 保留内层硬删除能力声明；实际调用仍执行资源授权。
+func (s *auditedSurface[T, ID]) HasPurgeCapability() bool { return s.inner.HasPurgeCapability() }

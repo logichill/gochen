@@ -9,7 +9,7 @@
 - 在 UpgraderRegistry 注册所需的版本升级链。
 - 消费时使用 `upcast.HydrateEventPayload` / `DecodeEventPayload[T]`，读取事件自身的 EventSchemaVersion 并完成升级与反序列化。
 
-`app/eventsourced.DomainEventStore.AppendEvents` 使用 Registry 声明的版本写入 schema_version。Registry、UpgraderRegistry 与事件 ID generator 都由组合根注入。
+`app/eventsourced/eventstore.NewDomainEventStore` 返回 `domain/eventsourced.IDomainEventStore` 接口；该适配器的 `AppendEvents` 使用 Registry 声明的版本写入 schema_version。Registry、UpgraderRegistry 与事件 ID generator 都由组合根注入。
 
 ## 发布顺序
 

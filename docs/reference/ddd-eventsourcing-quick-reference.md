@@ -8,7 +8,7 @@
 | --- | --- |
 | 领域事件 | `domain.IDomainEvent.EventType()` |
 | 聚合 | `domain/eventsourced.EventSourcedAggregate`、MetadataRegistry |
-| 领域事件持久化适配 | `app/eventsourced.NewDomainEventStore` |
+| 领域事件持久化适配 | `app/eventsourced/eventstore.NewDomainEventStore` |
 | 仓储 | `app/eventsourced.NewEventSourcedRepository` |
 | 命令服务 | `app/eventsourced.NewEventSourcedService` |
 | 事件事实 | `eventing/store.IEventStreamStore` |
@@ -28,6 +28,7 @@ import (
 	"log"
 
 	appes "gochen/app/eventsourced"
+	esstore "gochen/app/eventsourced/eventstore"
 	domaines "gochen/domain/eventsourced"
 	"gochen/errors"
 	"gochen/eventing/registry"
@@ -63,7 +64,8 @@ func run() error {
 	if err := reg.Register("MoneyDeposited", func() any { return &Deposited{} }); err != nil {
 		return err
 	}
-	domainStore, err := appes.NewDomainEventStore(appes.DomainEventStoreOptions[*Account, int64]{
+	domainStore, err := esstore.NewDomainEventStore(esstore.DomainEventStoreOptions[int64]{
+		PublishMode:     esstore.PublishModePersistOnly,
 		AggregateType:    "Account",
 		EventIDGenerator: gen.NewUUIDGenerator(),
 		EventStore:       store.NewMemoryEventStore[int64](),
