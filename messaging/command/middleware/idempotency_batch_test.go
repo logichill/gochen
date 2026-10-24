@@ -278,10 +278,77 @@ func TestIdempotencyMiddleware_BatchRetryRollsBackMessagesAndReservations(t *tes
 					for i, msg := range pending {
 						ids[i] = msg.GetID()
 					}
+					// 失败尝试的预留必须在 unwind 期间（外层重试前）回滚：
+					// 重试的 a 回到原位，批次末尾的重复 a 被幂等去重过滤，
+					// 快照顺序严格为 kept、a、b。
 					assert.Equal(t, []string{"kept", "a", "b"}, ids)
 				})
 			}
 		}
+	}
+}
+
+// TestIdempotencyMiddleware_BatchRetryWithoutDuplicateDoesNotDropCommands 锁定
+// P1 回归（fingerprint 8bff8bd7）：失败尝试的预留若推迟到最外层 wrapper 返回才
+// 回滚，外层重试中间件会撞上未回滚的预留并把命令静默去重——批次中没有重复项时
+// 命令从批次丢失且 PublishAll 返回成功（假成功，破坏 at-least-once）。
+func TestIdempotencyMiddleware_BatchRetryWithoutDuplicateDoesNotDropCommands(t *testing.T) {
+	for _, position := range []string{"failing_before_idempotency", "failing_after_idempotency"} {
+		t.Run(position, func(t *testing.T) {
+			ctx := context.Background()
+			idem := NewIdempotencyMiddleware(nil)
+			defer func() { _ = idem.Stop(ctx) }()
+			transport := memory.NewMemoryTransportForTest(8)
+			require.NoError(t, transport.Start(ctx))
+			defer func() { _ = transport.Stop(ctx) }()
+			bus := messaging.NewMessageBus(transport)
+			failed := false
+			failing := idempotencyMiddlewareFunc(func(ctx context.Context, msg messaging.IMessage, next messaging.HandlerFunc) error {
+				failAttempt := msg.GetID() == "a" && !failed
+				if failAttempt {
+					failed = true
+				}
+				if err := next(ctx, msg); err != nil {
+					return err
+				}
+				if failAttempt {
+					return assert.AnError
+				}
+				return nil
+			})
+			retrying := idempotencyMiddlewareFunc(func(ctx context.Context, msg messaging.IMessage, next messaging.HandlerFunc) error {
+				if err := next(ctx, msg); err != nil {
+					return next(ctx, msg)
+				}
+				return nil
+			})
+			// 失败层在幂等层之前（outside）时，幂等层的 next 已成功、预留与提交
+			// 回调均已保留，失败由更外层报出——回滚只能依赖检查点在 unwind 期间
+			// 触发；失败层在幂等层之后时，幂等层自身的 defer 即会撤销预留。
+			if position == "failing_before_idempotency" {
+				bus.Use(retrying)
+				bus.Use(failing)
+				bus.Use(idem)
+			} else {
+				bus.Use(retrying)
+				bus.Use(idem)
+				bus.Use(failing)
+			}
+			// 批次中没有任何重复项可供"拯救"；单条消息会走 PublishAll 单消息
+			// 路径（发布发生在链内），因此这里用两条消息强制走批量路径。
+			require.NoError(t, bus.PublishAll(ctx, []messaging.IMessage{
+				idempotencyTestCommand("a"), idempotencyTestCommand("b"),
+			}))
+			assert.Equal(t, 2, idem.GetProcessedCount())
+			pending, err := transport.StopWithSnapshot(ctx)
+			require.NoError(t, err)
+			ids := make([]string, len(pending))
+			for i, msg := range pending {
+				ids[i] = msg.GetID()
+			}
+			// 失败后重试不丢消息、不假成功：a 与 b 都必须进入批次。
+			assert.Equal(t, []string{"a", "b"}, ids)
+		})
 	}
 }
 

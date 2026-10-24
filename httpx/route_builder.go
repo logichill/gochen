@@ -30,22 +30,6 @@ type RouteConfig struct {
 	Tags []string
 }
 
-// IPermissionChecker 权限检查器接口。
-//
-// 说明：
-// - 由业务层实现，用于检查用户是否具有指定权限或角色；
-// - RouteBuilder 在注册路由时自动注入权限检查中间件。
-type IPermissionChecker interface {
-	// HasPermission 检查当前用户是否具有指定权限
-	HasPermission(ctx IContext, permission string) bool
-	// HasRole 检查当前用户是否具有指定角色
-	HasRole(ctx IContext, role string) bool
-	// HasAnyPermission 检查当前用户是否具有任一权限
-	HasAnyPermission(ctx IContext, permissions []string) bool
-	// HasAnyRole 检查当前用户是否具有任一角色
-	HasAnyRole(ctx IContext, roles []string) bool
-}
-
 // RouteBuilder 声明式路由构建器。
 //
 // 说明：
@@ -114,6 +98,9 @@ func (b *RouteBuilder) WithMiddlewares(middlewares ...Middleware) *RouteBuilder 
 
 // Route 添加路由配置。
 func (b *RouteBuilder) Route(cfg RouteConfig) *RouteBuilder {
+	// 规范化路径（前缀斜杠补齐 + 空白修剪），与底层 group/server 的拼接语义对齐，
+	// 避免 "users" 之类的声明在规范化路由组上拼接出非预期路径。
+	cfg.Path = NormalizeRoutePath(cfg.Path)
 	if cfg.Path == "" {
 		b.errors = append(b.errors, errors.NewCode(errors.InvalidInput, "route path cannot be empty"))
 		return b
@@ -206,189 +193,7 @@ func (b *RouteBuilder) PATCH(path string, handler Handler, permissions ...string
 	})
 }
 
-// Build 构建并注册所有路由。
-func (b *RouteBuilder) Build() error {
-	if b == nil {
-		return errors.NewCode(errors.InvalidInput, "route builder cannot be nil")
-	}
-	if isNilLike(b.group) {
-		return errors.NewCode(errors.InvalidInput, "route group cannot be nil")
-	}
-	if len(b.errors) > 0 {
-		return errors.NewCode(errors.InvalidInput, "route builder has errors").
-			WithContext("errors", b.errors)
-	}
-
-	if b.permissionChecker == nil {
-		for _, route := range b.routes {
-			if len(route.Permissions) > 0 || len(route.Roles) > 0 {
-				return errors.NewCode(errors.InvalidInput, "route requires permission checker").
-					WithContext("path", route.Path).
-					WithContext("method", route.Method)
-			}
-		}
-	}
-
-	for _, route := range b.routes {
-		handler := b.wrapHandler(route)
-		if err := b.registerRoute(route.Method, route.Path, handler); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func normalizeRouteRequirements(kind string, values []string) ([]string, errors.IAppError) {
-	if len(values) == 0 {
-		return nil, nil
-	}
-	normalized := make([]string, 0, len(values))
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		normalized = append(normalized, value)
-	}
-	if len(normalized) == 0 {
-		return nil, errors.NewCode(errors.InvalidInput, "route requirement cannot be blank").
-			WithContext("requirement", kind)
-	}
-	return normalized, nil
-}
-
 // Routes 返回已配置的路由列表（用于文档生成）。
 func (b *RouteBuilder) Routes() []RouteConfig {
 	return b.routes
-}
-
-func (b *RouteBuilder) executeMiddlewareChain(ctx IContext, middlewares []Middleware, handler Handler) error {
-	if len(middlewares) == 0 {
-		return handler(ctx)
-	}
-
-	// 链的中止语义由中间件自身与 ctx（IsAborted）承担：中间件可以不调用 next
-	// 并返回 nil 来终止链；本函数只负责顺序调用与错误透传，不额外区分中止。
-	return middlewares[0](ctx, func() error {
-		return b.executeMiddlewareChain(ctx, middlewares[1:], handler)
-	})
-}
-
-// wrapHandler 包装处理器，注入权限检查和中间件。
-func (b *RouteBuilder) wrapHandler(route RouteConfig) Handler {
-	return func(ctx IContext) error {
-		if ctx == nil {
-			return errors.NewCode(errors.InvalidInput, "ctx is nil")
-		}
-
-		middlewares := make([]Middleware, 0, len(b.globalMiddlewares)+len(route.Middlewares)+1)
-		middlewares = append(middlewares, b.globalMiddlewares...)
-
-		// 权限检查中间件（在全局中间件后、路由级中间件前执行）。
-		if b.permissionChecker != nil && (len(route.Permissions) > 0 || len(route.Roles) > 0) {
-			checker := b.permissionChecker
-			perms := append([]string(nil), route.Permissions...)
-			roles := append([]string(nil), route.Roles...)
-			middlewares = append(middlewares, func(ctx IContext, next func() error) error {
-				if len(perms) > 0 && !checker.HasAnyPermission(ctx, perms) {
-					return errors.NewCode(errors.Forbidden, "permission denied").
-						WithContext("required_permissions", perms)
-				}
-				if len(roles) > 0 && !checker.HasAnyRole(ctx, roles) {
-					return errors.NewCode(errors.Forbidden, "role required").
-						WithContext("required_roles", roles)
-				}
-				return next()
-			})
-		}
-
-		middlewares = append(middlewares, route.Middlewares...)
-		return b.executeMiddlewareChain(ctx, middlewares, route.Handler)
-	}
-}
-
-// registerRoute 注册单个路由。
-func (b *RouteBuilder) registerRoute(method, path string, handler Handler) error {
-	switch strings.ToUpper(method) {
-	case "GET":
-		b.group.GET(path, handler)
-	case "POST":
-		b.group.POST(path, handler)
-	case "PUT":
-		b.group.PUT(path, handler)
-	case "DELETE":
-		b.group.DELETE(path, handler)
-	case "PATCH":
-		b.group.PATCH(path, handler)
-	case "HEAD":
-		b.group.HEAD(path, handler)
-	case "OPTIONS":
-		b.group.OPTIONS(path, handler)
-	default:
-		return errors.NewCode(errors.InvalidInput, "unknown http method").
-			WithContext("path", path).
-			WithContext("method", method)
-	}
-	return nil
-}
-
-// PermissionMiddleware 创建权限检查中间件。
-//
-// 说明：
-// - 用于需要单独使用权限检查的场景；
-// - RouteBuilder 内部已集成权限检查。
-func PermissionMiddleware(checker IPermissionChecker, permissions ...string) Middleware {
-	if checker == nil {
-		return func(IContext, func() error) error {
-			return errors.NewCode(errors.InvalidInput, "permission checker is nil")
-		}
-	}
-	normalized, err := normalizeRouteRequirements("permission", permissions)
-	if err != nil {
-		return func(IContext, func() error) error {
-			return err
-		}
-	}
-	if len(normalized) == 0 {
-		return func(IContext, func() error) error {
-			return errors.NewCode(errors.InvalidInput, "permission middleware requires at least one permission")
-		}
-	}
-	permissions = normalized
-	return func(ctx IContext, next func() error) error {
-		if !checker.HasAnyPermission(ctx, permissions) {
-			return errors.NewCode(errors.Forbidden, "permission denied").
-				WithContext("required_permissions", permissions)
-		}
-		return next()
-	}
-}
-
-// RoleMiddleware 创建角色检查中间件。
-func RoleMiddleware(checker IPermissionChecker, roles ...string) Middleware {
-	if checker == nil {
-		return func(IContext, func() error) error {
-			return errors.NewCode(errors.InvalidInput, "role checker is nil")
-		}
-	}
-	normalized, err := normalizeRouteRequirements("role", roles)
-	if err != nil {
-		return func(IContext, func() error) error {
-			return err
-		}
-	}
-	if len(normalized) == 0 {
-		return func(IContext, func() error) error {
-			return errors.NewCode(errors.InvalidInput, "role middleware requires at least one role")
-		}
-	}
-	roles = normalized
-	return func(ctx IContext, next func() error) error {
-		if !checker.HasAnyRole(ctx, roles) {
-			return errors.NewCode(errors.Forbidden, "role required").
-				WithContext("required_roles", roles)
-		}
-		return next()
-	}
 }

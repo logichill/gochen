@@ -7,11 +7,13 @@ import (
 // MetricsSnapshot 指标快照（用于读取）
 type MetricsSnapshot struct {
 	// 事件存储指标
-	EventsSaved        int64
-	EventsLoaded       int64
+	EventsSaved        int64 // 成功落库的事件条数
+	EventsLoaded       int64 // 成功加载的事件条数
+	EventStoreSaves    int64 // 成功的保存调用次数
+	EventStoreLoads    int64 // 成功的加载调用次数
 	EventStoreDuration time.Duration
 	EventLoadDuration  time.Duration
-	EventStoreErrors   int64
+	EventStoreErrors   int64 // 失败的存储调用次数（读写均计入）
 
 	// 快照指标
 	SnapshotsCreated int64
@@ -54,12 +56,15 @@ func (s MetricsSnapshot) Summary() Summary {
 		EventStore: EventStoreSummary{
 			EventsSaved:         s.EventsSaved,
 			EventsLoaded:        s.EventsLoaded,
+			SaveCalls:           s.EventStoreSaves,
+			LoadCalls:           s.EventStoreLoads,
 			StoreDurationMillis: s.EventStoreDuration.Milliseconds(),
 			LoadDurationMillis:  s.EventLoadDuration.Milliseconds(),
 			Errors:              s.EventStoreErrors,
 			AvgSaveDurationMS:   avgDurationMillis(s.EventStoreDuration, s.EventsSaved),
 			AvgLoadDurationMS:   avgDurationMillis(s.EventLoadDuration, s.EventsLoaded),
-			ErrorRatePercent:    errorRatePercent(s.EventStoreErrors, s.EventsSaved),
+			// 与 MetricsHealthCheck 同口径：失败调用次数 / 总调用次数。
+			ErrorRatePercent: eventStoreErrorRatePercent(s),
 		},
 		Snapshot: SnapshotSummary{
 			Created:        s.SnapshotsCreated,
@@ -117,8 +122,12 @@ type Summary struct {
 
 // EventStoreSummary 汇总事件存储相关指标。
 type EventStoreSummary struct {
-	EventsSaved         int64   `json:"events_saved"`
-	EventsLoaded        int64   `json:"events_loaded"`
+	EventsSaved  int64 `json:"events_saved"`
+	EventsLoaded int64 `json:"events_loaded"`
+	// SaveCalls/LoadCalls 为成功调用次数（一次批量调用计 1 次），
+	// 与 Errors（失败调用次数）同量纲，ErrorRatePercent 由三者计算。
+	SaveCalls           int64   `json:"save_calls"`
+	LoadCalls           int64   `json:"load_calls"`
 	StoreDurationMillis int64   `json:"store_duration_ms"`
 	LoadDurationMillis  int64   `json:"load_duration_ms"`
 	Errors              int64   `json:"errors"`
@@ -176,6 +185,13 @@ type OutboxSummary struct {
 	PublishDurationMS       int64   `json:"publish_duration_ms"`
 	AvgPublishDurationMS    float64 `json:"avg_publish_duration_ms"`
 	PublishErrorRatePercent float64 `json:"publish_error_rate"`
+}
+
+// eventStoreErrorRatePercent 计算事件存储操作失败率（%，统一调用次数量纲）：
+// 分子 = 失败调用次数（读写均计入），分母 = 成功保存调用 + 成功加载调用 + 失败调用。
+// MetricsHealthCheck 使用同一公式，保证 summary 与健康检查对同一指标给出一致数值。
+func eventStoreErrorRatePercent(s MetricsSnapshot) float64 {
+	return errorRatePercent(s.EventStoreErrors, s.EventStoreSaves+s.EventStoreLoads+s.EventStoreErrors)
 }
 
 // avgDurationMillis 计算每次操作的平均耗时（毫秒）。

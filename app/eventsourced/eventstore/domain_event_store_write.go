@@ -86,6 +86,14 @@ func (a *domainEventStore[ID]) prepareDomainEvents(aggregateID ID, events []doma
 				WithContext("event_type", eventType).
 				WithContext("index", i)
 		}
+		// 事件信封不变量校验：与底层存储（memory/SQL）的入队校验同口径，
+		// 让 Outbox 模式在写入前也能拦截非法信封（如数值聚合 ID 非正）。
+		if err := evt.Validate(); err != nil {
+			return nil, errors.Wrap(err, errors.InvalidInput, "domain event envelope validation failed").
+				WithContext("event_type", eventType).
+				WithContext("aggregate_id", aggregateID).
+				WithContext("index", i)
+		}
 		storableEvents = append(storableEvents, *evt)
 	}
 

@@ -156,6 +156,8 @@ func TestPublisher_MarkPublishedError(t *testing.T) {
 	assert.Error(t, err)
 
 	assert.Equal(t, 1, eventBus.PublishedEventsLen())
+	// mark 失败必须计入 RetryCount 并保留重试/DLQ 逃生（有界重投），
+	// 否则条目滞留 PROCESSING 被租约周期无界重复投递且永不进入终态。
 	assert.Equal(t, 1, repo.MarkedFailedLen())
 	assert.Equal(t, OutboxStatusFailed, repo.EntryStatus(1))
 }

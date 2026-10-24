@@ -30,6 +30,9 @@ func (s *MemoryStore) TransitionStatus(ctx context.Context, id string, expected,
 }
 
 // RecoverResult 在同一临界区中检查归属并补存，已有可见结果始终优先。
+//
+// 补存的新记录与 Put 同等参与容量核算：登记 FIFO 顺序并触发淘汰
+// （本条记录保位），随后才绑定幂等键——保证绑定指向仍然存在的记录。
 func (s *MemoryStore) RecoverResult(ctx context.Context, key string, original *Result) (*Result, error) {
 	if err := contextError(ctx); err != nil {
 		return nil, err
@@ -58,6 +61,8 @@ func (s *MemoryStore) RecoverResult(ctx context.Context, key string, original *R
 		current = CloneResult(original)
 		s.records[id] = current
 		delete(s.idempotencyReservations, id)
+		s.trackRecordOrderLocked(id)
+		s.evictOverflowRecordsLocked(id)
 	}
 	s.bindIdempotencyKeyLocked(key, id)
 	return CloneResult(current), nil

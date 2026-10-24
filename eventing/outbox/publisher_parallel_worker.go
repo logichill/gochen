@@ -30,7 +30,9 @@ func (p *ParallelPublisher[ID]) processEntry(ctx context.Context, entry OutboxEn
 	core := p.core()
 	strategy := outboxMarkStrategy[ID]{
 		markPublished: func(ctx context.Context, entry OutboxEntry[ID]) error {
-			if p.tryEnqueueMark(ctx, markOp[ID]{kind: markPublished, entryID: entry.ID, claimToken: entry.ClaimToken, eventID: entry.EventID}) {
+			// entry 携带完整数据：批量回写失败回退到 recoverPublishedMarkFailure 时，
+			// DLQ 记录需要事件数据与 RetryCount，骨架 entry 会产出脏死信记录。
+			if p.tryEnqueueMark(ctx, markOp[ID]{kind: markPublished, entryID: entry.ID, claimToken: entry.ClaimToken, eventID: entry.EventID, entry: entry}) {
 				return nil
 			}
 			return core.markPublishedWithRecovery(ctx, entry)

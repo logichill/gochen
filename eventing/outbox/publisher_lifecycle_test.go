@@ -175,3 +175,51 @@ func TestPublisher_ConcurrentStopWaitsForManualPublish(t *testing.T) {
 	assert.NoError(t, <-stopDone)
 	assert.NoError(t, <-stopDone)
 }
+
+// TestPublisher_StopThenStart_RestartsAfterDefensiveStop 锁定生命周期语义：
+// 未启动即 Stop 不进入不可逆终态——与 README（"启动前 Stop 不影响后续启动"）和
+// ParallelPublisher 一致，防御性 Stop 后必须仍可 Start 并正常发布。
+func TestPublisher_StopThenStart_RestartsAfterDefensiveStop(t *testing.T) {
+	repo := &MockOutboxRepository{}
+	eventBus := &MockEventBus{}
+	cfg := OutboxConfig{
+		PublishInterval: 50 * time.Millisecond,
+		BatchSize:       10,
+		RetryInterval:   30 * time.Second,
+		RetentionPeriod: 24 * time.Hour,
+	}
+	publisher, err := NewPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), newTestRegistry(t), newTestUpgraders())
+	assert.NoError(t, err)
+
+	ctx := context.Background()
+
+	// 未启动即 Stop：幂等返回 nil，不置终态。
+	assert.NoError(t, publisher.Stop(ctx))
+	assert.NoError(t, publisher.Stop(ctx))
+
+	// 防御性 Stop 后仍可 Start，且后台循环正常发布。
+	assert.NoError(t, publisher.Start(ctx))
+	assert.NoError(t, repo.SaveWithEvents(ctx, 1, []eventing.Event[int64]{newTestEvent(1, 1, "event-after-defensive-stop", nil)}))
+	assert.Eventually(t, func() bool {
+		return eventBus.PublishedEventsLen() >= 1
+	}, 2*time.Second, 10*time.Millisecond)
+
+	// 手动 PublishPending 在启动前后均可用（终态未被置位）。
+	assert.NoError(t, repo.SaveWithEvents(ctx, 2, []eventing.Event[int64]{newTestEvent(2, 1, "event-manual", nil)}))
+	assert.NoError(t, publisher.PublishPending(ctx))
+	assert.GreaterOrEqual(t, eventBus.PublishedEventsLen(), 2)
+
+	assert.NoError(t, publisher.Stop(ctx))
+}
+
+// TestPublisher_StartThenStop_IsTerminal 锁定一次性语义的另一面：
+// 正常启动并停止后进入终止态，再次 Start 必须要求创建新实例。
+func TestPublisher_StartThenStop_IsTerminal(t *testing.T) {
+	publisher, err := NewPublisher(&MockOutboxRepository{}, &MockEventBus{}, DefaultOutboxConfig(), logging.NewNoopLogger(), newTestRegistry(t), newTestUpgraders())
+	assert.NoError(t, err)
+
+	ctx := context.Background()
+	assert.NoError(t, publisher.Start(ctx))
+	assert.NoError(t, publisher.Stop(ctx))
+	assert.Error(t, publisher.Start(ctx))
+}

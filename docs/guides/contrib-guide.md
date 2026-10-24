@@ -37,7 +37,7 @@ Contrib 当前使用单一 `go.mod`，业务按包导入所需适配器。Core �
 - 批量创建失败必须整体回滚；Repo 创建与更新的唯一约束冲突返回 `Conflict`。审计更新要求模型支持影响行数，否则返回 `Unsupported`，避免静默丢失乐观锁检查。
 - 事务适配器保证业务 SQL 使用事务 session，并正确处理提交后回调；不能在事务未提交时触发 `PostCommit` 副作用。
 - 隔离与授权由受保护 Application 和显式配置的通用 Repo 执行，适配器不得另设默认放行路径。
-- Redis 锁按持有者 token 释放和续租，失锁必须可被调用方感知；日志通过 `observe/logging` 注入。
+- Redis 锁按持有者 token 释放和续租，失锁必须可被调用方感知；`MaxLeaseDuration` 默认 `5*TTL` 兜底防泄漏，显式设为负数（`< 0`）可禁用上限以支持长任务；日志通过 `observe/logging` 注入。
 - 第三方错误在边界转换为 `gochen/errors`，保留可诊断的 cause。
 
 数据库草稿能力的使用与限制见[数据库 Schema 与迁移](db-schema-migration-guide.md)。

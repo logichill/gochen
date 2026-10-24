@@ -389,3 +389,118 @@ func TestDecode_GenericHelper(t *testing.T) {
 		t.Fatalf("expected decoded id 42, got %+v", dst)
 	}
 }
+
+// TestBind_PtrSliceElements 验证指针切片（[]*T）绑定：分配指针元素并解引用赋值，
+// 支持 DTO 用指针区分零值与显式传入。
+func TestBind_PtrSliceElements(t *testing.T) {
+	type sample struct {
+		Tags []*string `filter:"tags"`
+		IDs  []*int64  `filter:"ids"`
+	}
+
+	var dst sample
+	err := Bind(query.QueryFilters{
+		"tags": {{
+			Op:     query.FilterOpIn,
+			Values: []query.QueryValue{query.StringValue("alpha"), query.StringValue("beta")},
+		}},
+		"ids": {{
+			Op:     query.FilterOpIn,
+			Values: []query.QueryValue{query.IntValue(7), query.IntValue(9)},
+		}},
+	}, &dst)
+	if err != nil {
+		t.Fatalf("Bind returned error: %v", err)
+	}
+	if len(dst.Tags) != 2 || dst.Tags[0] == nil || dst.Tags[1] == nil ||
+		*dst.Tags[0] != "alpha" || *dst.Tags[1] != "beta" {
+		t.Fatalf("unexpected tags binding: %#v", dst.Tags)
+	}
+	if len(dst.IDs) != 2 || dst.IDs[0] == nil || dst.IDs[1] == nil ||
+		*dst.IDs[0] != 7 || *dst.IDs[1] != 9 {
+		t.Fatalf("unexpected ids binding: %#v", dst.IDs)
+	}
+}
+
+// P2-053 回归：匿名嵌入结构体的字段必须被递归绑定，与 InferQuerySchema 的展开契约一致。
+func TestBind_TraversesAnonymousEmbeddedStructs(t *testing.T) {
+	type BaseQuery struct {
+		TenantID int64 `filter:"tenant_id"`
+	}
+	type input struct {
+		BaseQuery
+		Name string `filter:"name"`
+	}
+
+	filters := query.QueryFilters{
+		"tenant_id": {{Op: query.FilterOpEq, Value: query.IntValue(42)}},
+		"name":      {{Op: query.FilterOpEq, Value: query.StringValue("alice")}},
+	}
+	var dst input
+	if err := Bind(filters, &dst); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	if dst.TenantID != 42 {
+		t.Fatalf("embedded field not bound: TenantID=%d, want 42", dst.TenantID)
+	}
+	if dst.Name != "alice" {
+		t.Fatalf("direct field not bound: Name=%q", dst.Name)
+	}
+}
+
+// 多层匿名嵌入同样递归展开。
+func TestBind_TraversesNestedAnonymousEmbeddedStructs(t *testing.T) {
+	type TenantScope struct {
+		TenantID int64 `filter:"tenant_id"`
+	}
+	type BaseQuery struct {
+		TenantScope
+		Active bool `filter:"active"`
+	}
+	type input struct {
+		BaseQuery
+		Name string `filter:"name"`
+	}
+
+	var dst input
+	if err := Bind(query.QueryFilters{
+		"tenant_id": {{Op: query.FilterOpEq, Value: query.IntValue(7)}},
+		"active":    {{Op: query.FilterOpEq, Value: query.BoolValue(true)}},
+	}, &dst); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	if dst.TenantID != 7 || !dst.Active {
+		t.Fatalf("nested embedded fields not bound: %+v", dst)
+	}
+}
+
+// P2-030 回归：不实现 IDecoder 的 nil 指针字段不应被预分配，也不该在被拒绝时污染目标。
+func TestBind_DoesNotAllocateNilPointerWithoutDecoder(t *testing.T) {
+	type inner struct{ Value string }
+	type input struct {
+		Special *inner `filter:"special"`
+	}
+	var dst input
+	// inner 未实现 IDecoder：绑定应失败，但绝不能把 Special 预分配成非 nil。
+	err := Bind(query.QueryFilters{"special": {{Op: query.FilterOpEq, Value: query.StringValue("x")}}}, &dst)
+	if err == nil {
+		t.Fatalf("expected binding to fail for unsupported pointer struct")
+	}
+	if dst.Special != nil {
+		t.Fatalf("nil pointer was pre-allocated despite not implementing IDecoder: %+v", dst.Special)
+	}
+}
+
+// 实现 IDecoder 的 nil 指针字段仍应被实例化并接收回调。
+func TestBind_AllocatesNilPointerWithDecoder(t *testing.T) {
+	type input struct {
+		Text *decodeText `filter:"text"`
+	}
+	var dst input
+	if err := Bind(query.QueryFilters{"text": {{Op: query.FilterOpEq, Value: query.StringValue("hello")}}}, &dst); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	if dst.Text == nil || dst.Text.Value != "hello" || dst.Text.Op != query.FilterOpEq {
+		t.Fatalf("decoder pointer not bound: %+v", dst.Text)
+	}
+}

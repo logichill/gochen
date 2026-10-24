@@ -1,16 +1,12 @@
 package snapshot
 
 import (
-	"context"
-	"encoding/json"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"gochen/codec/jsoncodec"
-	"gochen/errors"
 	"gochen/eventing/monitoring"
-	"gochen/observe/logging"
 )
 
 // Manager 负责判断何时创建快照、保存快照以及从快照恢复聚合。
@@ -26,45 +22,41 @@ type snapshotMetricsHolder struct {
 	rec monitoring.ISnapshotMetricsRecorder
 }
 
-// Config 快照配置，用于控制事件快照的生成和存储策略。
-type Config struct {
-	Frequency       int           `json:"frequency"`
-	RetentionPeriod time.Duration `json:"retention_period"`
-	MaxSnapshots    int           `json:"max_snapshots"`
-	Enabled         bool          `json:"enabled"`
-}
-
-// DefaultConfig 返回快照管理器的默认配置。
-func DefaultConfig() *Config {
-	return &Config{Frequency: 100, RetentionPeriod: 30 * 24 * time.Hour, MaxSnapshots: 10, Enabled: true}
-}
-
 // NewManager 创建一个基于给定存储与配置的快照管理器。
 func NewManager[ID comparable](snapshotStore ISnapshotStore[ID], config *Config) *Manager[ID] {
 	config = normalizeConfig(config)
 	defaultStrategy := NewEventCountStrategy[ID](config.Frequency)
-	return &Manager[ID]{snapshotStore: snapshotStore, config: config, strategy: defaultStrategy}
-}
-
-func normalizeConfig(config *Config) *Config {
-	defaults := DefaultConfig()
-	if config == nil {
-		return defaults
-	}
-	normalized := *config
-	if normalized.RetentionPeriod <= 0 {
-		normalized.RetentionPeriod = defaults.RetentionPeriod
-	}
-	return &normalized
+	manager := &Manager[ID]{snapshotStore: snapshotStore, config: config, strategy: defaultStrategy}
+	injectSnapshotStore(defaultStrategy, snapshotStore)
+	return manager
 }
 
 // SetMetricsRecorder 设置快照指标记录器（可选）。
 //
 // 并发语义：允许在运行时注入/替换 recorder（内部使用 atomic.Value），避免与 Record* 并发访问时产生 data race。
 func (sm *Manager[ID]) SetMetricsRecorder(rec monitoring.ISnapshotMetricsRecorder) {
+	if sm == nil {
+		return
+	}
+	if isNilMetricsRecorder(rec) {
+		rec = nil
+	}
 	// atomic.Value 不允许 Store(nil)，且要求后续 Store 的动态类型一致。
 	// 用稳定的 holder 类型承载 interface，可以安全地设置 nil/不同实现。
 	sm.metrics.Store(snapshotMetricsHolder{rec: rec})
+}
+
+func isNilMetricsRecorder(rec monitoring.ISnapshotMetricsRecorder) bool {
+	if rec == nil {
+		return true
+	}
+	rv := reflect.ValueOf(rec)
+	switch rv.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		return rv.IsNil()
+	default:
+		return false
+	}
 }
 
 func (sm *Manager[ID]) getMetrics() monitoring.ISnapshotMetricsRecorder {
@@ -76,17 +68,43 @@ func (sm *Manager[ID]) getMetrics() monitoring.ISnapshotMetricsRecorder {
 		return nil
 	}
 	h, ok := v.(snapshotMetricsHolder)
-	if !ok {
+	if !ok || isNilMetricsRecorder(h.rec) {
 		return nil
 	}
 	return h.rec
 }
 
 // SetStrategy 替换当前使用的快照触发策略。
+//
+// 会自动把 Manager 持有的 SnapshotStore 注入到支持该能力的策略（含组合策略
+// 的子策略），避免调用方忘记注入导致策略退化为绝对版本号判断。
 func (sm *Manager[ID]) SetStrategy(strategy ISnapshotStrategy[ID]) {
+	injectSnapshotStore(strategy, sm.snapshotStore)
 	sm.mutex.Lock()
 	sm.strategy = strategy
 	sm.mutex.Unlock()
+}
+
+// snapshotStoreSetter 由需要快照存储才能做增量判断的策略实现。
+type snapshotStoreSetter[ID comparable] interface {
+	SetSnapshotStore(store ISnapshotStore[ID])
+}
+
+// injectSnapshotStore 递归向策略树注入快照存储（组合策略下钻到子策略）。
+func injectSnapshotStore[ID comparable](strategy ISnapshotStrategy[ID], store ISnapshotStore[ID]) {
+	if strategy == nil || store == nil {
+		return
+	}
+	if setter, ok := strategy.(snapshotStoreSetter[ID]); ok {
+		setter.SetSnapshotStore(store)
+	}
+	if composite, ok := strategy.(interface {
+		Strategies() []ISnapshotStrategy[ID]
+	}); ok {
+		for _, child := range composite.Strategies() {
+			injectSnapshotStore(child, store)
+		}
+	}
 }
 
 func (sm *Manager[ID]) Strategy() ISnapshotStrategy[ID] {
@@ -95,148 +113,31 @@ func (sm *Manager[ID]) Strategy() ISnapshotStrategy[ID] {
 	return sm.strategy
 }
 
-// ShouldCreateSnapshot 判断当前聚合版本是否已经满足创建快照的条件。
-func (sm *Manager[ID]) ShouldCreateSnapshot(ctx context.Context, aggregate ISnapshotAggregate[ID]) (bool, error) {
-	if !sm.config.Enabled || aggregate == nil {
-		return false, nil
-	}
-	sm.mutex.RLock()
-	strategy := sm.strategy
-	sm.mutex.RUnlock()
+// notifySnapshotCreated 把快照创建事实广播给实现了时间缓存更新的策略。
+//
+// 组合策略需要递归下钻，否则包在 CompositeSnapshotStrategy 里的
+// TimeDurationStrategy 永远收不到通知。
+func (sm *Manager[ID]) notifySnapshotCreated(aggregateType string, aggregateID ID, timestamp time.Time) {
+	notifyStrategySnapshotCreated(sm.Strategy(), aggregateType, aggregateID, timestamp)
+}
+
+// snapshotTimeUpdater 由需要感知“快照已创建”的策略实现。
+type snapshotTimeUpdater[ID comparable] interface {
+	UpdateLastSnapshotTime(aggregateType string, aggregateID ID, timestamp time.Time)
+}
+
+func notifyStrategySnapshotCreated[ID comparable](strategy ISnapshotStrategy[ID], aggregateType string, aggregateID ID, timestamp time.Time) {
 	if strategy == nil {
-		return false, nil
+		return
 	}
-	freq := sm.config.Frequency
-	if freq <= 0 {
-		freq = 1
+	if updater, ok := strategy.(snapshotTimeUpdater[ID]); ok {
+		updater.UpdateLastSnapshotTime(aggregateType, aggregateID, timestamp)
 	}
-	should, err := strategy.ShouldCreateSnapshot(ctx, aggregate)
-	if err != nil {
-		return false, err
-	}
-	snapshot, err := sm.snapshotStore.FindSnapshot(ctx, aggregate.GetAggregateType(), aggregate.GetID())
-	if err != nil {
-		if aggregate.GetVersion() >= uint64(freq) {
-			return true, nil
-		}
-		return should, nil
-	}
-	if aggregate.GetVersion() >= snapshot.Version+uint64(freq) {
-		return true, nil
-	}
-	return false, nil
-}
-
-// CreateSnapshot 为指定聚合版本生成并保存一份快照。
-func (sm *Manager[ID]) CreateSnapshot(ctx context.Context, aggregateID ID, aggregateType string, data any, version uint64) error {
-	if !sm.config.Enabled {
-		return nil
-	}
-	start := time.Now()
-	var snapshotData any = data
-	if lightweight, ok := data.(interface{ SnapshotData() any }); ok {
-		snapshotData = lightweight.SnapshotData()
-		snapshotLogger().Debug(ctx, "using lightweight snapshot",
-			logging.Any("aggregate_id", aggregateID), logging.String("aggregate_type", aggregateType))
-	}
-	serializedData, err := json.Marshal(snapshotData)
-	if err != nil {
-		return errors.Wrap(err, errors.Internal, "failed to serialize snapshot data")
-	}
-	snap := Snapshot[ID]{AggregateID: aggregateID, AggregateType: aggregateType, Version: version, Data: serializedData, Timestamp: time.Now(), Metadata: map[string]any{"created_by": "snapshot_manager", "data_size": len(serializedData)}}
-	if err := sm.snapshotStore.SaveSnapshot(ctx, snap); err != nil {
-		return errors.Wrap(err, errors.Database, "failed to save snapshot").
-			WithContext("aggregate_type", aggregateType).
-			WithContext("aggregate_id", aggregateID)
-	}
-	if m := sm.getMetrics(); m != nil {
-		m.RecordSnapshotCreated(time.Since(start))
-	}
-	snapshotLogger().Info(ctx, "snapshot created",
-		logging.Any("aggregate_id", aggregateID),
-		logging.Any("version", version),
-		logging.Int("data_size", len(serializedData)))
-	return nil
-}
-
-// LoadSnapshot 读取快照并把状态恢复到目标对象。
-// 动态字段中的 JSON 数值保留为 json.Number，避免大整数标识符丢失精度。
-func (sm *Manager[ID]) LoadSnapshot(ctx context.Context, aggregateID ID, target any) (*Snapshot[ID], error) {
-	start := time.Now()
-	aggregateType := ""
-	if typed, ok := target.(interface{ GetAggregateType() string }); ok {
-		aggregateType = typed.GetAggregateType()
-	}
-	snapshot, err := sm.snapshotStore.FindSnapshot(ctx, aggregateType, aggregateID)
-	if err != nil {
-		if m := sm.getMetrics(); m != nil {
-			m.RecordSnapshotLoaded(time.Since(start), false)
-		}
-		return nil, err
-	}
-	if restorer, ok := target.(interface{ RestoreFromSnapshotData(data any) error }); ok {
-		var snapshotData any
-		if err := jsoncodec.DecodeInto(snapshot.Data, &snapshotData); err != nil {
-			if m := sm.getMetrics(); m != nil {
-				m.RecordSnapshotLoaded(time.Since(start), false)
-			}
-			return nil, errors.Wrap(err, errors.InvalidInput, "failed to deserialize lightweight snapshot data").
-				WithContext("aggregate_type", aggregateType).
-				WithContext("aggregate_id", aggregateID)
-		}
-		if err := restorer.RestoreFromSnapshotData(snapshotData); err != nil {
-			if m := sm.getMetrics(); m != nil {
-				m.RecordSnapshotLoaded(time.Since(start), false)
-			}
-			return nil, errors.Wrap(err, errors.Internal, "failed to restore from lightweight snapshot").
-				WithContext("aggregate_type", aggregateType).
-				WithContext("aggregate_id", aggregateID)
-		}
-		snapshotLogger().Debug(ctx, "restored from lightweight snapshot",
-			logging.Any("aggregate_id", aggregateID))
-	} else {
-		if err := jsoncodec.DecodeIntoValue(snapshot.Data, target); err != nil {
-			if m := sm.getMetrics(); m != nil {
-				m.RecordSnapshotLoaded(time.Since(start), false)
-			}
-			return nil, errors.Wrap(err, errors.InvalidInput, "failed to deserialize snapshot data").
-				WithContext("aggregate_type", aggregateType).
-				WithContext("aggregate_id", aggregateID)
+	if composite, ok := strategy.(interface {
+		Strategies() []ISnapshotStrategy[ID]
+	}); ok {
+		for _, child := range composite.Strategies() {
+			notifyStrategySnapshotCreated(child, aggregateType, aggregateID, timestamp)
 		}
 	}
-	if m := sm.getMetrics(); m != nil {
-		m.RecordSnapshotLoaded(time.Since(start), true)
-	}
-	snapshotLogger().Debug(ctx, "snapshot loaded",
-		logging.Any("aggregate_id", aggregateID),
-		logging.Any("version", snapshot.Version))
-	return snapshot, nil
-}
-
-// CleanupOldSnapshots 根据保留期删除过旧快照。
-func (sm *Manager[ID]) CleanupOldSnapshots(ctx context.Context) error {
-	return sm.snapshotStore.CleanupSnapshots(ctx, sm.config.RetentionPeriod)
-}
-
-// SnapshotStats 汇总当前快照存储中的数量、类型分布和策略配置。
-func (sm *Manager[ID]) SnapshotStats(ctx context.Context) (monitoring.SnapshotManagerStats, error) {
-	snapshots, err := sm.snapshotStore.ListSnapshots(ctx, "", 0)
-	if err != nil {
-		return monitoring.SnapshotManagerStats{}, err
-	}
-	stats := monitoring.SnapshotManagerStats{
-		TotalSnapshots: len(snapshots),
-		Enabled:        sm.config.Enabled,
-		Frequency:      sm.config.Frequency,
-		RetentionDays:  sm.config.RetentionPeriod.Hours() / 24,
-		Strategy:       "",
-		ByType:         make(map[string]int),
-	}
-	if strategy := sm.Strategy(); strategy != nil {
-		stats.Strategy = strategy.Name()
-	}
-	for _, s := range snapshots {
-		stats.ByType[s.AggregateType]++
-	}
-	return stats, nil
 }

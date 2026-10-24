@@ -195,7 +195,21 @@ func (s *EventSourcedService[T, ID]) executeAttempt(
 	if finalErr == nil {
 		finalErr = s.repository.Save(ctx, aggregate)
 	}
+	if finalErr != nil {
+		// 失败尝试可能已在聚合上部分应用了事件（handler 中途报错或 Save 乐观锁冲突）。
+		// 丢弃未提交事件，避免脏状态被后续 Hook 误读为待提交事件；
+		// 版本号保持不变，聚合实例仅作为只读诊断视图传给 Hook。
+		clearUncommittedEvents(aggregate)
+	}
 	return aggregate, finalErr
+}
+
+// clearUncommittedEvents 通过领域接口清理失败尝试的未提交事件；
+// 聚合未实现该接口（自定义实现）时静默跳过。
+func clearUncommittedEvents[T deventsourced.IEventSourcedAggregate[ID], ID comparable](aggregate T) {
+	if agg, ok := any(aggregate).(deventsourced.IEventSourcedAggregate[ID]); ok && agg != nil {
+		agg.ClearUncommittedEvents()
+	}
 }
 
 func (s *EventSourcedService[T, ID]) commandRetryPolicy() retry.Config {

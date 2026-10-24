@@ -1,16 +1,13 @@
 package querybind
 
 import (
-	"fmt"
 	"reflect"
 	"strings"
-	"time"
 
 	"gochen/app/query"
 	"gochen/errors"
 )
 
-var timeType = reflect.TypeOf(time.Time{})
 var decoderType = reflect.TypeOf((*IDecoder)(nil)).Elem()
 
 // IDecoder 表示业务自定义规则的扩展点。
@@ -46,6 +43,22 @@ func bindWithSchemaInferOptions(filters query.QueryFilters, dst any, opts *query
 	for i := 0; i < rv.NumField(); i++ {
 		fieldValue := rv.Field(i)
 		fieldType := rt.Field(i)
+
+		// 匿名嵌入结构体：与 InferQuerySchema 的展开契约对齐，递归绑定其字段，
+		// 否则 BaseQuery / TenantScope 这类组合复用模式的过滤字段会全部丢失。
+		// 注意：嵌入字段本身通常不可寻址赋值（CanSet=false），但其内部导出字段
+		// 可以设置，因此必须在 CanSet 检查之前处理。
+		if fieldType.Anonymous && fieldValue.Kind() == reflect.Struct {
+			// 未导出匿名嵌入字段无法反射赋值，跳过（与 struct 字段可见性规则一致）。
+			if fieldType.PkgPath != "" || !fieldValue.CanAddr() {
+				continue
+			}
+			if err := bindWithSchemaInferOptions(filters, fieldValue.Addr().Interface(), opts); err != nil {
+				return err
+			}
+			continue
+		}
+
 		if !fieldValue.CanSet() {
 			continue
 		}
@@ -70,6 +83,15 @@ func bindWithSchemaInferOptions(filters query.QueryFilters, dst any, opts *query
 			if err := validateBindPointerType(fieldValue.Type(), map[reflect.Type]bool{}); err != nil {
 				return bindError(filterName, err)
 			}
+		}
+
+		// 非解码器类型直接交给 bindDefault，避免为不实现 IDecoder 的 nil 指针
+		// 做无谓分配。
+		if !hasDecoderCapability(fieldValue) {
+			if err := bindDefault(fieldValue, exprs); err != nil {
+				return bindError(filterName, err)
+			}
+			continue
 		}
 
 		if decoder, ok := resolveDecoder(fieldValue); ok {
@@ -133,162 +155,39 @@ func resolveDecoder(fieldValue reflect.Value) (IDecoder, bool) {
 		return nil, false
 	}
 	if fieldValue.IsNil() {
-		fieldValue.Set(reflect.New(fieldValue.Type().Elem()))
+		// nil 指针：先用指针类型（fieldValue.Type() 即 *T）的接口方法集
+		// 静态探测是否实现 IDecoder，完全不分配；确认实现后再实例化写入。
+		decoderType := reflect.TypeOf((*IDecoder)(nil)).Elem()
+		if !fieldValue.Type().Implements(decoderType) {
+			return nil, false
+		}
+		allocated := reflect.New(fieldValue.Type().Elem())
+		decoder, ok := allocated.Interface().(IDecoder)
+		if !ok {
+			// 探测失败：不得把零值实例留给目标 DTO（绑定失败仍会返回错误，
+			// 但调用方不应看到被污染的指针字段）。
+			return nil, false
+		}
+		fieldValue.Set(allocated)
+		return decoder, true
 	}
 	decoder, ok := fieldValue.Interface().(IDecoder)
 	return decoder, ok
 }
 
-func bindDefault(dst reflect.Value, exprs []query.QueryExpr) error {
-	if len(exprs) == 0 {
-		return nil
-	}
-
-	if dst.Kind() == reflect.Ptr {
-		if err := validateBindPointerType(dst.Type(), map[reflect.Type]bool{}); err != nil {
-			return err
-		}
-		if dst.IsNil() {
-			dst.Set(reflect.New(dst.Type().Elem()))
-		}
-		return bindDefault(dst.Elem(), exprs)
-	}
-
-	if dst.Kind() == reflect.Slice {
-		return bindSlice(dst, exprs)
-	}
-
-	if len(exprs) != 1 {
-		return errors.NewCode(errors.InvalidInput, "default binding expects a single query expression")
-	}
-	if exprs[0].Op != query.FilterOpEq {
-		return errors.NewCode(errors.InvalidInput, "default binding only supports eq operator").
-			WithContext("operator", string(exprs[0].Op))
-	}
-
-	return assignScalar(dst, exprs[0].Value)
-}
-
-func validateBindPointerType(t reflect.Type, path map[reflect.Type]bool) error {
-	for t != nil && t.Kind() == reflect.Pointer {
-		if path[t] {
-			return errors.NewCode(errors.InvalidInput, "querybind: recursive pointer type").WithContext("type", t.String())
-		}
-		path[t] = true
-		t = t.Elem()
-	}
-	return nil
-}
-
-func bindSlice(dst reflect.Value, exprs []query.QueryExpr) error {
-	if len(exprs) != 1 {
-		return errors.NewCode(errors.InvalidInput, "slice binding expects a single query expression")
-	}
-	expr := exprs[0]
-	if expr.Op != query.FilterOpEq && expr.Op != query.FilterOpIn {
-		return errors.NewCode(errors.InvalidInput, "slice binding only supports eq/in operator").
-			WithContext("operator", string(expr.Op))
-	}
-
-	values := expr.Values
-	if expr.Op == query.FilterOpEq {
-		values = []query.QueryValue{expr.Value}
-	}
-
-	result := reflect.MakeSlice(dst.Type(), 0, len(values))
-	for _, value := range values {
-		elem := reflect.New(dst.Type().Elem()).Elem()
-		if err := assignScalar(elem, value); err != nil {
-			return err
-		}
-		result = reflect.Append(result, elem)
-	}
-	dst.Set(result)
-	return nil
-}
-
-func assignScalar(dst reflect.Value, value query.QueryValue) error {
-	targetType := dst.Type()
-	switch {
-	case targetType == timeType:
-		if value.Type != query.FieldTypeTime {
-			return incompatibleScalarValueError(targetType, value.Type)
-		}
-		dst.Set(reflect.ValueOf(value.Time))
-		return nil
-	case targetType.Kind() == reflect.String:
-		if value.Type != query.FieldTypeString && value.Type != query.FieldTypeEnum {
-			return incompatibleScalarValueError(targetType, value.Type)
-		}
-		dst.SetString(value.String)
-		return nil
-	case isSignedInt(targetType.Kind()):
-		if value.Type != query.FieldTypeInt {
-			return incompatibleScalarValueError(targetType, value.Type)
-		}
-		if err := query.ValidateSignedIntRange(targetType, value.Int); err != nil {
-			return err
-		}
-		dst.SetInt(value.Int)
-		return nil
-	case isUnsignedInt(targetType.Kind()):
-		if value.Type != query.FieldTypeInt {
-			return incompatibleScalarValueError(targetType, value.Type)
-		}
-		if err := query.ValidateUnsignedIntRange(targetType, value.Int); err != nil {
-			return err
-		}
-		dst.SetUint(uint64(value.Int))
-		return nil
-	case isFloat(targetType.Kind()):
-		if value.Type != query.FieldTypeFloat && value.Type != query.FieldTypeInt {
-			return incompatibleScalarValueError(targetType, value.Type)
-		}
-		if value.Type == query.FieldTypeInt {
-			dst.SetFloat(float64(value.Int))
-			return nil
-		}
-		dst.SetFloat(value.Float)
-		return nil
-	case targetType.Kind() == reflect.Bool:
-		if value.Type != query.FieldTypeBool {
-			return incompatibleScalarValueError(targetType, value.Type)
-		}
-		dst.SetBool(value.Bool)
-		return nil
-	default:
-		return errors.NewCode(errors.InvalidInput, fmt.Sprintf("unsupported default bind target: %s", targetType.String()))
-	}
-}
-
-func incompatibleScalarValueError(targetType reflect.Type, valueType query.FieldType) error {
-	message := "querybind: incompatible query value type"
-	if valueType == "" {
-		message = "querybind: query value type is required"
-	}
-	return errors.NewCode(errors.InvalidInput, message).
-		WithContext("target", targetType.String()).
-		WithContext("value_type", string(valueType))
-}
-
-func isSignedInt(kind reflect.Kind) bool {
-	switch kind {
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+// hasDecoderCapability 静态探测字段类型（或其地址）是否实现 IDecoder，不做任何分配。
+//
+// 用于在给 nil 指针分配实例之前预判：只有确定实现 IDecoder 才值得分配，
+// 避免绑定失败时污染目标 DTO 为非零空指针，也避免无谓堆分配。
+func hasDecoderCapability(fieldValue reflect.Value) bool {
+	if fieldValue.CanAddr() && fieldValue.Addr().Type().Implements(decoderType) {
 		return true
-	default:
-		return false
 	}
-}
-
-func isUnsignedInt(kind reflect.Kind) bool {
-	switch kind {
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+	if fieldValue.Type().Implements(decoderType) {
 		return true
-	default:
-		return false
 	}
-}
-
-func isFloat(kind reflect.Kind) bool {
-	return kind == reflect.Float32 || kind == reflect.Float64
+	if fieldValue.Kind() == reflect.Ptr && fieldValue.Type().Elem().Implements(decoderType) {
+		return true
+	}
+	return false
 }

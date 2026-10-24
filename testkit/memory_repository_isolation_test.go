@@ -162,6 +162,21 @@ func TestIsolation_BatchPathsAreGuarded(t *testing.T) {
 	require.Equal(t, int64(0), countA)
 }
 
+// 6.1) 批量创建失败路径与单条/基线一致：prepare 阶段已盖归属戳，仓储数据原子回退。
+func TestIsolation_CreateAllFailureKeepsPrepareStamp(t *testing.T) {
+	repo := newIsolatedRepo(t)
+	ctxA := tenantCtx(t, "tenant-a")
+
+	doc := &isoDoc{Title: "dup"}
+	err := repo.CreateAll(ctxA, []*isoDoc{doc, doc})
+	require.True(t, errors.Is(err, errors.Conflict))
+	require.Equal(t, "tenant-a", doc.GetTenantID())
+
+	count, countErr := repo.Count(ctxA)
+	require.NoError(t, countErr)
+	require.Equal(t, int64(0), count, "失败的批量创建不得写入任何数据")
+}
+
 // 7) 未启用隔离时行为不变（L0/L1 不背负 L2 心智）。
 func TestIsolation_DisabledKeepsPlainBehaviour(t *testing.T) {
 	repo := testkit.NewMemoryRepository[*isoDoc, int64](testkit.NewInt64Sequence(1))

@@ -144,3 +144,39 @@ func TestManualTimerResetDiscardsExpiredTick(t *testing.T) {
 	default:
 	}
 }
+
+func TestManualClock_Timer_OrderFiredByDeadline(t *testing.T) {
+	start := time.Unix(0, 0).UTC()
+	c := NewManualClock(start)
+
+	// 先创建 +10s 的 timer1，后创建 +1s 的 timer2
+	timer1 := c.NewTimer(10 * time.Second)
+	timer2 := c.NewTimer(1 * time.Second)
+
+	// 将两个 timer 的 channel 指向同一个 channel 以确切检验触发先后顺序
+	sharedCh := make(chan time.Time, 2)
+	timer1.(*manualTimer).ch = sharedCh
+	timer2.(*manualTimer).ch = sharedCh
+
+	// 一次性推进 10s，使两个 timer 同时到期
+	c.Advance(10 * time.Second)
+
+	// timer2 (deadline: +1s) 应当先于 timer1 (deadline: +10s) 触发
+	select {
+	case first := <-sharedCh:
+		if want := start.Add(1 * time.Second); !first.Equal(want) {
+			t.Fatalf("first fired timer = %v, want %v (timer2)", first, want)
+		}
+	default:
+		t.Fatal("expected first timer to fire")
+	}
+
+	select {
+	case second := <-sharedCh:
+		if want := start.Add(10 * time.Second); !second.Equal(want) {
+			t.Fatalf("second fired timer = %v, want %v (timer1)", second, want)
+		}
+	default:
+		t.Fatal("expected second timer to fire")
+	}
+}

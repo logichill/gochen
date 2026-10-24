@@ -36,6 +36,9 @@ func RunTxLifecycle(ctx context.Context, runner ITxLifecycleRunner, fn func(txCt
 		if committed {
 			return
 		}
+		// 回滚路径：先清空未执行的提交后回调。owner=true 封存整个事务，
+		// owner=false 只撤销本内层作用域注册的回调（失败在下方显式处理）。
+		contextx.ResetAfterCommit(txScope.Context())
 		_ = runner.Rollback(txScope)
 	}()
 
@@ -52,6 +55,10 @@ func RunTxLifecycle(ctx context.Context, runner ITxLifecycleRunner, fn func(txCt
 	}
 
 	if err := fn(txCtx); err != nil {
+		// 业务 fn 失败：本作用域注册的回调必须全部作废（owner=false 只回退
+		// 内层新增部分，owner=true 封存整个事务），否则外层捕获错误继续提交时，
+		// 已回滚逻辑的回调仍会被执行。
+		contextx.ResetAfterCommit(txCtx)
 		return err
 	}
 	if err := runner.Commit(txScope); err != nil {

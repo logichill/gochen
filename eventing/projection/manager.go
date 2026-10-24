@@ -1,6 +1,7 @@
 package projection
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -136,6 +137,63 @@ func (pm *ProjectionManager[ID]) hasCheckpointStore() bool {
 	pm.mutex.RLock()
 	defer pm.mutex.RUnlock()
 	return pm.checkpointStore != nil
+}
+
+func (pm *ProjectionManager[ID]) hasEventStore() bool {
+	if pm == nil {
+		return false
+	}
+	pm.mutex.RLock()
+	defer pm.mutex.RUnlock()
+	return pm.eventStore != nil
+}
+
+// hasRealGap 判断在线事件与投影游标之间是否存在**该投影真正关心**的缺口。
+//
+// 全局位置跨事件类型递增：投影只订阅部分类型时，位置差几乎总不为 1，
+// 直接用 pos > cursor.Position+1 判定会把「别的类型的事件」误当成空洞，
+// 导致每次在线事件都触发一轮伪追赶（重放退化）。这里改为向事件存储查询
+// 游标之后、当前事件位置之前是否存在**本投影支持类型**的未处理事件：
+//   - 存在 → 真实空洞，需要追赶；
+//   - 不存在 → 位置差由其它类型事件造成，无需追赶。
+//
+// 返回值 (realGap, confirmed)：
+//   - realGap=true 且 confirmed=true：存储查询成功并确认存在未处理的
+//     本类型事件（真实空洞）。调用方必须立即追赶，不得被节流窗口抑制——
+//     抑制会让在线游标单调越进未处理区间，空洞事件被永久埋没。
+//   - realGap=true 且 confirmed=false：探测本身失败或存储未暴露位置，
+//     无法判定（保守视为存在缺口）。调用方对此类缺口保留节流窗口，
+//     避免存储异常时每个在线事件都发起一轮注定失败的追赶。
+//   - realGap=false（此时 confirmed 恒为 true）：确认无缺口。
+func (pm *ProjectionManager[ID]) hasRealGap(ctx context.Context, rt *projectionRuntime[ID], cursor *Checkpoint, targetPosition int64) (realGap bool, confirmed bool) {
+	if pm == nil || rt == nil || rt.projection == nil || cursor == nil || targetPosition <= 0 {
+		return false, true
+	}
+	pm.mutex.RLock()
+	eventStore := pm.eventStore
+	pm.mutex.RUnlock()
+	if eventStore == nil {
+		return false, true
+	}
+	stream, err := eventStore.StreamEvents(ctx, &store.StreamOptions{
+		After: cursor.LastEventID,
+		Types: rt.projection.SupportedEventTypes(),
+		Limit: 1,
+	})
+	if err != nil {
+		// 探测失败（如存储瞬断）：无法判定，保守认为存在缺口但未确认。
+		return true, false
+	}
+	if stream == nil || len(stream.Events) == 0 {
+		return false, true
+	}
+	// 取游标之后第一条支持类型事件：若其位置早于当前在线事件，说明中间
+	// 确实有未处理的本类型事件（真实空洞）。
+	if pos := stream.Events[0].GetGlobalPosition(); pos > 0 {
+		return pos < targetPosition, true
+	}
+	// 存储未暴露位置：无法判定，保守认为存在缺口但未确认。
+	return true, false
 }
 
 func (pm *ProjectionManager[ID]) runtime(name string) (*projectionRuntime[ID], bool) {

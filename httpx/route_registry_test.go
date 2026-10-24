@@ -64,3 +64,42 @@ func hasConflict(conflicts []RouteConflict, method, path string, count int) bool
 	}
 	return false
 }
+
+// P2-045/P2-075 回归：routeRegistryServer 必须可解包，暴露底层服务器能力。
+func TestRouteRegistryServer_UnwrapExposesInnerServer(t *testing.T) {
+	inner := &noopServer{}
+	srv := WithRouteRegistry(inner)
+
+	unwrappable, ok := srv.(IUnwrappableServer)
+	if !ok {
+		t.Fatalf("expected routeRegistryServer to implement IUnwrappableServer, got %T", srv)
+	}
+	if got := unwrappable.Unwrap(); got != IServer(inner) {
+		t.Fatalf("Unwrap returned %T, want inner noopServer", got)
+	}
+	if got := UnwrapServer(srv); got != IServer(inner) {
+		t.Fatalf("UnwrapServer returned %T, want inner noopServer", got)
+	}
+}
+
+// 循环解包：多层包装应返回最内层服务器。
+func TestUnwrapServer_UnwrapsMultipleLayers(t *testing.T) {
+	inner := &noopServer{}
+	first := WithRouteRegistry(inner)
+	second := WithRouteRegistry(first)
+
+	if got := UnwrapServer(second); got != IServer(inner) {
+		t.Fatalf("UnwrapServer returned %T, want innermost noopServer", got)
+	}
+}
+
+// 非包装服务器解包返回自身；nil 返回 nil。
+func TestUnwrapServer_NonWrappingAndNil(t *testing.T) {
+	plain := &noopServer{}
+	if got := UnwrapServer(plain); got != IServer(plain) {
+		t.Fatalf("UnwrapServer(plain) returned %T, want same server", got)
+	}
+	if got := UnwrapServer(nil); got != nil {
+		t.Fatalf("UnwrapServer(nil) = %v, want nil", got)
+	}
+}

@@ -3,6 +3,7 @@ package saga
 import (
 	"context"
 	"reflect"
+	"time"
 
 	"gochen/clock"
 	"gochen/errors"
@@ -14,6 +15,11 @@ import (
 	"gochen/process/task"
 )
 
+// DefaultSagaCompensationTimeout 补偿执行的默认超时上限。
+// 补偿上下文与父 ctx 解绑后必须自带期限，防止回滚无限期执行使 saga
+// 永久停留在 compensating。
+const DefaultSagaCompensationTimeout = 5 * time.Minute
+
 // SagaOrchestrator 定义SagaOrchestrator。
 type SagaOrchestrator struct {
 	commandExecutor  command.ICommandExecutor
@@ -24,6 +30,8 @@ type SagaOrchestrator struct {
 	clock            clock.IClock
 	eventIDGenerator gen.IGenerator[string]
 	supervisor       *task.TaskSupervisor
+	// compensationTimeout 补偿执行的专用超时上限；非正值时回退到默认值。
+	compensationTimeout time.Duration
 }
 
 // NewSagaOrchestrator 创建SagaOrchestrator。
@@ -50,12 +58,13 @@ func NewSagaOrchestrator(
 		stateStore = nil
 	}
 	o := &SagaOrchestrator{
-		commandExecutor:  commandExecutor,
-		eventBus:         eventBus,
-		stateStore:       stateStore,
-		clock:            clock.NewRealClock(),
-		eventIDGenerator: eventIDGenerator,
-		logger:           logging.WithComponent(logger, "saga.orchestrator"),
+		commandExecutor:     commandExecutor,
+		eventBus:            eventBus,
+		stateStore:          stateStore,
+		clock:               clock.NewRealClock(),
+		eventIDGenerator:    eventIDGenerator,
+		logger:              logging.WithComponent(logger, "saga.orchestrator"),
+		compensationTimeout: DefaultSagaCompensationTimeout,
 	}
 	o.supervisor = task.NewTaskSupervisorWithLogger("process.saga.orchestrator", o.logger)
 	return o, nil
@@ -83,6 +92,25 @@ func (o *SagaOrchestrator) WithLockProvider(provider lock.ILockProvider) *SagaOr
 		o.lock = provider
 	}
 	return o
+}
+
+// WithCompensationTimeout 设置补偿执行的专用超时上限。
+// 仅接受正值；非正值忽略并保留当前值。补偿上下文与父 ctx 解绑后，
+// 该上限是补偿无限期执行的唯一兜底。
+func (o *SagaOrchestrator) WithCompensationTimeout(timeout time.Duration) *SagaOrchestrator {
+	if o == nil || timeout <= 0 {
+		return o
+	}
+	o.compensationTimeout = timeout
+	return o
+}
+
+// effectiveCompensationTimeout 返回补偿执行的超时上限。
+func (o *SagaOrchestrator) effectiveCompensationTimeout() time.Duration {
+	if o.compensationTimeout > 0 {
+		return o.compensationTimeout
+	}
+	return DefaultSagaCompensationTimeout
 }
 
 // WithClock 注入 Saga 使用的时钟（测试或需要可控时间的场景）。

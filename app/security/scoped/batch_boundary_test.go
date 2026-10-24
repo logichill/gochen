@@ -30,10 +30,22 @@ type batchProbeCounter struct {
 func (c *batchProbeCounter) reset() { *c = batchProbeCounter{} }
 
 // singleBoundaryRepo 只提供单条边界探针，代表"没有批量解析能力"的仓储。
+//
+// 这里必须显式声明仓储探针接口而不是嵌 *MemoryRepository，原因有二：
+//  1. MemoryRepository 自身已实现批量探针 ResolveResourcesByID，嵌具体类型会把
+//     该方法提升进本类型的方法集，让装饰器误判"仓储支持批量解析"，逐条降级
+//     路径永远走不到；
+//  2. 探针接口（HasScopeDeclaration/ResourceKind/ValidateWriteConstraintSupport）
+//     也一并本类型自持，与仓储内部状态解耦，语义上就是"本仓储自证能力"。
 type singleBoundaryRepo struct {
-	*testkit.MemoryRepository[*order, int64]
+	domcrud.IRepository[*order, int64]
+	domcrud.IBatchOperations[*order, int64]
 	counter *batchProbeCounter
 }
+
+func (r *singleBoundaryRepo) HasScopeDeclaration() bool             { return true }
+func (r *singleBoundaryRepo) ResourceKind() string                  { return "order" }
+func (r *singleBoundaryRepo) ValidateWriteConstraintSupport() error { return nil }
 
 func (r *singleBoundaryRepo) ResolveResourceByID(_ context.Context, id int64) (authscoped.Resource, error) {
 	r.counter.singleCalls++
@@ -72,12 +84,14 @@ func boundaryResourceOf(id int64) authscoped.Resource {
 }
 
 func newSingleBoundaryRepo(counter *batchProbeCounter) *singleBoundaryRepo {
+	mem := testkit.NewMemoryRepository[*order, int64](
+		testkit.NewInt64Sequence(1),
+		testkit.WithMemoryScope[*order, int64]("order"),
+	)
 	return &singleBoundaryRepo{
-		MemoryRepository: testkit.NewMemoryRepository[*order, int64](
-			testkit.NewInt64Sequence(1),
-			testkit.WithMemoryScope[*order, int64]("order"),
-		),
-		counter: counter,
+		IRepository:      mem,
+		IBatchOperations: mem,
+		counter:          counter,
 	}
 }
 

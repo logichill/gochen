@@ -314,3 +314,22 @@ func TestRegistryBeginIgnoresClosedInflightCall(t *testing.T) {
 		t.Fatalf("expected one active inflight call, got %d", reg.Len())
 	}
 }
+
+func TestRegistryBeginFailsFastOnCanceledContextEvenWithInflight(t *testing.T) {
+	reg := NewRegistry[string, string]()
+	_, owner, err := reg.Begin(context.Background(), "key")
+	if err != nil || !owner {
+		t.Fatalf("begin owner: owner=%v err=%v", owner, err)
+	}
+
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	call, isOwner, err := reg.Begin(canceledCtx, "key")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got call=%v isOwner=%v err=%v", call, isOwner, err)
+	}
+	if call != nil || isOwner {
+		t.Fatalf("expected nil call and false owner for canceled context, got call=%v isOwner=%v", call, isOwner)
+	}
+}

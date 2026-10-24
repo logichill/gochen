@@ -52,6 +52,15 @@ func WithTxSession(ctx context.Context, session IOrmSession, owned bool) (contex
 		if err != nil {
 			return nil, err
 		}
+		// 会话复用时会重复注入同一个分发器，而 WithTxLifecycle 只在首次
+		// 绑定 lifecycle 时记录水位线；此处补齐，保证嵌套内层回滚能按
+		// 水位线截断分发器中的内层回调（保留外层回调）。
+		if marker, ok := dispatcher.(contextx.IAfterCommitMarkableDispatcher); ok {
+			ctx, err = contextx.WithAfterCommitMark(ctx, marker.MarkAfterCommit())
+			if err != nil {
+				return nil, err
+			}
+		}
 	}
 	return ctx, nil
 }

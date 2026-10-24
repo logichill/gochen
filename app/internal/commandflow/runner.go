@@ -2,6 +2,7 @@ package commandflow
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"gochen/errors"
@@ -70,17 +71,34 @@ func Run[T any](ctx context.Context, plan Plan[T]) (Result[T], error) {
 	}
 
 	startedAt := time.Now()
-	finalErr := retry.DoWithInfo(ctx, func(attemptCtx context.Context, attempt int) error {
-		state, err := plan.Attempt(attemptCtx, attempt)
-		result.State = state
-		result.Attempts = attempt
-		if plan.AfterAttempt != nil {
-			plan.AfterAttempt(attemptCtx, attempt, state, err)
-		}
-		return err
-	}, cfg)
+	// panic 隔离：命令尝试中的 panic（handler/钩子/内部逻辑）会直接展开跳过
+	// 收尾钩子，违背 FinalizeHook “每次 ExecuteCommand 只调用一次”的契约。
+	// 此处捕获 panic，在完成 WrapFinalError/AfterFinalize/Trace 度量与审计
+	// 收尾后重新抛出原始 panic，保持调用方语义不变。
+	var panicked any
+	var finalErr error
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				panicked = r
+			}
+		}()
+		finalErr = retry.DoWithInfo(ctx, func(attemptCtx context.Context, attempt int) error {
+			state, err := plan.Attempt(attemptCtx, attempt)
+			result.State = state
+			result.Attempts = attempt
+			if plan.AfterAttempt != nil {
+				plan.AfterAttempt(attemptCtx, attempt, state, err)
+			}
+			return err
+		}, cfg)
+	}()
 
-	if finalErr != nil && plan.WrapFinalError != nil {
+	if panicked != nil {
+		// 合成的 panic 错误不经过 WrapFinalError（领域错误包装器不应处理 panic 值）。
+		finalErr = errors.NewCode(errors.Internal, "command execution panicked").
+			WithContext("panic", fmt.Sprint(panicked))
+	} else if finalErr != nil && plan.WrapFinalError != nil {
 		finalErr = plan.WrapFinalError(finalErr, result.Attempts)
 	}
 	result.Elapsed = time.Since(startedAt)
@@ -90,6 +108,9 @@ func Run[T any](ctx context.Context, plan Plan[T]) (Result[T], error) {
 	}
 	if plan.Trace != nil {
 		plan.Trace(ctx, result.Attempts, result.Elapsed, finalErr)
+	}
+	if panicked != nil {
+		panic(panicked)
 	}
 	return result, finalErr
 }

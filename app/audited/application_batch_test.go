@@ -24,7 +24,6 @@ func TestAuditedApplication_UpdateAll_UsesBatchAuditStoreWhenAvailable(t *testin
 	if err != nil {
 		t.Fatalf("new audited app: %v", err)
 	}
-	writer := NewBatchWriter(app)
 
 	createdAt := time.Date(2024, 2, 3, 4, 5, 6, 0, time.UTC)
 	// 预置实体
@@ -47,7 +46,7 @@ func TestAuditedApplication_UpdateAll_UsesBatchAuditStoreWhenAvailable(t *testin
 		{AuditedEntity: &audited.AuditedEntity[int64]{Entity: crud.Entity[int64]{ID: 1, Version: 1}, CreatedBy: "attacker", DeletedBy: func() *string { v := "attacker"; return &v }()}, Name: "a2", Status: "active"},
 		{AuditedEntity: &audited.AuditedEntity[int64]{Entity: crud.Entity[int64]{ID: 2, Version: 1}}, Name: "b2", Status: "active"},
 	}
-	if err := writer.UpdateAll(ctx, updates); err != nil {
+	if err := app.UpdateAll(ctx, updates); err != nil {
 		t.Fatalf("UpdateAll: %v", err)
 	}
 
@@ -92,7 +91,6 @@ func TestAuditedApplication_UpdateAll_RollsBackWhenDiffMarshalFails(t *testing.T
 	if err != nil {
 		t.Fatalf("new audited app: %v", err)
 	}
-	writer := NewBatchWriter(app)
 
 	repo.items[1] = &auditedTestEntity{
 		AuditedEntity: &audited.AuditedEntity[int64]{Entity: crud.Entity[int64]{ID: 1, Version: 1}},
@@ -112,7 +110,7 @@ func TestAuditedApplication_UpdateAll_RollsBackWhenDiffMarshalFails(t *testing.T
 		{AuditedEntity: &audited.AuditedEntity[int64]{Entity: crud.Entity[int64]{ID: 2, Version: 1}}, Name: "new-2", Snapshot: make(chan int)},
 	}
 
-	if err := writer.UpdateAll(ctx, updates); !errors.Is(err, errors.Internal) {
+	if err := app.UpdateAll(ctx, updates); !errors.Is(err, errors.Internal) {
 		t.Fatalf("expected Internal when diff marshal fails, got %v", err)
 	}
 	got, err := repo.Get(context.Background(), 1)
@@ -141,20 +139,21 @@ func TestAuditedApplication_CreateAll_AfterHookRunsBeforeCommitAndPostCommitRuns
 	var afterCreateSawCommitted bool
 	var postCommitSawCommitted bool
 	app, err := NewApplication(repo, store, &appcrud.Options[*auditedTestEntity, int64]{Hooks: &appcrud.Hooks[*auditedTestEntity, int64]{
-		AfterCreate: func(ctx context.Context, entity *auditedTestEntity) error {
-			_, afterCreateSawCommitted = repo.items[entity.GetID()]
-			return nil
-		},
-		PostCommitCreate: func(ctx context.Context, entity *auditedTestEntity) error {
-			_, postCommitSawCommitted = repo.items[entity.GetID()]
-			return nil
+		Create: appcrud.Stage[*auditedTestEntity]{
+			After: func(_ context.Context, entity *auditedTestEntity) error {
+				_, afterCreateSawCommitted = repo.items[entity.GetID()]
+				return nil
+			},
+			PostCommit: func(_ context.Context, entity *auditedTestEntity) error {
+				_, postCommitSawCommitted = repo.items[entity.GetID()]
+				return nil
+			},
 		},
 	}})
 	if err != nil {
 		t.Fatalf("new audited app: %v", err)
 	}
 
-	writer := NewBatchWriter(app)
 	ctx, err := contextx.WithOperator(context.Background(), "alice")
 	if err != nil {
 		t.Fatalf("WithOperator returned error: %v", err)
@@ -163,7 +162,7 @@ func TestAuditedApplication_CreateAll_AfterHookRunsBeforeCommitAndPostCommitRuns
 		{AuditedEntity: &audited.AuditedEntity[int64]{Entity: crud.Entity[int64]{ID: 1}}},
 		{AuditedEntity: &audited.AuditedEntity[int64]{Entity: crud.Entity[int64]{ID: 2}}},
 	}
-	if err := writer.CreateAll(ctx, entities); err != nil {
+	if err := app.CreateAll(ctx, entities); err != nil {
 		t.Fatalf("CreateAll: %v", err)
 	}
 	if afterCreateSawCommitted {
@@ -180,19 +179,18 @@ func TestAuditedApplication_CreateAll_RollsBackWhenAfterCreateFails(t *testing.T
 
 	var afterCalls int
 	app, err := NewApplication(repo, store, &appcrud.Options[*auditedTestEntity, int64]{Hooks: &appcrud.Hooks[*auditedTestEntity, int64]{
-		AfterCreate: func(ctx context.Context, entity *auditedTestEntity) error {
+		Create: appcrud.Stage[*auditedTestEntity]{After: func(_ context.Context, entity *auditedTestEntity) error {
 			afterCalls++
 			if entity.GetID() == 2 {
 				return errors.NewCode(errors.Internal, "after create failed")
 			}
 			return nil
-		},
+		}},
 	}})
 	if err != nil {
 		t.Fatalf("new audited app: %v", err)
 	}
 
-	writer := NewBatchWriter(app)
 	ctx, err := contextx.WithOperator(context.Background(), "alice")
 	if err != nil {
 		t.Fatalf("WithOperator returned error: %v", err)
@@ -201,7 +199,7 @@ func TestAuditedApplication_CreateAll_RollsBackWhenAfterCreateFails(t *testing.T
 		{AuditedEntity: &audited.AuditedEntity[int64]{Entity: crud.Entity[int64]{ID: 1}}},
 		{AuditedEntity: &audited.AuditedEntity[int64]{Entity: crud.Entity[int64]{ID: 2}}},
 	}
-	if err := writer.CreateAll(ctx, entities); err == nil {
+	if err := app.CreateAll(ctx, entities); err == nil {
 		t.Fatalf("expected CreateAll to fail when after hook fails")
 	}
 	if afterCalls != 2 {
@@ -226,7 +224,6 @@ func TestAuditedApplication_CreateAll_RollsBackWhenSnapshotMarshalFails(t *testi
 		t.Fatalf("new audited app: %v", err)
 	}
 
-	writer := NewBatchWriter(app)
 	ctx, err := contextx.WithOperator(context.Background(), "alice")
 	if err != nil {
 		t.Fatalf("WithOperator returned error: %v", err)
@@ -235,7 +232,7 @@ func TestAuditedApplication_CreateAll_RollsBackWhenSnapshotMarshalFails(t *testi
 		{AuditedEntity: &audited.AuditedEntity[int64]{Entity: crud.Entity[int64]{ID: 1}}},
 		{AuditedEntity: &audited.AuditedEntity[int64]{Entity: crud.Entity[int64]{ID: 2}}, Snapshot: make(chan int)},
 	}
-	if err := writer.CreateAll(ctx, entities); !errors.Is(err, errors.Internal) {
+	if err := app.CreateAll(ctx, entities); !errors.Is(err, errors.Internal) {
 		t.Fatalf("expected Internal when snapshot marshal fails, got %v", err)
 	}
 	if _, err := repo.Get(context.Background(), 1); !errors.Is(err, errors.NotFound) {
@@ -256,7 +253,6 @@ func TestAuditedApplication_UpdateAll_PrefetchBeforeSnapshots_UsesListByIds(t *t
 	if err != nil {
 		t.Fatalf("new audited app: %v", err)
 	}
-	writer := NewBatchWriter(app)
 
 	repo.items[1] = &auditedTestEntity{
 		AuditedEntity: &audited.AuditedEntity[int64]{Entity: crud.Entity[int64]{ID: 1, Version: 1}},
@@ -277,7 +273,7 @@ func TestAuditedApplication_UpdateAll_PrefetchBeforeSnapshots_UsesListByIds(t *t
 		{AuditedEntity: &audited.AuditedEntity[int64]{Entity: crud.Entity[int64]{ID: 1, Version: 1}}, Name: "new", Status: "active"},
 		{AuditedEntity: &audited.AuditedEntity[int64]{Entity: crud.Entity[int64]{ID: 2, Version: 1}}, Name: "new", Status: "active"},
 	}
-	if err := writer.UpdateAll(ctx, updates); err != nil {
+	if err := app.UpdateAll(ctx, updates); err != nil {
 		t.Fatalf("UpdateAll: %v", err)
 	}
 	if repo.getCalls != 0 {
@@ -298,7 +294,6 @@ func TestAuditedApplication_UpdateAll_PrefetchBeforeSnapshots_ChunksListByIds(t 
 	if err != nil {
 		t.Fatalf("new audited app: %v", err)
 	}
-	writer := NewBatchWriter(app)
 
 	n := updateAllBeforeSnapshotChunkSize + 1
 	for i := 0; i < n; i++ {
@@ -324,7 +319,7 @@ func TestAuditedApplication_UpdateAll_PrefetchBeforeSnapshots_ChunksListByIds(t 
 	if err != nil {
 		t.Fatalf("WithOperator returned error: %v", err)
 	}
-	if err := writer.UpdateAll(ctx, updates); err != nil {
+	if err := app.UpdateAll(ctx, updates); err != nil {
 		t.Fatalf("UpdateAll: %v", err)
 	}
 	if repo.getCalls != 0 {
@@ -345,7 +340,6 @@ func TestAuditedApplication_UpdateAll_PrefetchBeforeSnapshots_FallsBackToGet(t *
 	if err != nil {
 		t.Fatalf("new audited app: %v", err)
 	}
-	writer := NewBatchWriter(app)
 
 	repo.items[1] = &auditedTestEntity{AuditedEntity: &audited.AuditedEntity[int64]{Entity: crud.Entity[int64]{ID: 1, Version: 1}}, Name: "a", Status: "p"}
 	repo.items[2] = &auditedTestEntity{AuditedEntity: &audited.AuditedEntity[int64]{Entity: crud.Entity[int64]{ID: 2, Version: 1}}, Name: "b", Status: "p"}
@@ -360,7 +354,7 @@ func TestAuditedApplication_UpdateAll_PrefetchBeforeSnapshots_FallsBackToGet(t *
 		{AuditedEntity: &audited.AuditedEntity[int64]{Entity: crud.Entity[int64]{ID: 2, Version: 1}}, Name: "b2", Status: "active"},
 		{AuditedEntity: &audited.AuditedEntity[int64]{Entity: crud.Entity[int64]{ID: 3, Version: 1}}, Name: "c2", Status: "active"},
 	}
-	if err := writer.UpdateAll(ctx, updates); err != nil {
+	if err := app.UpdateAll(ctx, updates); err != nil {
 		t.Fatalf("UpdateAll: %v", err)
 	}
 	if repo.getCalls != len(updates) {
@@ -378,7 +372,6 @@ func TestAuditedApplication_UpdateAll_PrefetchBeforeSnapshots_FillsMissingListBy
 	if err != nil {
 		t.Fatalf("new audited app: %v", err)
 	}
-	writer := NewBatchWriter(app)
 
 	repo.items[1] = &auditedTestEntity{AuditedEntity: &audited.AuditedEntity[int64]{Entity: crud.Entity[int64]{ID: 1, Version: 1}}, Name: "old-1", Status: "pending"}
 	repo.items[2] = &auditedTestEntity{AuditedEntity: &audited.AuditedEntity[int64]{Entity: crud.Entity[int64]{ID: 2, Version: 1}}, Name: "old-2", Status: "pending"}
@@ -391,7 +384,7 @@ func TestAuditedApplication_UpdateAll_PrefetchBeforeSnapshots_FillsMissingListBy
 		{AuditedEntity: &audited.AuditedEntity[int64]{Entity: crud.Entity[int64]{ID: 1, Version: 1}}, Name: "new-1", Status: "active"},
 		{AuditedEntity: &audited.AuditedEntity[int64]{Entity: crud.Entity[int64]{ID: 2, Version: 1}}, Name: "new-2", Status: "active"},
 	}
-	if err := writer.UpdateAll(ctx, updates); err != nil {
+	if err := app.UpdateAll(ctx, updates); err != nil {
 		t.Fatalf("UpdateAll: %v", err)
 	}
 	if repo.getCalls != 1 {

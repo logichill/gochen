@@ -37,28 +37,6 @@ func (h testHandler) Handle(ctx context.Context, m messaging.IMessage) error {
 // - result：文本结果
 func (h testHandler) Type() string { return "testHandler" }
 
-// 阻塞处理器用于测试关闭超时
-type blockingHandler struct{ ch chan struct{} }
-
-// Handle 处理消息并执行业务处理逻辑。
-//
-// 参数：
-// - ctx：上下文（用于取消、超时与链路信息）
-// - m：消息数据
-//
-// 返回：
-// - err：错误信息（nil 表示成功）
-func (h blockingHandler) Handle(ctx context.Context, m messaging.IMessage) error {
-	<-h.ch
-	return nil
-}
-
-// Type 返回类型标识。
-//
-// 返回：
-// - result：文本结果
-func (h blockingHandler) Type() string { return "blockingHandler" }
-
 type signaledBlockingHandler struct {
 	started chan struct{}
 	release chan struct{}
@@ -727,7 +705,7 @@ func TestMemoryTransport_PublishClonesNilMapSliceElements(t *testing.T) {
 	}
 }
 
-func TestMemoryTransport_DispatchReusesSingleHandlerMessageClone(t *testing.T) {
+func TestMemoryTransport_DispatchIsolatesHandlers(t *testing.T) {
 	tpt := NewMemoryTransportForTest(4)
 	ctx := context.Background()
 
@@ -741,15 +719,16 @@ func TestMemoryTransport_DispatchReusesSingleHandlerMessageClone(t *testing.T) {
 	message := &messaging.Message{ID: "m1", Type: "snapshot", Payload: messaging.NewPayload(map[string]any{"value": "original"})}
 	tpt.dispatch(ctx, message)
 
+	// 第二个订阅者必须看到未被第一个 handler 污染的快照。
 	select {
 	case got := <-payloadCh:
-		require.Equal(t, "mutated-by-first-handler", got["value"])
+		require.Equal(t, "original", got["value"])
 	case <-time.After(200 * time.Millisecond):
 		t.Fatalf("timeout waiting for payload")
 	}
 	select {
 	case got := <-metadataCh:
-		require.Equal(t, "first", got)
+		require.Equal(t, "", got)
 	case <-time.After(200 * time.Millisecond):
 		t.Fatalf("timeout waiting for metadata")
 	}
@@ -1081,4 +1060,53 @@ func TestMemoryTransport_PublishPropagatesMessagePanic(t *testing.T) {
 		}
 	}()
 	_ = tpt.Publish(context.Background(), &panickingTypeMessage{Message: messaging.NewMessage("panic", messaging.KindEvent, "test", nil)})
+}
+
+// TestMemoryTransport_RestartAfterSnapshotTimeout 验证 StopWithSnapshot 超时后可以顺利重新启动（F14）。
+func TestMemoryTransport_RestartAfterSnapshotTimeout(t *testing.T) {
+	ctx := context.Background()
+	tpt := NewMemoryTransport(4, 1)
+	require.NoError(t, tpt.Start(ctx))
+
+	started := make(chan struct{})
+	blockCh := make(chan struct{})
+
+	_, err := tpt.Subscribe(ctx, "block", signaledBlockingHandler{started: started, release: blockCh})
+	require.NoError(t, err)
+	require.NoError(t, tpt.Publish(ctx, &messaging.Message{ID: "m1", Type: "block"}))
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("handler did not start")
+	}
+
+	timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	defer cancel()
+
+	pending, err := tpt.StopWithSnapshot(timeoutCtx)
+	require.Error(t, err)
+	require.Len(t, pending, 1)
+
+	// 此时传输层正在等待 worker 退出（closing=true）
+	// 启动一个 goroutine 调用 Start，并稍后释放 handler 阻塞通道
+	startDone := make(chan error, 1)
+	go func() {
+		startCtx, startCancel := context.WithTimeout(ctx, 2*time.Second)
+		defer startCancel()
+		startDone <- tpt.Start(startCtx)
+	}()
+
+	time.Sleep(20 * time.Millisecond)
+	close(blockCh) // 解除 worker 阻塞，后台回收完成
+
+	select {
+	case err := <-startDone:
+		require.NoError(t, err, "Start after StopWithSnapshot timeout should succeed once workers exit")
+	case <-time.After(time.Second):
+		t.Fatal("Start timed out waiting for closing to complete")
+	}
+
+	// 验证重启后可以正常发布和停止
+	t.Cleanup(func() { _ = tpt.Stop(ctx) })
+	require.NoError(t, tpt.Publish(ctx, &messaging.Message{ID: "m2", Type: "none"}))
 }

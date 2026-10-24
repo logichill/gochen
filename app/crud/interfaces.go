@@ -44,6 +44,17 @@ type IConfigProvider interface {
 	Config() *ServiceConfig
 }
 
+// ICapabilities 报告应用层对底层仓储可选能力的探测结果。
+// 安全装饰器和传输适配器共享此探测接口，供装配与路由注册期 fail-fast，不直接暴露底层仓储。
+type ICapabilities interface {
+	// HasQueryCapability 报告是否具备列表与计数查询能力（IQueryRepository 或 IQueryableRepository）。
+	HasQueryCapability() bool
+	// HasQueryableCapability 报告是否具备通用条件/排序/字段投影查询能力（IQueryableRepository）。
+	HasQueryableCapability() bool
+	// HasBatchCapability 报告是否具备批量写能力（IBatchOperations 或 ITransactional）。
+	HasBatchCapability() bool
+}
+
 // IApplication 只包含 CRUD 用例；配置与基础设施不属于业务调用接口。
 type IApplication[T domain.IEntity[ID], ID comparable] interface {
 	IReader[T, ID]

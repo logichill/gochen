@@ -15,5 +15,6 @@
 //   - 本包表达协议，并提供可选的 QuerySchema/DecodeFilters 用于前置字段合法性判断与基础类型解码。
 //   - FilterBuilder/DecodeAdapterFilters 面向 URL/CLI 字符串适配层；repository 主路径会拒绝空 in/not_in 列表，
 //     避免把”无候选值”静默解释成全量或无条件查询；
-//   - DecodeAdapterFilters 拒绝 gt/gte/lt/lte 操作符（无 schema 时无法做类型感知的范围比较）；需要范围查询请配置 QuerySchema。
+//   - DecodeAdapterFilters 拒绝 gt/gte/lt/lte 操作符（无 schema 时无法做类型感知的范围比较）；
+//     需要范围查询请配置 QuerySchema 并改用 FilterBuilder.ApplyWithSchema。
 package query

@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"context"
-	"sort"
 	"sync"
 	"time"
 
@@ -51,56 +50,6 @@ type AggregateLockMiddleware struct {
 
 	// clock 用于 lastUsed/idle/eviction 的时间来源（便于测试稳定控制）。
 	clock clock.IClock
-}
-
-// lockEntry 锁条目，包含锁和最后使用时间。
-type lockEntry struct {
-	mutex    *sync.Mutex
-	lastUsed time.Time
-	// active 表示当前正在使用或等待该锁的 goroutine 数。
-	// 只有 active==0 的锁才允许被清理/淘汰，避免出现同一聚合对应多把锁的并发破坏。
-	active int
-}
-
-type typeLockEntry struct {
-	mutex    *sync.Mutex
-	lastUsed time.Time
-	active   int
-}
-
-// aggregateLockHandle 聚合锁句柄。
-//
-// 用于在不暴露内部计数的前提下，安全地在 Unlock 时回收 active 计数。
-type aggregateLockHandle struct {
-	aggregateID string
-	entry       *lockEntry
-	middleware  *AggregateLockMiddleware
-}
-
-// Lock 提供middleware能力。
-func (h *aggregateLockHandle) Lock() {
-	h.entry.mutex.Lock()
-}
-
-// Unlock 提供middleware能力。
-func (h *aggregateLockHandle) Unlock() {
-	h.entry.mutex.Unlock()
-	h.middleware.releaseAggregateLock(h.aggregateID)
-}
-
-type typeLockHandle struct {
-	aggregateType string
-	entry         *typeLockEntry
-	middleware    *AggregateLockMiddleware
-}
-
-func (h *typeLockHandle) Lock() {
-	h.entry.mutex.Lock()
-}
-
-func (h *typeLockHandle) Unlock() {
-	h.entry.mutex.Unlock()
-	h.middleware.releaseTypeLock(h.aggregateType)
 }
 
 // AggregateLockConfig 聚合锁配置。
@@ -154,6 +103,10 @@ func NewAggregateLockMiddleware(config *AggregateLockConfig) *AggregateLockMiddl
 
 // Handle 仅对命令消息加锁，确保同一聚合上的命令不会并发执行。
 func (m *AggregateLockMiddleware) Handle(ctx context.Context, message messaging.IMessage, next messaging.HandlerFunc) error {
+	// 防空保护：nil 或 typed-nil 消息直接调用 GetKind 会 panic
+	if messaging.IsNilMessage(message) {
+		return next(ctx, message)
+	}
 	// 只处理命令消息
 	if message.GetKind() != messaging.KindCommand {
 		return next(ctx, message)
@@ -180,7 +133,9 @@ func (m *AggregateLockMiddleware) Handle(ctx context.Context, message messaging.
 			return next(ctx, message)
 		}
 		handle := m.getOrCreateTypeLockHandle(aggregateType)
-		handle.Lock()
+		if err := handle.Lock(ctx); err != nil {
+			return err
+		}
 		defer handle.Unlock()
 	default: // "aggregate" 或其他值均视为按聚合 ID 加锁
 		if aggregateID == "" {
@@ -188,7 +143,9 @@ func (m *AggregateLockMiddleware) Handle(ctx context.Context, message messaging.
 			return next(ctx, message)
 		}
 		handle := m.getOrCreateAggregateLockHandle(aggregateID)
-		handle.Lock()
+		if err := handle.Lock(ctx); err != nil {
+			return err
+		}
 		defer handle.Unlock()
 	}
 
@@ -198,209 +155,4 @@ func (m *AggregateLockMiddleware) Handle(ctx context.Context, message messaging.
 
 func (m *AggregateLockMiddleware) Name() string {
 	return "CommandAggregateLock"
-}
-
-func (m *AggregateLockMiddleware) GetLockCount() int {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
-
-	switch m.lockGranularity {
-	case "type":
-		return len(m.locksByType)
-	default:
-		return len(m.locksByAggregate)
-	}
-}
-
-// Clear 清空所有已缓存的空闲锁映射，主要用于测试重置。
-func (m *AggregateLockMiddleware) Clear() {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-
-	for id, entry := range m.locksByAggregate {
-		if entry == nil || entry.active <= 0 {
-			delete(m.locksByAggregate, id)
-		}
-	}
-	for aggregateType, entry := range m.locksByType {
-		if entry == nil || entry.active <= 0 {
-			delete(m.locksByType, aggregateType)
-		}
-	}
-}
-
-// Prune 清理当前所有空闲（无活跃持有者）的锁映射，等价于 Clear。
-// 正在被持有的锁（active > 0）不会被移除，以保证并发安全。
-func (m *AggregateLockMiddleware) Prune() {
-	m.Clear()
-}
-
-// PruneExpired 删除所有空闲超过阈值的锁。
-func (m *AggregateLockMiddleware) PruneExpired() int {
-	if m.lockIdleTimeout <= 0 {
-		return 0
-	}
-
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-
-	return m.cleanupExpiredLocks()
-}
-
-// cleanupExpiredLocks 删除空闲超时且当前无活跃持有者的锁；调用者需持有写锁。
-func (m *AggregateLockMiddleware) cleanupExpiredLocks() int {
-	if m.lockIdleTimeout <= 0 {
-		return 0
-	}
-
-	now := m.clock.Now()
-	cutoff := now.Add(-m.lockIdleTimeout)
-	pruned := 0
-
-	for id, entry := range m.locksByAggregate {
-		if entry.active == 0 && entry.lastUsed.Before(cutoff) {
-			delete(m.locksByAggregate, id)
-			pruned++
-		}
-	}
-	for aggregateType, entry := range m.locksByType {
-		if entry.active == 0 && entry.lastUsed.Before(cutoff) {
-			delete(m.locksByType, aggregateType)
-			pruned++
-		}
-	}
-
-	return pruned
-}
-
-// evictOldestLocks 淘汰最久未使用的锁，使锁数量回到上限之内。
-func (m *AggregateLockMiddleware) evictOldestLocks() {
-	if m.maxAggregateLocks <= 0 {
-		return
-	}
-
-	// 如果未超过限制，无需淘汰
-	if len(m.locksByAggregate) < m.maxAggregateLocks {
-		return
-	}
-
-	type item struct {
-		id string
-		t  time.Time
-	}
-	items := make([]item, 0, len(m.locksByAggregate))
-	for id, entry := range m.locksByAggregate {
-		items = append(items, item{id: id, t: entry.lastUsed})
-	}
-
-	sort.Slice(items, func(i, j int) bool {
-		return items[i].t.Before(items[j].t)
-	})
-
-	overflow := len(m.locksByAggregate) - m.maxAggregateLocks + 1
-	if overflow <= 0 {
-		return
-	}
-
-	for i := 0; i < overflow && i < len(items); i++ {
-		id := items[i].id
-		entry := m.locksByAggregate[id]
-		if entry == nil {
-			delete(m.locksByAggregate, id)
-			continue
-		}
-		if entry.active != 0 {
-			continue
-		}
-		delete(m.locksByAggregate, id)
-	}
-}
-
-// getOrCreateAggregateLockHandle 获取或创建聚合锁句柄。
-func (m *AggregateLockMiddleware) getOrCreateAggregateLockHandle(aggregateID string) *aggregateLockHandle {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-
-	// 先清理过期锁
-	m.cleanupExpiredLocks()
-
-	// 超过限制则淘汰最旧锁
-	if m.maxAggregateLocks > 0 && len(m.locksByAggregate) >= m.maxAggregateLocks {
-		m.evictOldestLocks()
-	}
-
-	entry, exists := m.locksByAggregate[aggregateID]
-	if !exists {
-		now := m.clock.Now()
-		entry = &lockEntry{
-			mutex:    &sync.Mutex{},
-			lastUsed: now,
-			active:   0,
-		}
-		m.locksByAggregate[aggregateID] = entry
-	}
-
-	// 增加活跃计数并更新时间戳
-	entry.active++
-	entry.lastUsed = m.clock.Now()
-
-	return &aggregateLockHandle{
-		aggregateID: aggregateID,
-		entry:       entry,
-		middleware:  m,
-	}
-}
-
-// releaseAggregateLock 释放聚合锁引用计数。
-func (m *AggregateLockMiddleware) releaseAggregateLock(aggregateID string) {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-
-	entry, ok := m.locksByAggregate[aggregateID]
-	if !ok || entry == nil {
-		return
-	}
-	if entry.active > 0 {
-		entry.active--
-	}
-	entry.lastUsed = m.clock.Now()
-}
-
-// getOrCreateTypeLockHandle 获取或创建类型锁句柄。
-func (m *AggregateLockMiddleware) getOrCreateTypeLockHandle(aggregateType string) *typeLockHandle {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-
-	m.cleanupExpiredLocks()
-
-	entry, ok := m.locksByType[aggregateType]
-	if !ok {
-		entry = &typeLockEntry{
-			mutex:    &sync.Mutex{},
-			lastUsed: m.clock.Now(),
-		}
-		m.locksByType[aggregateType] = entry
-	}
-	entry.active++
-	entry.lastUsed = m.clock.Now()
-
-	return &typeLockHandle{
-		aggregateType: aggregateType,
-		entry:         entry,
-		middleware:    m,
-	}
-}
-
-func (m *AggregateLockMiddleware) releaseTypeLock(aggregateType string) {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-
-	entry, ok := m.locksByType[aggregateType]
-	if !ok || entry == nil {
-		return
-	}
-	if entry.active > 0 {
-		entry.active--
-	}
-	entry.lastUsed = m.clock.Now()
 }

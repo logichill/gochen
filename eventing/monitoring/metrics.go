@@ -12,11 +12,21 @@ import (
 // - 所有字段均通过原子操作更新与读取，适合在框架内部作为默认埋点落点。
 type Metrics struct {
 	// 事件存储指标
-	EventsSaved        int64 // 保存的事件总数
-	EventsLoaded       int64 // 加载的事件总数
+	//
+	// 量纲说明（错误率口径）：
+	//   - EventsSaved/EventsLoaded 按“事件条数”累加（一次批量调用 +N），
+	//     用于吞吐与平均耗时；
+	//   - EventStoreSaves/EventStoreLoads 按“调用次数”累加（一次批量调用 +1），
+	//     与 EventStoreErrors（失败调用次数）同量纲，供错误率计算使用；
+	//   - 事件存储错误率 = EventStoreErrors / (EventStoreSaves + EventStoreLoads
+	//     + EventStoreErrors)，分子分母均为调用次数。
+	EventsSaved        int64 // 成功落库的事件条数
+	EventsLoaded       int64 // 成功加载的事件条数
+	EventStoreSaves    int64 // 成功的保存调用次数（一次批量保存计 1 次）
+	EventStoreLoads    int64 // 成功的加载调用次数（一次批量加载计 1 次）
 	EventStoreDuration int64 // 事件存储总耗时（纳秒）
 	EventLoadDuration  int64 // 事件加载总耗时（纳秒）
-	EventStoreErrors   int64 // 事件存储错误数
+	EventStoreErrors   int64 // 事件存储失败调用次数（读写路径均计入）
 
 	// 快照指标
 	SnapshotsCreated int64 // 创建的快照总数
@@ -81,20 +91,38 @@ func NewMetrics() *Metrics {
 	return &Metrics{startTimeUnixNano: time.Now().UnixNano()}
 }
 
-// RecordEventSaved 累计事件保存次数与耗时。
+// RecordEventSaved 累计一次成功的事件保存调用（count 为本批事件条数）与耗时。
+// 除事件条数外同时按调用次数记账（EventStoreSaves +1），供错误率按统一的
+// “调用次数”量纲计算；条数口径保留给吞吐与平均耗时指标。
 func (m *Metrics) RecordEventSaved(count int, duration time.Duration) {
 	atomic.AddInt64(&m.EventsSaved, int64(count))
+	atomic.AddInt64(&m.EventStoreSaves, 1)
 	atomic.AddInt64(&m.EventStoreDuration, int64(duration))
 }
 
-// RecordEventLoaded 累计事件加载次数与耗时。
+// RecordEventLoaded 累计一次成功的事件加载调用（count 为本批事件条数）与耗时。
+// 调用次数记账语义同 RecordEventSaved。
 func (m *Metrics) RecordEventLoaded(count int, duration time.Duration) {
 	atomic.AddInt64(&m.EventsLoaded, int64(count))
+	atomic.AddInt64(&m.EventStoreLoads, 1)
 	atomic.AddInt64(&m.EventLoadDuration, int64(duration))
 }
 
-// RecordEventStoreError 累计事件存储错误数。
+// RecordEventStoreError 累计一次失败的事件存储调用（读写路径共用）。
 func (m *Metrics) RecordEventStoreError() { atomic.AddInt64(&m.EventStoreErrors, 1) }
+
+// EventStoreErrorRatePercent 返回事件存储操作失败率（%，按调用次数量纲）：
+// 分子 = 失败调用次数，分母 = 成功保存调用 + 成功加载调用 + 失败调用。
+func (m *Metrics) EventStoreErrorRatePercent() float64 {
+	if m == nil {
+		return 0
+	}
+	total := atomic.LoadInt64(&m.EventStoreSaves) + atomic.LoadInt64(&m.EventStoreLoads) + atomic.LoadInt64(&m.EventStoreErrors)
+	if total == 0 {
+		return 0
+	}
+	return float64(atomic.LoadInt64(&m.EventStoreErrors)) / float64(total) * 100
+}
 
 // RecordSnapshotCreated 累计快照创建次数与耗时。
 func (m *Metrics) RecordSnapshotCreated(duration time.Duration) {
@@ -163,6 +191,8 @@ func (m *Metrics) Snapshot() MetricsSnapshot {
 	return MetricsSnapshot{
 		EventsSaved:        atomic.LoadInt64(&m.EventsSaved),
 		EventsLoaded:       atomic.LoadInt64(&m.EventsLoaded),
+		EventStoreSaves:    atomic.LoadInt64(&m.EventStoreSaves),
+		EventStoreLoads:    atomic.LoadInt64(&m.EventStoreLoads),
 		EventStoreDuration: time.Duration(atomic.LoadInt64(&m.EventStoreDuration)),
 		EventLoadDuration:  time.Duration(atomic.LoadInt64(&m.EventLoadDuration)),
 		EventStoreErrors:   atomic.LoadInt64(&m.EventStoreErrors),
@@ -201,6 +231,8 @@ func (m *Metrics) Snapshot() MetricsSnapshot {
 func (m *Metrics) Reset() {
 	atomic.StoreInt64(&m.EventsSaved, 0)
 	atomic.StoreInt64(&m.EventsLoaded, 0)
+	atomic.StoreInt64(&m.EventStoreSaves, 0)
+	atomic.StoreInt64(&m.EventStoreLoads, 0)
 	atomic.StoreInt64(&m.EventStoreDuration, 0)
 	atomic.StoreInt64(&m.EventLoadDuration, 0)
 	atomic.StoreInt64(&m.EventStoreErrors, 0)

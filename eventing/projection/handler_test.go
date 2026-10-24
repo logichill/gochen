@@ -56,3 +56,40 @@ func TestProjectionEventHandler_ShouldProcessOnlyWhenRunning(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, 1, projection.processedEvents)
 }
+
+func TestProjectionEventHandler_WithoutEventStore_DoesNotSwallowEvents(t *testing.T) {
+	eventBus := &MockEventBus{}
+	reg := registry.NewRegistry()
+	require.NoError(t, reg.Register("TestEvent", func() any { return &struct{}{} }))
+	upgraders := upcast.NewUpgraderRegistry()
+	// Manager without eventStore
+	manager, err := NewProjectionManager[int64](nil, eventBus, reg, upgraders)
+	assert.NoError(t, err)
+	// Artificially attach checkpointStore to simulate configuration
+	manager.checkpointStore = NewMemoryCheckpointStore()
+
+	projection := NewMockProjection("test-projection-no-store", []string{"TestEvent"})
+	err = manager.RegisterProjection(projection)
+	assert.NoError(t, err)
+
+	rt, ok := manager.runtime(projection.Name())
+	require.True(t, ok)
+	handler := rt.handlers["TestEvent"]
+	require.NotNil(t, handler)
+
+	err = manager.StartProjection("test-projection-no-store")
+	assert.NoError(t, err)
+
+	evt := &eventing.Event[int64]{
+		Message: messaging.Message{
+			ID:        "event-no-store-1",
+			Type:      "TestEvent",
+			Timestamp: time.Now(),
+			Metadata:  messaging.NewMetadata(),
+		},
+	}
+
+	err = handler.HandleEvent(context.Background(), evt)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, projection.processedEvents)
+}

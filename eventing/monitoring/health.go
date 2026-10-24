@@ -2,8 +2,6 @@ package monitoring
 
 import (
 	"context"
-	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -166,55 +164,4 @@ func worseStatus(a, b HealthStatus) HealthStatus {
 		return b
 	}
 	return a
-}
-
-// MetricsHealthConfig 定义指标健康检查配置。
-type MetricsHealthConfig struct {
-	MaxEventStoreErrorRatePercent float64
-	MaxProjectionLag              time.Duration
-	MaxProjectionErrorRatePercent float64
-}
-
-func DefaultMetricsHealthConfig() MetricsHealthConfig {
-	return MetricsHealthConfig{
-		MaxEventStoreErrorRatePercent: 5,
-		MaxProjectionLag:              5 * time.Second,
-		MaxProjectionErrorRatePercent: 5,
-	}
-}
-
-// MetricsHealthCheck 基于内存指标快照生成一个通用健康检查函数。
-func MetricsHealthCheck(metrics *Metrics, cfg MetricsHealthConfig) (Check, error) {
-	if metrics == nil {
-		return nil, errors.NewCode(errors.InvalidInput, "metrics cannot be nil")
-	}
-
-	return func(context.Context) (HealthStatus, string, error) {
-		s := metrics.Snapshot()
-
-		var issues []string
-
-		if s.EventsSaved > 0 && cfg.MaxEventStoreErrorRatePercent > 0 {
-			rate := errorRatePercent(s.EventStoreErrors, s.EventsSaved)
-			if rate > cfg.MaxEventStoreErrorRatePercent {
-				issues = append(issues, fmt.Sprintf("event_store error_rate %.2f%% > %.2f%%", rate, cfg.MaxEventStoreErrorRatePercent))
-			}
-		}
-
-		if cfg.MaxProjectionLag > 0 && s.ProjectionLag > cfg.MaxProjectionLag {
-			issues = append(issues, fmt.Sprintf("projection lag %s > %s", s.ProjectionLag, cfg.MaxProjectionLag))
-		}
-
-		if s.ProjectionUpdates > 0 && cfg.MaxProjectionErrorRatePercent > 0 {
-			rate := errorRatePercent(s.ProjectionErrors, s.ProjectionUpdates)
-			if rate > cfg.MaxProjectionErrorRatePercent {
-				issues = append(issues, fmt.Sprintf("projection error_rate %.2f%% > %.2f%%", rate, cfg.MaxProjectionErrorRatePercent))
-			}
-		}
-
-		if len(issues) == 0 {
-			return HealthStatusHealthy, "ok", nil
-		}
-		return HealthStatusDegraded, strings.Join(issues, "; "), nil
-	}, nil
 }

@@ -710,6 +710,102 @@ func TestProjectionManager_RebuildProjection_TenantAwareProjectorPreservesCheckp
 	require.Equal(t, events[len(events)-1].ID, checkpoint.LastEventID)
 }
 
+// countingReplayRecorder 统计重放路径的指标打点次数，用于守护 P2#12
+// （16e96665）：重放事件必须恰好计一次，不得双计。
+type countingReplayRecorder struct {
+	processed   int
+	processedOK int
+	updates     int
+	updatesOK   int
+}
+
+func (r *countingReplayRecorder) RecordEventProcessed(_ time.Duration, ok bool) {
+	r.processed++
+	if ok {
+		r.processedOK++
+	}
+}
+
+func (r *countingReplayRecorder) RecordProjectionUpdate(ok bool, _ time.Duration) {
+	r.updates++
+	if ok {
+		r.updatesOK++
+	}
+}
+
+// TestProjectionManager_ReplayMetricsExactlyOnce 回归 P2#12：重放 N 个事件，
+// RecordEventProcessed/RecordProjectionUpdate 各恰好打点 N 次（修复前
+// applyEventCommon 与外层 recordReplayMetrics 双计，2 事件 4 计）。
+func TestProjectionManager_ReplayMetricsExactlyOnce(t *testing.T) {
+	ctx := context.Background()
+	eventStore := store.NewMemoryEventStore[int64]()
+	checkpointStore := NewMemoryCheckpointStore()
+
+	reg := newTestRegistry(t)
+	manager, err := NewProjectionManager[int64](eventStore, &MockEventBus{}, reg, upcast.NewUpgraderRegistry())
+	require.NoError(t, err)
+	manager, err = manager.WithCheckpointStore(checkpointStore)
+	require.NoError(t, err)
+
+	projection := NewMockProjection("replay-metrics-projection", []string{"TestEvent"})
+	require.NoError(t, manager.RegisterProjection(projection))
+
+	now := time.Now()
+	var events []eventing.IStorableEvent[int64]
+	for i := 1; i <= 3; i++ {
+		e := testutil.NewEvent[int64](1, "Agg", "TestEvent", uint64(i), map[string]any{"i": i})
+		e.Timestamp = now
+		events = append(events, e)
+	}
+	require.NoError(t, eventStore.AppendEvents(ctx, "Agg", 1, events, 0))
+
+	recorder := &countingReplayRecorder{}
+	manager.SetMetricsRecorder(recorder)
+
+	require.NoError(t, manager.ResumeFromCheckpoint(ctx, projection.Name()))
+
+	assert.Equal(t, 3, projection.processedEvents)
+	assert.Equal(t, 3, recorder.processed)
+	assert.Equal(t, 3, recorder.processedOK)
+	assert.Equal(t, 3, recorder.updates)
+	assert.Equal(t, 3, recorder.updatesOK)
+}
+
+// TestProjectionManager_ReplayMetricsFailureExactlyOnce 回归 P2#12：重放失败
+// 的那一条也必须恰好计一次失败（既不丢计，也不双计）。
+func TestProjectionManager_ReplayMetricsFailureExactlyOnce(t *testing.T) {
+	ctx := context.Background()
+	eventStore := store.NewMemoryEventStore[int64]()
+	checkpointStore := NewMemoryCheckpointStore()
+
+	reg := newTestRegistry(t)
+	manager, err := NewProjectionManager[int64](eventStore, &MockEventBus{}, reg, upcast.NewUpgraderRegistry())
+	require.NoError(t, err)
+	manager, err = manager.WithCheckpointStore(checkpointStore)
+	require.NoError(t, err)
+
+	projection := NewMockProjection("replay-metrics-fail-projection", []string{"TestEvent"})
+	projection.handleFunc = func(ctx context.Context, event eventing.IEvent) error {
+		return fmt.Errorf("fail:%s", event.GetID())
+	}
+	require.NoError(t, manager.RegisterProjection(projection))
+
+	now := time.Now()
+	e1 := testutil.NewEvent[int64](1, "Agg", "TestEvent", 1, nil)
+	e1.Timestamp = now
+	require.NoError(t, eventStore.AppendEvents(ctx, "Agg", 1, []eventing.IStorableEvent[int64]{e1}, 0))
+
+	recorder := &countingReplayRecorder{}
+	manager.SetMetricsRecorder(recorder)
+
+	require.Error(t, manager.ResumeFromCheckpoint(ctx, projection.Name()))
+
+	assert.Equal(t, 1, recorder.processed)
+	assert.Equal(t, 0, recorder.processedOK)
+	assert.Equal(t, 1, recorder.updates)
+	assert.Equal(t, 0, recorder.updatesOK)
+}
+
 // TestProjectionEventHandler_SkipsSilentlyAfterFailedUnsubscribe 回归 R2：
 // 启用 checkpoint store 后，投影卸载时若退订失败，旧 handler 仍会收到事件；
 // 此时必须静默跳过，而不是返回 Conflict 并投递死信。
@@ -750,4 +846,45 @@ func TestProjectionEventHandler_SkipsSilentlyAfterFailedUnsubscribe(t *testing.T
 	require.NoError(t, handler.HandleEvent(ctx, evt))
 	assert.Equal(t, 0, deadLetters)
 	assert.Equal(t, 0, projection.processedEvents)
+}
+
+func TestProjectionManager_RebuildProjection_RestoresRunningState(t *testing.T) {
+	ctx := context.Background()
+	eventStore := store.NewMemoryEventStore[int64]()
+	eventBus := &MockEventBus{}
+	reg := newTestRegistry(t)
+	upgraders := upcast.NewUpgraderRegistry()
+	manager, err := NewProjectionManager[int64](eventStore, eventBus, reg, upgraders)
+	require.NoError(t, err)
+
+	projection := NewMockProjection("running-rebuild-projection", []string{"TestEvent"})
+	require.NoError(t, manager.RegisterProjection(projection))
+	require.NoError(t, manager.StartProjection(projection.Name()))
+
+	status, err := manager.ProjectionStatus(projection.Name())
+	require.NoError(t, err)
+	require.Equal(t, "running", status.Status)
+
+	events := []eventing.Event[int64]{
+		*testutil.NewEvent[int64](1, "Agg", "TestEvent", 1, nil),
+	}
+	require.NoError(t, manager.RebuildProjection(ctx, projection.Name(), events))
+
+	// 重建前处于 running 态，重建完成后必须恢复为 running，且能继续接收事件
+	statusAfter, err := manager.ProjectionStatus(projection.Name())
+	require.NoError(t, err)
+	require.Equal(t, "running", statusAfter.Status)
+
+	rt, ok := manager.runtime(projection.Name())
+	require.True(t, ok)
+	handler := rt.handlers["TestEvent"]
+	require.NotNil(t, handler)
+
+	newEvent := testutil.NewEvent[int64](2, "Agg", "TestEvent", 2, nil)
+	require.NoError(t, handler.HandleEvent(ctx, newEvent))
+	require.Equal(t, 1, projection.processedEvents)
+
+	statusFinal, err := manager.ProjectionStatus(projection.Name())
+	require.NoError(t, err)
+	require.Equal(t, int64(2), statusFinal.ProcessedEvents)
 }

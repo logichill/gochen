@@ -23,7 +23,7 @@ func (o *SagaOrchestrator) Resume(ctx context.Context, saga ISaga, state *SagaSt
 			WithContext("saga_id", sagaID)
 	}
 
-	lockedCtx, release, err := o.acquireSagaLock(ctx, sagaID)
+	lockedCtx, compCtx, release, err := o.acquireSagaLock(ctx, sagaID)
 	if err != nil {
 		return err
 	}
@@ -50,7 +50,7 @@ func (o *SagaOrchestrator) Resume(ctx context.Context, saga ISaga, state *SagaSt
 	for i := state.CurrentStep; i < len(steps); i++ {
 		step := steps[i]
 
-		if err := o.executeStepWithLeaseGuard(ctx, saga, state, step, i); err != nil {
+		if err := o.executeStepWithLeaseGuard(ctx, compCtx, saga, state, step, i); err != nil {
 			return err
 		}
 		if err := o.markStepCompletedWithLeaseGuard(ctx, state, sagaID, step.Name); err != nil {

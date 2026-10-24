@@ -67,147 +67,6 @@ type Filter struct {
 	Values []string `json:"values,omitempty"` // in/not_in：多值
 }
 
-// FilterBuilder 定义过滤条件构建器。
-type FilterBuilder struct {
-	filters []Filter
-}
-
-// NewFilterBuilder 创建新的过滤条件构建器。
-func NewFilterBuilder() *FilterBuilder {
-	return &FilterBuilder{}
-}
-
-// addValue 添加值。
-func (b *FilterBuilder) addValue(field string, op FilterOp, value string) *FilterBuilder {
-	field = strings.TrimSpace(field)
-	if field == "" {
-		return b
-	}
-	b.filters = append(b.filters, Filter{
-		Field: field,
-		Op:    op,
-		Value: value,
-	})
-	return b
-}
-
-// addValues 添加值集合。
-func (b *FilterBuilder) addValues(field string, op FilterOp, values []string) *FilterBuilder {
-	field = strings.TrimSpace(field)
-	if field == "" {
-		return b
-	}
-	if len(values) == 0 {
-		return b
-	}
-	out := make([]string, 0, len(values))
-	for _, v := range values {
-		v = strings.TrimSpace(v)
-		if v == "" {
-			continue
-		}
-		out = append(out, v)
-	}
-	if len(out) == 0 {
-		return b
-	}
-	b.filters = append(b.filters, Filter{
-		Field:  field,
-		Op:     op,
-		Values: out,
-	})
-	return b
-}
-
-func (b *FilterBuilder) Eq(field string, value string) *FilterBuilder {
-	return b.addValue(field, FilterOpEq, value)
-}
-
-func (b *FilterBuilder) Ne(field string, value string) *FilterBuilder {
-	return b.addValue(field, FilterOpNe, value)
-}
-
-func (b *FilterBuilder) Like(field string, value string) *FilterBuilder {
-	return b.addValue(field, FilterOpLike, value)
-}
-
-func (b *FilterBuilder) Gt(field string, value string) *FilterBuilder {
-	return b.addValue(field, FilterOpGt, value)
-}
-
-func (b *FilterBuilder) Gte(field string, value string) *FilterBuilder {
-	return b.addValue(field, FilterOpGte, value)
-}
-
-func (b *FilterBuilder) Lt(field string, value string) *FilterBuilder {
-	return b.addValue(field, FilterOpLt, value)
-}
-
-func (b *FilterBuilder) Lte(field string, value string) *FilterBuilder {
-	return b.addValue(field, FilterOpLte, value)
-}
-
-func (b *FilterBuilder) In(field string, values ...string) *FilterBuilder {
-	if len(values) == 0 {
-		return b
-	}
-	return b.addValues(field, FilterOpIn, values)
-}
-
-func (b *FilterBuilder) NotIn(field string, values ...string) *FilterBuilder {
-	if len(values) == 0 {
-		return b
-	}
-	return b.addValues(field, FilterOpNotIn, values)
-}
-
-// IsNull 判断Null。
-func (b *FilterBuilder) IsNull(field string) *FilterBuilder {
-	field = strings.TrimSpace(field)
-	if field == "" {
-		return b
-	}
-	b.filters = append(b.filters, Filter{
-		Field: field,
-		Op:    FilterOpIsNull,
-	})
-	return b
-}
-
-func (b *FilterBuilder) NotNull(field string) *FilterBuilder {
-	field = strings.TrimSpace(field)
-	if field == "" {
-		return b
-	}
-	b.filters = append(b.filters, Filter{
-		Field: field,
-		Op:    FilterOpNotNull,
-	})
-	return b
-}
-
-func (b *FilterBuilder) Build() []Filter {
-	if len(b.filters) == 0 {
-		return nil
-	}
-	out := make([]Filter, len(b.filters))
-	copy(out, b.filters)
-	return out
-}
-
-// Apply 应用到统一查询请求。
-func (b *FilterBuilder) Apply(request *QueryRequest) error {
-	if request == nil || len(b.filters) == 0 {
-		return nil
-	}
-	decoded, err := DecodeAdapterFilters(b.Build())
-	if err != nil {
-		return err
-	}
-	request.Filters = request.Filters.Merge(decoded)
-	return nil
-}
-
 // DecodeAdapterFilters 将适配层字符串过滤条件提升为"默认 string 语义"的查询表达式集合。
 //
 // 无 QuerySchema 时无法做类型感知的范围比较，因此拒绝 gt/gte/lt/lte 操作符；
@@ -218,16 +77,25 @@ func DecodeAdapterFilters(filters []Filter) (QueryFilters, error) {
 	}
 	var out QueryFilters
 	for _, filter := range filters {
-		expr := QueryExpr{Op: filter.Op}
 		field := strings.TrimSpace(filter.Field)
 		if field == "" {
 			continue
 		}
+		// 白名单校验：非法操作符（含注入片段）直接拒绝，不流入下游仓储。
+		if !filter.Op.IsValid() {
+			return nil, errors.NewCode(errors.InvalidInput, "invalid filter operator").
+				WithContext("operator", string(filter.Op)).
+				WithContext("field", field)
+		}
+		expr := QueryExpr{Op: filter.Op}
 		switch filter.Op {
 		case FilterOpGt, FilterOpGte, FilterOpLt, FilterOpLte:
 			return nil, errors.NewCode(errors.InvalidInput, "range operator requires schema for type-aware decoding").
 				WithContext("operator", string(filter.Op)).
 				WithContext("field", field)
+		case FilterOpIsNull, FilterOpNotNull:
+			// 一元操作符不携带值，清空 value 避免下游误用。
+			expr.Value = QueryValue{Type: FieldTypeString}
 		case FilterOpIn, FilterOpNotIn:
 			expr.Values = make([]QueryValue, 0, len(filter.Values))
 			for _, value := range filter.Values {

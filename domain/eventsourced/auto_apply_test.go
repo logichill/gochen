@@ -96,22 +96,22 @@ func newBadDuplicateHandlerAggregate(id int64) *badDuplicateHandlerAggregate {
 	}
 }
 
-// Handle1 e：实体对象。
+// ApplyFirst e：实体对象。
 //
 // 参数：
-func (a *badDuplicateHandlerAggregate) Handle1(e *userCreatedV1) {}
+func (a *badDuplicateHandlerAggregate) ApplyFirst(e *userCreatedV1) {}
 
-// Handle2 e：实体对象。
+// ApplySecond e：实体对象。
 //
 // 参数：
-func (a *badDuplicateHandlerAggregate) Handle2(e *userCreatedV1) {}
+func (a *badDuplicateHandlerAggregate) ApplySecond(e *userCreatedV1) {}
 
 type badNonErrorHandlerAggregate struct {
 	*EventSourcedAggregate[int64]
 }
 
-// OnUserCreated 单非 error 返回值（bool）不是合法的事件处理器签名。
-func (a *badNonErrorHandlerAggregate) OnUserCreated(e *userCreatedV1) bool { return false }
+// ApplyUserCreated 单非 error 返回值（bool）不是合法的事件处理器签名。
+func (a *badNonErrorHandlerAggregate) ApplyUserCreated(e *userCreatedV1) bool { return false }
 
 // TestEventSourcedAggregate_AutoApply_SameEventTypeDifferentGoTypes 验证 EventSourcedAggregate AutoApply SameEventTypeDifferentGoTypes。
 func TestEventSourcedAggregate_AutoApply_SameEventTypeDifferentGoTypes(t *testing.T) {
@@ -215,7 +215,9 @@ func (valueHandlerError) Error() string { return "handler failed" }
 
 type concreteErrorHandler struct{}
 
-func (*concreteErrorHandler) OnCreated(*userCreatedV1) valueHandlerError { return valueHandlerError{} }
+func (*concreteErrorHandler) ApplyCreated(*userCreatedV1) valueHandlerError {
+	return valueHandlerError{}
+}
 func TestMetadataRejectsConcreteErrorReturn(t *testing.T) {
 	_, err := ScanMetadata(&concreteErrorHandler{}, "ConcreteError")
 	if !errors.Is(err, errors.InvalidInput) {

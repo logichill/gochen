@@ -354,3 +354,57 @@ func newMemoryOutboxRepository(t *testing.T) *MemoryOutboxRepository[int64] {
 	require.NoError(t, err)
 	return repo
 }
+
+func TestMemoryOutboxRepositoryExcludesEntriesExceedingMaxRetries(t *testing.T) {
+	repo := newMemoryOutboxRepository(t)
+	repo.WithMaxRetries(3)
+
+	evt := newTestEvent(1, 1, "event-max-retries", nil)
+	require.NoError(t, repo.SaveWithEvents(context.Background(), 1, []eventing.Event[int64]{evt}))
+
+	repo.mu.Lock()
+	repo.entries[0].Status = OutboxStatusPending
+	repo.entries[0].RetryCount = 3
+	repo.mu.Unlock()
+
+	claimed, err := repo.ClaimPendingEntries(context.Background(), 1)
+	require.NoError(t, err)
+	require.Empty(t, claimed)
+}
+
+// TestMemoryOutboxRepositoryKeepsExhaustedFailedEntriesClaimable 锁定超限逃生语义：
+// DLQ 迁移失败或未配置 DLQ 时，超限的 Failed（到期）与租约到期的 Processing 条目
+// 必须仍可领取，否则会永久冻结在 outbox 中（既不在可重试管道内、也不在 DLQ 内）。
+func TestMemoryOutboxRepositoryKeepsExhaustedFailedEntriesClaimable(t *testing.T) {
+	repo := newMemoryOutboxRepository(t)
+	repo.WithMaxRetries(3)
+
+	evt := newTestEvent(1, 1, "event-exhausted-failed", nil)
+	require.NoError(t, repo.SaveWithEvents(context.Background(), 1, []eventing.Event[int64]{evt}))
+
+	expiredLease := timePointer(time.Now().Add(-time.Hour))
+
+	// Failed 超限且重试到期：可领取（允许重试 DLQ 迁移）。
+	repo.mu.Lock()
+	repo.entries[0].Status = OutboxStatusFailed
+	repo.entries[0].RetryCount = 3
+	repo.entries[0].NextRetryAt = timePointer(time.Now().Add(-time.Hour))
+	repo.mu.Unlock()
+
+	claimed, err := repo.ClaimPendingEntries(context.Background(), 1)
+	require.NoError(t, err)
+	require.Len(t, claimed, 1)
+	require.Equal(t, "event-exhausted-failed", claimed[0].EventID)
+
+	// Processing 超限且租约到期：可领取（逃逸 claim 崩溃后的恢复路径）。
+	repo.mu.Lock()
+	repo.entries[0].Status = OutboxStatusProcessing
+	repo.entries[0].RetryCount = 3
+	repo.entries[0].LeaseUntil = expiredLease
+	repo.mu.Unlock()
+
+	claimed, err = repo.ClaimPendingEntries(context.Background(), 1)
+	require.NoError(t, err)
+	require.Len(t, claimed, 1)
+	require.Equal(t, "event-exhausted-failed", claimed[0].EventID)
+}

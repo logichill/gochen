@@ -423,7 +423,7 @@ type unhandledEvent struct{}
 
 func (e *unhandledEvent) EventType() string { return "Unhandled" }
 
-func (a *autoAgg) WhenHandled(e *handledEvent) { a.Applied++ }
+func (a *autoAgg) ApplyHandled(e *handledEvent) { a.Applied++ }
 
 func TestDomainEventStore_RestoreAggregate_FailFastOnMissingHandler(t *testing.T) {
 	t.Parallel()

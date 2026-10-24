@@ -12,6 +12,10 @@ const aggregateTagName = "aggregate"
 // eventSourcedAggregateBaseName 用于匹配嵌入字段的 Go 类型名。
 const eventSourcedAggregateBaseName = "EventSourcedAggregate"
 
+// packagePath 是本包（gochen/domain/eventsourced）的导入路径，
+// 用于识别嵌入字段是否真的来自本包的 EventSourcedAggregate 类型。
+const packagePath = "gochen/domain/eventsourced"
+
 // ResolveAggregateType 从聚合 struct 的嵌入字段 tag 中提取 aggregateType。
 //
 // 扫描规则：
@@ -26,13 +30,12 @@ func ResolveAggregateType(self any) (string, error) {
 	}
 
 	t := reflect.TypeOf(self)
-	if t.Kind() == reflect.Ptr {
-		t = t.Elem()
-	}
-	if t.Kind() != reflect.Struct {
-		return "", errors.NewCode(errors.InvalidInput, "aggregate sample must be a struct or pointer to struct").
+	if t.Kind() != reflect.Ptr || t.Elem().Kind() != reflect.Struct {
+		return "", errors.NewCode(errors.InvalidInput, "aggregate sample must be a pointer to struct").
+			WithContext("target_type", t.String()).
 			WithContext("actual_kind", t.Kind().String())
 	}
+	t = t.Elem()
 
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
@@ -61,9 +64,19 @@ func isEventSourcedAggregateField(ft reflect.Type) bool {
 		return false
 	}
 
-	// 泛型实例化后的 Go 类型名形如 "EventSourcedAggregate[int64]"
+	// 泛型实例化后的 Go 类型名形如 "EventSourcedAggregate[int64]"。
+	// 仅比名字不够：其它包可能定义同名结构体，误判后会把无关字段当成
+	// 聚合嵌入字段并读取其 tag。这里额外校验包路径属于本包，
+	// 避免同名结构体被误识别。
 	name := ft.Name()
-	return name == eventSourcedAggregateBaseName || strings.HasPrefix(name, eventSourcedAggregateBaseName+"[")
+	if name != eventSourcedAggregateBaseName && !strings.HasPrefix(name, eventSourcedAggregateBaseName+"[") {
+		return false
+	}
+	pkgPath := ft.PkgPath()
+	if pkgPath != "" && pkgPath != packagePath {
+		return false
+	}
+	return true
 }
 
 // InitAggregateFromTag 创建并绑定 metadata 的事件溯源聚合根（aggregateType 从 struct tag 自动提取）。
@@ -107,14 +120,11 @@ func InitAggregateFromTag[T comparable](registry *MetadataRegistry, self any, id
 //	    Balance int
 //	}
 //
-//	func NewAccount(registry *eventsourced.MetadataRegistry, id int64, balance int) (*Account, error) {
-//	    a, err := eventsourced.New[Account, int64](registry, id)
-//	    if err != nil {
-//	        return nil, err
-//	    }
-//	    a.Balance = balance
-//	    return a, nil
+//	func NewAccount(registry *eventsourced.MetadataRegistry, id int64) (*Account, error) {
+//	    return eventsourced.New[Account, int64](registry, id)
 //	}
+//
+// 业务初始状态通过命令产生事件并应用，不能在回放工厂中直接赋业务字段。
 //
 //	// 空工厂函数（用于仓储回放）可简化为一行：
 //	func NewEmptyAccount(registry *eventsourced.MetadataRegistry, id int64) (*Account, error) {

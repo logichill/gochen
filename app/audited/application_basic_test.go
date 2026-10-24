@@ -72,13 +72,15 @@ func TestAuditedApplication_Create_PostCommitHookRunsAfterOuterCommit(t *testing
 	var afterCreateSawCommitted bool
 	var postCommitSawCommitted bool
 	app, err := NewApplication(repo, store, &appcrud.Options[*auditedTestEntity, int64]{Hooks: &appcrud.Hooks[*auditedTestEntity, int64]{
-		AfterCreate: func(ctx context.Context, entity *auditedTestEntity) error {
-			_, afterCreateSawCommitted = repo.items[entity.GetID()]
-			return nil
-		},
-		PostCommitCreate: func(ctx context.Context, entity *auditedTestEntity) error {
-			_, postCommitSawCommitted = repo.items[entity.GetID()]
-			return nil
+		Create: appcrud.Stage[*auditedTestEntity]{
+			After: func(_ context.Context, entity *auditedTestEntity) error {
+				_, afterCreateSawCommitted = repo.items[entity.GetID()]
+				return nil
+			},
+			PostCommit: func(_ context.Context, entity *auditedTestEntity) error {
+				_, postCommitSawCommitted = repo.items[entity.GetID()]
+				return nil
+			},
 		},
 	}})
 	if err != nil {
@@ -106,9 +108,9 @@ func TestAuditedApplication_Create_RollsBackWhenAfterCreateFails(t *testing.T) {
 	store := &recordingAuditStore{}
 
 	app, err := NewApplication(repo, store, &appcrud.Options[*auditedTestEntity, int64]{Hooks: &appcrud.Hooks[*auditedTestEntity, int64]{
-		AfterCreate: func(ctx context.Context, entity *auditedTestEntity) error {
+		Create: appcrud.Stage[*auditedTestEntity]{After: func(context.Context, *auditedTestEntity) error {
 			return errors.NewCode(errors.Internal, "after create failed")
-		},
+		}},
 	}})
 	if err != nil {
 		t.Fatalf("new audited app: %v", err)
@@ -154,6 +156,41 @@ func TestAuditedApplication_Create_RollsBackWhenSnapshotMarshalFails(t *testing.
 	}
 	if len(store.records) != 0 {
 		t.Fatalf("expected no audit record after snapshot marshal failure, got %d", len(store.records))
+	}
+}
+
+func TestAuditedApplication_Update_RejectsStaleVersion(t *testing.T) {
+	repo := newMemAuditedRepo()
+	store := &recordingAuditStore{}
+	app, err := NewApplication(repo, store, nil)
+	if err != nil {
+		t.Fatalf("new audited app: %v", err)
+	}
+	repo.items[1] = &auditedTestEntity{
+		AuditedEntity: &audited.AuditedEntity[int64]{Entity: crud.Entity[int64]{ID: 1, Version: 1}},
+		Name:          "original",
+	}
+
+	ctx, err := contextx.WithOperator(context.Background(), "alice")
+	if err != nil {
+		t.Fatalf("WithOperator returned error: %v", err)
+	}
+	stale := &auditedTestEntity{
+		AuditedEntity: &audited.AuditedEntity[int64]{Entity: crud.Entity[int64]{ID: 1, Version: 2}},
+		Name:          "stale",
+	}
+	err = app.Update(ctx, stale)
+	if !errors.Is(err, errors.Conflict) {
+		t.Fatalf("expected Conflict for stale version, got %v", err)
+	}
+	if repo.updates != 0 {
+		t.Fatalf("expected repository Update not to run, got %d calls", repo.updates)
+	}
+	if len(store.records) != 0 {
+		t.Fatalf("expected no audit record after version conflict, got %d", len(store.records))
+	}
+	if got := repo.items[1]; got == nil || got.Name != "original" || got.GetVersion() != 1 {
+		t.Fatalf("stored entity changed after version conflict: %+v", got)
 	}
 }
 

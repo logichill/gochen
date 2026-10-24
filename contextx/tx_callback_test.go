@@ -186,3 +186,157 @@ func TestAppendAfterCommit_ConcurrentAppendAndRun(t *testing.T) {
 	}
 	_ = calls.Load()
 }
+
+// 嵌套内层回滚只应撤销内层注册的回调，外层在进入内层前注册的回调必须保留。
+func TestResetAfterCommitInnerRollbackKeepsOuterCallbacks(t *testing.T) {
+	ctx := context.Background()
+
+	outerCtx, err := WithTxLifecycle(ctx, true)
+	if err != nil {
+		t.Fatalf("outer lifecycle: %v", err)
+	}
+	outerCalled := false
+	if err := AppendAfterCommit(outerCtx, func(context.Context) error {
+		outerCalled = true
+		return nil
+	}); err != nil {
+		t.Fatalf("append outer callback: %v", err)
+	}
+
+	innerCtx, err := WithTxLifecycle(outerCtx, false)
+	if err != nil {
+		t.Fatalf("inner lifecycle: %v", err)
+	}
+	innerCalled := false
+	if err := AppendAfterCommit(innerCtx, func(context.Context) error {
+		innerCalled = true
+		return nil
+	}); err != nil {
+		t.Fatalf("append inner callback: %v", err)
+	}
+
+	// 内层回滚：只撤销内层回调。
+	ResetAfterCommit(innerCtx)
+
+	// 外层提交：只应执行外层回调。
+	if err := RunAfterCommit(outerCtx); err != nil {
+		t.Fatalf("outer run after commit: %v", err)
+	}
+	if innerCalled {
+		t.Fatal("inner callback must be revoked by inner rollback")
+	}
+	if !outerCalled {
+		t.Fatal("outer callback must survive inner rollback")
+	}
+}
+
+// 最外层回滚（owned=true）封存整个事务，后续追加必须失败。
+func TestResetAfterCommitOuterRollbackSealsState(t *testing.T) {
+	ctx := context.Background()
+	outerCtx, err := WithTxLifecycle(ctx, true)
+	if err != nil {
+		t.Fatalf("outer lifecycle: %v", err)
+	}
+	if err := AppendAfterCommit(outerCtx, func(context.Context) error { return nil }); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	ResetAfterCommit(outerCtx)
+	if err := AppendAfterCommit(outerCtx, func(context.Context) error { return nil }); err == nil {
+		t.Fatal("append after outer rollback must fail")
+	}
+	if err := RunAfterCommit(outerCtx); err != nil {
+		t.Fatalf("run after commit on sealed state: %v", err)
+	}
+}
+
+// 注入分发器时，嵌套内层回滚必须按水位线截断分发器中的内层回调。
+func TestResetAfterCommitInnerRollbackTruncatesDispatcher(t *testing.T) {
+	dispatcher := NewAfterCommitDispatcher()
+	base := context.Background()
+	base, err := WithAfterCommitDispatcher(base, dispatcher)
+	if err != nil {
+		t.Fatalf("with dispatcher: %v", err)
+	}
+
+	outerCtx, err := WithTxLifecycle(base, true)
+	if err != nil {
+		t.Fatalf("outer lifecycle: %v", err)
+	}
+	outerCalled := false
+	if err := AppendAfterCommit(outerCtx, func(context.Context) error {
+		outerCalled = true
+		return nil
+	}); err != nil {
+		t.Fatalf("append outer: %v", err)
+	}
+
+	innerCtx, err := WithTxLifecycle(outerCtx, false)
+	if err != nil {
+		t.Fatalf("inner lifecycle: %v", err)
+	}
+	innerCalled := false
+	if err := AppendAfterCommit(innerCtx, func(context.Context) error {
+		innerCalled = true
+		return nil
+	}); err != nil {
+		t.Fatalf("append inner: %v", err)
+	}
+
+	ResetAfterCommit(innerCtx)
+
+	if err := RunAfterCommit(outerCtx); err != nil {
+		t.Fatalf("run after commit: %v", err)
+	}
+	if innerCalled {
+		t.Fatal("inner callback in dispatcher must be truncated by inner rollback")
+	}
+	if !outerCalled {
+		t.Fatal("outer callback in dispatcher must survive inner rollback")
+	}
+}
+
+// 最外层回滚时，注入的分发器必须被整体 Reset，且可复用。
+func TestResetAfterCommitOuterRollbackResetsDispatcher(t *testing.T) {
+	dispatcher := NewAfterCommitDispatcher()
+	base := context.Background()
+	base, err := WithAfterCommitDispatcher(base, dispatcher)
+	if err != nil {
+		t.Fatalf("with dispatcher: %v", err)
+	}
+	outerCtx, err := WithTxLifecycle(base, true)
+	if err != nil {
+		t.Fatalf("outer lifecycle: %v", err)
+	}
+	called := false
+	if err := AppendAfterCommit(outerCtx, func(context.Context) error {
+		called = true
+		return nil
+	}); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	ResetAfterCommit(outerCtx)
+	if err := RunAfterCommit(outerCtx); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if called {
+		t.Fatal("callback must not run after outer rollback")
+	}
+	// 分发器复位后可再次注册并执行。
+	if err := dispatcher.AppendAfterCommit(context.Background(), func(context.Context) error { return nil }); err != nil {
+		t.Fatalf("dispatcher must be reusable after reset: %v", err)
+	}
+}
+
+func TestWithAfterCommitMark_RejectsNilContextAndRecordsMark(t *testing.T) {
+	if got, err := WithAfterCommitMark(nil, 3); err == nil || got != nil {
+		t.Fatalf("expected nil context error, got ctx=%v err=%v", got, err)
+	}
+
+	ctx, err := WithAfterCommitMark(context.Background(), 5)
+	if err != nil {
+		t.Fatalf("WithAfterCommitMark returned error: %v", err)
+	}
+	if mark, ok := dispatcherMarkFromContext(ctx); !ok || mark != 5 {
+		t.Fatalf("expected mark=5, got mark=%d ok=%v", mark, ok)
+	}
+}

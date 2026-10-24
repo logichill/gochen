@@ -383,3 +383,118 @@ func TestNew_FieldsSettableAfterConstruction(t *testing.T) {
 		t.Fatalf("expected ID 100, got %v", a.GetID())
 	}
 }
+
+// ─── P3-040 边界：自定义主键类型与泛型外层结构体 ─────────────────────
+
+// customID 自定义 comparable 主键类型。
+type customID string
+
+// customIDAggregate 使用自定义 comparable 主键类型。
+type customIDAggregate struct {
+	*EventSourcedAggregate[customID] `aggregate:"custom_id_agg"`
+	Name                             string
+}
+
+func (a *customIDAggregate) ApplyTagTest(e *tagTestEvent) {
+	a.Name = "custom-applied"
+}
+
+// genericWrapper 泛型外层结构体，内嵌聚合。
+type genericWrapper[ID comparable] struct {
+	*EventSourcedAggregate[ID] `aggregate:"generic_wrapper"`
+	Label                      string
+}
+
+func (w *genericWrapper[ID]) ApplyTagTest(e *tagTestEvent) {
+	w.Label = "generic-applied"
+}
+
+// TestResolveAggregateType_CustomID 验证自定义主键类型的 tag 解析。
+func TestResolveAggregateType_CustomID(t *testing.T) {
+	got, err := ResolveAggregateType(&customIDAggregate{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "custom_id_agg" {
+		t.Fatalf("expected 'custom_id_agg', got %q", got)
+	}
+}
+
+// TestNew_CustomID 验证自定义主键类型聚合的装配与事件应用。
+func TestNew_CustomID(t *testing.T) {
+	registry := NewMetadataRegistry()
+	a, err := New[customIDAggregate, customID](registry, customID("cust-1"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if a.GetAggregateType() != "custom_id_agg" {
+		t.Fatalf("expected 'custom_id_agg', got %q", a.GetAggregateType())
+	}
+	if a.GetID() != customID("cust-1") {
+		t.Fatalf("expected ID 'cust-1', got %v", a.GetID())
+	}
+	if err := a.ApplyAndRecord(&tagTestEvent{Amount: 1}); err != nil {
+		t.Fatalf("ApplyAndRecord failed: %v", err)
+	}
+	if a.Name != "custom-applied" {
+		t.Fatalf("expected Name='custom-applied', got %q", a.Name)
+	}
+}
+
+// TestNew_GenericWrapperStringID 验证泛型外层结构体 + string 主键的装配。
+func TestNew_GenericWrapperStringID(t *testing.T) {
+	registry := NewMetadataRegistry()
+	w, err := New[genericWrapper[string], string](registry, "gw-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if w.GetAggregateType() != "generic_wrapper" {
+		t.Fatalf("expected 'generic_wrapper', got %q", w.GetAggregateType())
+	}
+	if w.GetID() != "gw-1" {
+		t.Fatalf("expected ID 'gw-1', got %v", w.GetID())
+	}
+	if err := w.ApplyAndRecord(&tagTestEvent{Amount: 1}); err != nil {
+		t.Fatalf("ApplyAndRecord failed: %v", err)
+	}
+	if w.Label != "generic-applied" {
+		t.Fatalf("expected Label='generic-applied', got %q", w.Label)
+	}
+}
+
+// TestNew_GenericWrapperInt64 验证泛型外层结构体 + int64 主键的装配。
+func TestNew_GenericWrapperInt64(t *testing.T) {
+	registry := NewMetadataRegistry()
+	w, err := New[genericWrapper[int64], int64](registry, 7)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if w.GetID() != 7 {
+		t.Fatalf("expected ID 7, got %v", w.GetID())
+	}
+}
+
+// TestMetadataRegistry_RegisterSet_SampleValidation 验证 RegisterSet 与 ValidateMetadataSet
+// 在 Sample 为 nil 时的校验行为：全零值跳过，指定了 AggregateType 的非空项报错拒绝。
+func TestMetadataRegistry_RegisterSet_SampleValidation(t *testing.T) {
+	registry := NewMetadataRegistry()
+
+	// 全零占位跳过
+	if err := registry.RegisterSet(MetadataRegistration{}); err != nil {
+		t.Fatalf("expected all-zero registration to be skipped, got: %v", err)
+	}
+	if err := ValidateMetadataSet(MetadataRegistration{}); err != nil {
+		t.Fatalf("expected all-zero registration in ValidateMetadataSet to be skipped, got: %v", err)
+	}
+
+	// 指定了 AggregateType 但 Sample 为 nil：报错拒绝
+	err := registry.RegisterSet(MetadataRegistration{AggregateType: "User"})
+	if err == nil {
+		t.Fatalf("expected error when AggregateType is provided but Sample is nil")
+	}
+
+	err = ValidateMetadataSet(MetadataRegistration{AggregateType: "User"})
+	if err == nil {
+		t.Fatalf("expected ValidateMetadataSet to fail when AggregateType is provided but Sample is nil")
+	}
+}

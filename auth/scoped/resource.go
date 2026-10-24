@@ -3,7 +3,6 @@ package scoped
 import (
 	"reflect"
 	"strings"
-	"sync"
 
 	"gochen/errors"
 )
@@ -89,55 +88,6 @@ func (r typedResourceResolver[T]) TargetType() reflect.Type { return reflect.Typ
 // TypedResourceResolver 为指定目标类型创建带类型元数据的资源解析器。
 func TypedResourceResolver[T any](resolver func(target T) (Resource, bool)) ITypedResourceResolver {
 	return typedResourceResolver[T]{resolver: resolver}
-}
-
-// ResourceRegistry 按注册顺序组合多个资源解析器。
-//
-// Register 可在启动期完成后继续调用（例如运行期动态注册），
-// 因此内部有锁：注册与解析并发时不需要调用方自己加锁。
-type ResourceRegistry struct {
-	mu        sync.RWMutex
-	resolvers []IResourceResolver
-}
-
-// NewResourceRegistry 创建按注册顺序尝试解析器的注册表。
-func NewResourceRegistry(resolvers ...IResourceResolver) *ResourceRegistry {
-	registry := &ResourceRegistry{}
-	for _, resolver := range resolvers {
-		registry.Register(resolver)
-	}
-	return registry
-}
-
-// Register 追加一个资源解析器。
-//
-// 注册表不做冲突裁决；多个解析器命中同一目标时先注册者优先。
-func (r *ResourceRegistry) Register(resolver IResourceResolver) {
-	if r == nil || resolver == nil {
-		return
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.resolvers = append(r.resolvers, resolver)
-}
-
-// Resolve 依次尝试各解析器，返回首个成功解析出的资源。
-func (r *ResourceRegistry) Resolve(target any) (Resource, bool) {
-	if r == nil {
-		return Resource{}, false
-	}
-	r.mu.RLock()
-	resolvers := r.resolvers
-	r.mu.RUnlock()
-	for _, resolver := range resolvers {
-		if resolver == nil {
-			continue
-		}
-		if resource, ok := resolver.Resolve(target); ok {
-			return resource.Normalize(), true
-		}
-	}
-	return Resource{}, false
 }
 
 // ResolveResources 批量把目标对象转换成规范化资源描述。

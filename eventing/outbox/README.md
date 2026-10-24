@@ -47,6 +47,22 @@ Publisher 的 `Start(ctx)` / `Stop(ctx)` 可并发且幂等。启动前 Stop 不
 
 串行 Publisher 会串行化后台循环与手动 PublishPending。ParallelPublisher 需要先 Start 才能 PublishPending；按 aggregate type + ID 分片有助于同聚合顺序，但不提供跨实例或全局严格顺序保证。
 
+## 批量标记与文件组织
+
+批量标记直接配置在 `ParallelPublisher` 上，在 `Start` 前调用并检查错误：
+
+```go
+if err := publisher.SetBatchOperations(batchRepository); err != nil {
+    return err
+}
+```
+
+`batchRepository` 实现 `IBatchRepository`。原 `BatchPublisher` / `NewBatchPublisher` 已删除：该包装只保存配置，没有将配置接入内层发布器。调用方应直接持有 `*ParallelPublisher`，通过上述入口启用批量标记。
+
+`publisher_serial.go` 保留串行发布器的定义、构造和依赖配置；`publisher_serial_lifecycle.go`、`publisher_serial_publish.go`、`publisher_serial_cleanup.go` 分别承载运行循环、发布与清理。串行与并行发布器共享 `publisher_core.go` 和 `publisher_core_mark.go` 中的发布及结果回写逻辑。
+
+内存仓储按 `memory_repository_save.go`、`memory_repository_claim.go`、`memory_repository_state.go` 组织保存、领取续租及结果更新，继续共用同一仓储对象和锁。
+
 ## Schema、监控与示例
 
 表与索引要求集中见[数据库 Schema 与迁移](../../docs/guides/db-schema-migration-guide.md#outbox)。SQL DDL 的可执行示例位于 `gochen-runtime` 仓库 `examples/infra/outbox/sql/internal/schema/schema.go`。

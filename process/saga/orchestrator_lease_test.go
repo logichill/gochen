@@ -18,7 +18,7 @@ import (
 
 func TestWatchSagaLeaseLostStopsWhenLeaseLostChannelDoesNotClose(t *testing.T) {
 	lease := newMockLease()
-	_, stopWatching := watchSagaLeaseLost(context.Background(), task.NewTaskSupervisor("process.saga.lease_watch.test"), lease)
+	_, _, stopWatching := watchSagaLeaseLost(context.Background(), task.NewTaskSupervisor("process.saga.lease_watch.test"), lease)
 
 	stopped := make(chan struct{})
 	go func() {
@@ -59,7 +59,7 @@ func TestSagaOrchestrator_AcquireSagaLockPreservesErrorCode(t *testing.T) {
 	orchestrator := newTestSagaOrchestrator(t, cmdExecutor, &mockSagaEventBus{}, nil).
 		WithLockProvider(failingSagaLockProvider{err: errors.NewCode(errors.Database, "db down")})
 
-	_, _, err := orchestrator.acquireSagaLock(context.Background(), "saga-db")
+	_, _, _, err := orchestrator.acquireSagaLock(context.Background(), "saga-db")
 	require.Error(t, err)
 	require.Truef(t, errors.Is(err, errors.Database), "expected database code, got %v", err)
 }

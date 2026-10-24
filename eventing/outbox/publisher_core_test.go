@@ -57,6 +57,9 @@ func (r *recoverMarkFailureRepo) DeletePublished(ctx context.Context, olderThan 
 	return nil
 }
 
+// TestOutboxPublisherCoreRecoverPublishedMarkFailureMarksEntryFailed 锁定有界重试语义：
+// 发布成功但 MarkAsPublished 持续失败时，必须把 mark 失败计入 RetryCount（MarkAsFailed），
+// 否则条目以 PROCESSING 滞留到租约到期被无界重复投递且永不进入终态。
 func TestOutboxPublisherCoreRecoverPublishedMarkFailureMarksEntryFailed(t *testing.T) {
 	repo := &recoverMarkFailureRepo{}
 	core := outboxPublisherCore[int64]{repo: repo, cfg: OutboxConfig{RetryInterval: time.Second}}
@@ -69,43 +72,62 @@ func TestOutboxPublisherCoreRecoverPublishedMarkFailureMarksEntryFailed(t *testi
 	}, markErr)
 
 	require.Error(t, err)
+	require.ErrorIs(t, err, markErr)
 	require.Equal(t, int64(42), repo.failedEntryID)
 	require.Equal(t, "claim-42", repo.claimToken)
-	require.Equal(t, markErr.Error(), repo.errorMsg)
+	// errorMsg 必须注明事件已投递，避免 DLQ/排障时误判为未消费。
+	require.Contains(t, repo.errorMsg, "event was published")
 	require.False(t, repo.nextRetryAt.IsZero())
 }
 
-func TestOutboxPublisherCoreRecoverPublishedMarkFailureIgnoresCallerCancellation(t *testing.T) {
+// TestOutboxPublisherCoreRecoverPublishedMarkFailureMovesToDLQWhenRetriesExhausted 锁定
+// DLQ 逃生：mark 失败计入 RetryCount 后达到上限时，必须迁入死信队列而不是无限重投。
+func TestOutboxPublisherCoreRecoverPublishedMarkFailureMovesToDLQWhenRetriesExhausted(t *testing.T) {
 	repo := &recoverMarkFailureRepo{}
-	core := outboxPublisherCore[int64]{repo: repo, cfg: OutboxConfig{RetryInterval: time.Second}}
-	markErr := errors.New("mark published failed")
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	err := core.recoverPublishedMarkFailure(ctx, OutboxEntry[int64]{
-		ID:         42,
-		RetryCount: 1,
-		ClaimToken: "claim-42",
-	}, markErr)
-
-	require.Error(t, err)
-	require.NoError(t, repo.ctxErr)
-	require.Equal(t, int64(42), repo.failedEntryID)
-	require.Equal(t, "claim-42", repo.claimToken)
-}
-
-func TestOutboxPublisherCoreRecoverPublishedMarkFailureReturnsRecoveryError(t *testing.T) {
-	repo := &recoverMarkFailureRepo{markFailedErr: errors.New("db down")}
-	core := outboxPublisherCore[int64]{repo: repo, cfg: OutboxConfig{RetryInterval: time.Second}}
+	dlq := &MockDLQRepository{}
+	core := outboxPublisherCore[int64]{
+		repo: repo,
+		cfg:  OutboxConfig{RetryInterval: time.Second, MaxRetries: 3},
+		dlq:  dlq,
+	}
 	markErr := errors.New("mark published failed")
 
 	err := core.recoverPublishedMarkFailure(context.Background(), OutboxEntry[int64]{
 		ID:         42,
+		RetryCount: 2, // mark 失败计入后 RetryCount+1 == MaxRetries
 		ClaimToken: "claim-42",
 	}, markErr)
 
 	require.Error(t, err)
-	require.ErrorIs(t, err, repo.markFailedErr)
+	require.ErrorIs(t, err, markErr)
+	require.Equal(t, int64(42), repo.failedEntryID)
+	moved := dlq.MovedEntries()
+	require.Len(t, moved, 1)
+	require.Equal(t, int64(42), moved[0].ID)
+	require.Equal(t, 3, moved[0].RetryCount)
+	require.Contains(t, moved[0].LastError, "event was published")
+}
+
+// TestOutboxPublisherCoreRecoverPublishedMarkFailureNoMaxRetries_NeverMovesToDLQ 锁定
+// NoMaxRetries(-1) 语义：mark 失败仍计入 RetryCount，但永不迁入死信队列（无限重试）。
+func TestOutboxPublisherCoreRecoverPublishedMarkFailureNoMaxRetries_NeverMovesToDLQ(t *testing.T) {
+	repo := &recoverMarkFailureRepo{}
+	dlq := &MockDLQRepository{}
+	core := outboxPublisherCore[int64]{
+		repo: repo,
+		cfg:  OutboxConfig{RetryInterval: time.Second, MaxRetries: NoMaxRetries},
+		dlq:  dlq,
+	}
+
+	err := core.recoverPublishedMarkFailure(context.Background(), OutboxEntry[int64]{
+		ID:         42,
+		RetryCount: 99,
+		ClaimToken: "claim-42",
+	}, errors.New("mark published failed"))
+
+	require.Error(t, err)
+	require.Equal(t, int64(42), repo.failedEntryID)
+	require.Empty(t, dlq.MovedEntries())
 }
 
 func TestOutboxPublisherCoreRecoverPublishedMarkFailureNoopsWithoutError(t *testing.T) {

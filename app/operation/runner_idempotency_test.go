@@ -7,6 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"gochen/contextx"
 	gerrors "gochen/errors"
@@ -705,4 +706,64 @@ func TestRunner_IdempotencySingleflight_WaiterOnOwnerErrorAndPanic(t *testing.T)
 			t.Fatalf("waiter expected panic error with original value, got %v", waiterErr)
 		}
 	})
+}
+
+func TestRunnerExecuteTracked_LeaderCancellationDoesNotAbortFollower(t *testing.T) {
+	store := NewMemoryStore()
+	runner := NewRunner(&RunnerOptions{Store: store})
+	spec := &Spec{
+		Type:           "task.run",
+		Mode:           ModeTracked,
+		IdempotencyKey: "test-leader-cancel",
+	}
+
+	leaderStarted := make(chan struct{})
+	leaderRelease := make(chan struct{})
+	leaderCtx, cancelLeader := context.WithCancel(context.Background())
+
+	followerDone := make(chan struct{})
+	var followerResult *Result
+	var followerErr error
+
+	// 1. Leader starts and pauses
+	go func() {
+		_, _ = runner.Execute(leaderCtx, spec, func(ctx context.Context) (*Result, error) {
+			close(leaderStarted)
+			<-leaderRelease
+			return nil, ctx.Err()
+		})
+	}()
+
+	<-leaderStarted
+
+	// 2. Follower with active context joins the same idempotency key
+	go func() {
+		defer close(followerDone)
+		followerResult, followerErr = runner.Execute(context.Background(), spec, func(ctx context.Context) (*Result, error) {
+			return &Result{
+				Result: map[string]any{"source": "follower_completed"},
+			}, nil
+		})
+	}()
+
+	// Give follower a moment to register as waiter
+	time.Sleep(20 * time.Millisecond)
+
+	// 3. Cancel Leader's context and release leader
+	cancelLeader()
+	close(leaderRelease)
+
+	// 4. Wait for follower
+	select {
+	case <-followerDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("follower timed out")
+	}
+
+	if followerErr != nil {
+		t.Fatalf("follower failed with error: %v, expected successful recovery", followerErr)
+	}
+	if followerResult == nil || followerResult.Result["source"] != "follower_completed" {
+		t.Fatalf("unexpected follower result: %+v", followerResult)
+	}
 }

@@ -171,12 +171,26 @@ func (s *ContextAwareEventStore[ID]) StreamAggregate(ctx context.Context, opts *
 }
 
 // HasAggregate 检查聚合是否存在，并保持与租户过滤一致。
+//
+// 无租户上下文时直接透传给底层存储；带租户时用 Limit=1 的 StreamAggregate
+// 逐页探测，避免为判断存在性而全量加载事件流造成内存峰值/OOM。
 func (s *ContextAwareEventStore[ID]) HasAggregate(ctx context.Context, aggregateType string, aggregateID ID) (bool, error) {
-	events, err := s.LoadEvents(ctx, aggregateType, aggregateID, 0)
+	if s == nil || s.inner == nil {
+		return false, errors.NewCode(errors.InvalidInput, "inner event store cannot be nil")
+	}
+	if contextx.TenantID(ctx) == "" {
+		return s.inner.HasAggregate(ctx, aggregateType, aggregateID)
+	}
+	res, err := s.StreamAggregate(ctx, &store.AggregateStreamOptions[ID]{
+		AggregateType: aggregateType,
+		AggregateID:   aggregateID,
+		AfterVersion:  0,
+		Limit:         1,
+	})
 	if err != nil {
 		return false, err
 	}
-	return len(events) > 0, nil
+	return res != nil && len(res.Events) > 0, nil
 }
 
 func (s *ContextAwareEventStore[ID]) GetAggregateVersion(ctx context.Context, aggregateType string, aggregateID ID) (uint64, error) {

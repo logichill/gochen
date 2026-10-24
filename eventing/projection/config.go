@@ -38,6 +38,15 @@ type ProjectionConfig struct {
 	// 默认值 100，设置为 0 表示禁用事件数维度策略。
 	// 注意：如果两个维度都设置为 0，则每个事件都会保存检查点（不推荐）。
 	CheckpointSaveCount int
+
+	// CatchUpMinInterval 两次空洞追赶之间的最小间隔。
+	//
+	// 多事件类型系统中，相邻两个被订阅事件的全局位置差通常大于 1（中间穿插了
+	// 未订阅类型），位置空洞检测几乎每个事件都会命中；若每次都执行追赶重放，
+	// 在线处理会退化为对存储无休止的范围扫描。该间隔限制追赶频率，一次完整追赶
+	// 即可从持久 checkpoint 重放全部可达历史，因此抑制重复追赶不会损失恢复能力。
+	// 默认值 30s；设置为负数表示回落到“每个事件都尝试追赶”的历史行为。
+	CatchUpMinInterval time.Duration
 }
 
 func projectionLogger() logging.ILogger {
@@ -69,6 +78,7 @@ func normalizeProjectionConfig(config *ProjectionConfig) *ProjectionConfig {
 			RetryBackoff:           1 * time.Second,
 			CheckpointSaveInterval: 5 * time.Second,
 			CheckpointSaveCount:    100,
+			CatchUpMinInterval:     30 * time.Second,
 			DeadLetterFunc:         defaultDeadLetterFunc(),
 		}
 	}
@@ -80,6 +90,9 @@ func normalizeProjectionConfig(config *ProjectionConfig) *ProjectionConfig {
 	}
 	if out.RetryBackoff < 0 {
 		out.RetryBackoff = 0
+	}
+	if out.CatchUpMinInterval == 0 {
+		out.CatchUpMinInterval = 30 * time.Second
 	}
 	if out.DeadLetterFunc == nil {
 		out.DeadLetterFunc = defaultDeadLetterFunc()
@@ -121,7 +134,6 @@ func (PresetProjectionConfigs) LowLatency() *ProjectionConfig {
 		DeadLetterFunc:         defaultDeadLetterFunc(),
 	})
 }
-
 func (PresetProjectionConfigs) Balanced() *ProjectionConfig {
 	return DefaultProjectionConfig()
 }

@@ -288,9 +288,15 @@ func TestRepositoryGet(t *testing.T) {
 		repo, err := newTestEventSourcedRepository[*TestAggregate]("TestAggregate", &TestAggregate{}, AdaptAggregateFactory(NewTestAggregate), store)
 		require.NoError(t, err)
 
-		_, err = repo.Get(context.Background(), 100)
+		agg, err := repo.Get(context.Background(), 100)
 		require.Error(t, err)
 		require.Equal(t, "restore failed", err.Error())
+		require.Nil(t, agg)
+
+		aggOrCreate, err := repo.GetOrCreate(context.Background(), 100)
+		require.Error(t, err)
+		require.Equal(t, "restore failed", err.Error())
+		require.Nil(t, aggOrCreate)
 	})
 
 	t.Run("factory typed nil aggregate returns invalid input", func(t *testing.T) {

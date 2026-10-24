@@ -38,10 +38,6 @@ func DefaultServiceConfig() *ServiceConfig {
 	}
 }
 
-func (s *Application[T, ID]) Config() *ServiceConfig {
-	return cloneServiceConfig(s.config)
-}
-
 func normalizeServiceConfig(config *ServiceConfig) {
 	if config == nil {
 		return
@@ -52,4 +48,13 @@ func normalizeServiceConfig(config *ServiceConfig) {
 	if config.MaxPageSize <= 0 {
 		config.MaxPageSize = defaultMaxPageSize
 	}
+}
+
+func cloneServiceConfig(config *ServiceConfig) *ServiceConfig {
+	if config == nil {
+		return nil
+	}
+	copyCfg := *config
+	normalizeServiceConfig(&copyCfg)
+	return &copyCfg
 }

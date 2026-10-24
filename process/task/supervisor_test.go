@@ -133,6 +133,18 @@ func TestTaskSupervisor_GoWithTimeout(t *testing.T) {
 	}
 }
 
+func TestTaskSupervisor_GoWithTimeout_RejectsNonPositiveTimeout(t *testing.T) {
+	gm := NewTaskSupervisorWithLogger("test", logging.NewNoopLogger())
+	ctx := context.Background()
+
+	err := gm.GoWithTimeout(ctx, "zero-timeout-task", 0, func(ctx context.Context) error {
+		return nil
+	})
+	if !errors.Is(err, errors.InvalidInput) {
+		t.Fatalf("expected InvalidInput error, got %v", err)
+	}
+}
+
 func TestTaskSupervisor_GoWithTimeout_Timeout(t *testing.T) {
 	gm := NewTaskSupervisorWithLogger("test", logging.NewNoopLogger())
 	ctx := context.Background()

@@ -16,8 +16,8 @@ type balanceChanged struct{ Delta int }
 func (*balanceChanged) EventType() string { return "BalanceChanged" }
 
 type account struct {
-	*es.EventSourcedAggregate[int64]
-	Balance int
+	*es.EventSourcedAggregate[int64] `aggregate:"Account"`
+	Balance                          int
 }
 
 func (a *account) ApplyBalanceChanged(e *balanceChanged) { a.Balance += e.Delta }
@@ -32,17 +32,14 @@ type assembly struct {
 
 func newAssembly() *assembly {
 	m := es.NewMetadataRegistry()
-	_, err := m.Register(&account{}, "Account")
-	must(err)
+	must(m.RegisterSet(es.AggregateFromTag(&account{})))
 	r := registry.NewRegistry()
 	must(r.Register("BalanceChanged", func() any { return &balanceChanged{} }))
 	return &assembly{m, store.NewMemoryEventStore[int64](), r, upcast.NewUpgraderRegistry()}
 }
 func (s *assembly) aggregate(id int64) *account {
-	a := &account{}
-	base, err := es.InitAggregate(s.metadata, a, id, "Account")
+	a, err := es.New[account, int64](s.metadata, id)
 	must(err)
-	a.EventSourcedAggregate = base
 	return a
 }
 func (s *assembly) options(mode esstore.PublishMode) esstore.DomainEventStoreOptions[int64] {

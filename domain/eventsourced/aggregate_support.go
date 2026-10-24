@@ -11,10 +11,18 @@ type IEventSourcedModule interface {
 }
 
 // Aggregate 创建一条 aggregate registration 声明。
+//
+// sample 允许为指向聚合结构体的 typed nil：仅用于反射获取类型，不会被解引用；
+// 未携带具体类型的 nil interface 会被拒绝并记录在 registration.Error 中。
 func Aggregate(sample any, aggregateType string) MetadataRegistration {
+	var err error
+	if sample == nil {
+		err = errors.NewCode(errors.InvalidInput, "aggregate sample cannot be nil")
+	}
 	return MetadataRegistration{
 		Sample:        sample,
 		AggregateType: aggregateType,
+		Error:         err,
 	}
 }
 

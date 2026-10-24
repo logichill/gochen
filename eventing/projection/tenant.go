@@ -58,8 +58,10 @@ func (p *TenantAwareProjector[ID]) HandleWithCheckpoint(ctx context.Context, eve
 	eventTenantID := extractTenantIDFromMessage(event)
 	if eventTenantID != contextTenantID {
 		if checkpointStoreRequiresORMTxSession(store) {
-			if cp, ok := p.projector.(*CheckpointingProjector[ID]); ok {
-				return cp.saveCheckpointWithinTx(ctx, store, checkpoint)
+			// 面向接口断言：任何提供 SaveCheckpointWithinTx 的投影（含被其他
+			// 装饰器包装后透传该能力的自定义实现）都能在事务会话内保存检查点。
+			if cp, ok := p.projector.(ICheckpointTxSaver[ID]); ok {
+				return cp.SaveCheckpointWithinTx(ctx, store, checkpoint)
 			}
 		}
 		return saveSkippedCheckpoint(ctx, store, checkpoint)

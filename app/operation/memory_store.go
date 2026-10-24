@@ -7,12 +7,21 @@ import (
 	"gochen/errors"
 )
 
-const defaultMaxDeletedTombstones = 4096
-
 // MemoryStore 提供轻量内存实现，适合短期、测试或单进程场景。
 //
 // 说明：Delete 会保留进程内 tombstone，阻止近期 in-flight 幂等调用把已删除 operation 复活；
 // tombstone 有上限自动裁剪，也可通过 PurgeDeleted 手动清理；长期高频场景应使用持久化 store。
+//
+// 容量上限：默认不限制（保持既有行为）；通过 WithMaxRecords 配置后，
+// 记录数超过上限时按写入顺序淘汰最旧的非预占记录（FIFO，非 LRU）。
+// 被淘汰记录的幂等键绑定同步解除，后续同键请求视为首次执行；
+// 预占中的记录（in-flight）与 tombstone 拦截范围内的记录不会被淘汰。
+//
+// 预占占位记录计入容量但不参与 FIFO 淘汰；当预占/tombstone 占据的容量
+// 使可淘汰记录不足以回收溢出时，本调用刚写入的记录始终保位
+// （绝不淘汰本次写入的记录），实际记录数可暂时超过 maxRecords，
+// 待预占释放后恢复。这是有意取舍：宁可短暂超容量，也不静默丢失
+// 刚报成功的写入（那会形成指向已删除记录的幽灵幂等绑定）。
 type MemoryStore struct {
 	mu                      sync.RWMutex
 	records                 map[string]*Result
@@ -22,16 +31,42 @@ type MemoryStore struct {
 	// deleted 保存 tombstone，阻止完成较晚的 owner 结果把已删除 operation 复活。
 	deleted      map[string]struct{}
 	deletedOrder []string
+	// recordOrder 按 Put 顺序记录 operation id，用于容量上限的 FIFO 淘汰。
+	// 仅在 maxRecords > 0 时维护；被 Delete 等路径移除的 id 以 "" 占位，
+	// 由惰性压缩回收（recordOrderIndex 提供 O(1) 成员查询与移除）。
+	recordOrder      []string
+	recordOrderIndex map[string]int
+	maxRecords       int
 }
 
-// NewMemoryStore 创建内存 operation store。
-func NewMemoryStore() *MemoryStore {
-	return &MemoryStore{
+// NewMemoryStore 创建内存 operation store（无容量上限）。
+func NewMemoryStore(options ...MemoryStoreOption) *MemoryStore {
+	s := &MemoryStore{
 		records:                 make(map[string]*Result),
 		idempotencyKeys:         make(map[string]string),
 		idempotencyKeysByOpID:   make(map[string]map[string]struct{}),
 		idempotencyReservations: make(map[string]struct{}),
 		deleted:                 make(map[string]struct{}),
+	}
+	for _, option := range options {
+		if option != nil {
+			option(s)
+		}
+	}
+	return s
+}
+
+// MemoryStoreOption 定制 MemoryStore 构造选项。
+type MemoryStoreOption func(*MemoryStore)
+
+// WithMaxRecords 设置记录容量上限（FIFO 淘汰最旧的非预占记录）。
+//
+// maxRecords <= 0 表示无上限。上限只约束 records/idempotency 映射；
+// tombstone 上限独立生效（见 defaultMaxDeletedTombstones）。
+// 必须在首次并发写入前配置（构造后立即链式调用）。
+func WithMaxRecords(maxRecords int) MemoryStoreOption {
+	return func(s *MemoryStore) {
+		s.maxRecords = maxRecords
 	}
 }
 
@@ -49,34 +84,6 @@ func (s *MemoryStore) Get(ctx context.Context, id string) (*Result, error) {
 		return nil, err
 	}
 
-	result, ok := s.records[id]
-	if !ok {
-		return nil, errors.NewCode(errors.NotFound, "operation not found").WithContext("operation_id", id)
-	}
-	if s.isIdempotencyReservationLocked(id) {
-		return nil, errors.NewCode(errors.NotFound, "operation not found").WithContext("operation_id", id)
-	}
-	return CloneResult(result), nil
-}
-
-// GetByIdempotencyKey 按幂等键读取已有 tracked operation 结果。
-func (s *MemoryStore) GetByIdempotencyKey(ctx context.Context, key string) (*Result, error) {
-	if err := contextError(ctx); err != nil {
-		return nil, err
-	}
-	if s == nil {
-		return nil, errors.NewCode(errors.InvalidInput, "memory operation store is nil")
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-
-	id, ok := s.idempotencyKeys[key]
-	if !ok {
-		return nil, errors.NewCode(errors.NotFound, "operation not found").WithContext("idempotency_key", key)
-	}
 	result, ok := s.records[id]
 	if !ok {
 		return nil, errors.NewCode(errors.NotFound, "operation not found").WithContext("operation_id", id)
@@ -114,273 +121,112 @@ func (s *MemoryStore) Put(ctx context.Context, result *Result) error {
 	}
 	s.records[result.Operation.ID] = CloneResult(result)
 	delete(s.idempotencyReservations, result.Operation.ID)
+	s.trackRecordOrderLocked(result.Operation.ID)
+	// 本调用刚写入的记录必须保位：Put 报成功后 Get 必须能读到，
+	// 且不能把幂等键淘汰成幽灵绑定。
+	s.evictOverflowRecordsLocked(result.Operation.ID)
 	return nil
 }
 
-// PutWithIdempotencyKey 原子保存 operation 并把幂等键绑定到该 operation。
-func (s *MemoryStore) PutWithIdempotencyKey(ctx context.Context, key string, result *Result) error {
-	if err := contextError(ctx); err != nil {
-		return err
+// trackRecordOrderLocked 记录写入顺序（容量上限启用时），重复 Put 覆盖不改变顺序。
+// 依靠 recordOrderIndex 做 O(1) 查重，避免每次 Put 对全表线性扫描。
+func (s *MemoryStore) trackRecordOrderLocked(id string) {
+	if s.maxRecords <= 0 {
+		return
 	}
-	if s == nil {
-		return errors.NewCode(errors.InvalidInput, "memory operation store is nil")
+	if _, ok := s.recordOrderIndex[id]; ok {
+		return
 	}
-	if key == "" {
-		return s.Put(ctx, result)
-	}
-	if result == nil {
-		return errors.NewCode(errors.InvalidInput, "operation result cannot be nil")
-	}
-	if result.Operation.ID == "" {
-		return errors.NewCode(errors.InvalidInput, "operation id cannot be empty")
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	s.initializeLocked()
-	if _, ok := s.deleted[result.Operation.ID]; ok {
-		return errors.NewCode(errors.Conflict, "operation has been deleted").
-			WithContext("operation_id", result.Operation.ID)
-	}
-	if existingID, ok := s.idempotencyKeys[key]; ok {
-		if existing, exists := s.records[existingID]; exists {
-			if existing.Operation.ID != result.Operation.ID {
-				return errors.NewCode(errors.Conflict, "idempotency key already exists").
-					WithContext("idempotency_key", key).
-					WithContext("operation_id", existing.Operation.ID)
-			}
-		}
-		if existingID != result.Operation.ID {
-			s.removeIdempotencyKeyLocked(key, existingID)
-		}
-	}
-	s.records[result.Operation.ID] = CloneResult(result)
-	delete(s.idempotencyReservations, result.Operation.ID)
-	s.bindIdempotencyKeyLocked(key, result.Operation.ID)
-	return nil
+	s.recordOrderIndex[id] = len(s.recordOrder)
+	s.recordOrder = append(s.recordOrder, id)
 }
 
-// ReserveIdempotencyKey 在业务执行前预占幂等键。
-func (s *MemoryStore) ReserveIdempotencyKey(ctx context.Context, key string, operationID string) error {
-	if err := contextError(ctx); err != nil {
-		return err
+// untrackRecordOrderLocked 把 id 从 FIFO 顺序表中移除（O(1)）。
+// 切片槽位以 "" 占位，惰性压缩回收，避免低于容量运行时无界累积。
+func (s *MemoryStore) untrackRecordOrderLocked(id string) {
+	if s.maxRecords <= 0 {
+		return
 	}
-	if s == nil {
-		return errors.NewCode(errors.InvalidInput, "memory operation store is nil")
-	}
-	if key == "" {
-		return nil
-	}
-	if operationID == "" {
-		return errors.NewCode(errors.InvalidInput, "operation id cannot be empty")
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	s.initializeLocked()
-	if _, ok := s.deleted[operationID]; ok {
-		return errors.NewCode(errors.Conflict, "operation has been deleted").
-			WithContext("operation_id", operationID)
-	}
-	if existingID, ok := s.idempotencyKeys[key]; ok {
-		if existing, exists := s.records[existingID]; exists {
-			if existing.Operation.ID == operationID {
-				return nil
-			}
-			return errors.NewCode(errors.Conflict, "idempotency key already exists").
-				WithContext("idempotency_key", key).
-				WithContext("operation_id", existing.Operation.ID)
-		}
-		s.removeIdempotencyKeyLocked(key, existingID)
-	}
-	if _, exists := s.records[operationID]; exists {
-		return errors.NewCode(errors.Conflict, "operation id is already in use").WithContext("operation_id", operationID)
-	}
-	s.records[operationID] = &Result{Operation: Operation{ID: operationID, Mode: ModeTracked, Status: StatusAccepted}}
-	s.idempotencyReservations[operationID] = struct{}{}
-	s.bindIdempotencyKeyLocked(key, operationID)
-	return nil
-}
-
-// ReleaseIdempotencyKey 释放同一 operation 尚未完成的幂等键预占。
-func (s *MemoryStore) ReleaseIdempotencyKey(ctx context.Context, key string, operationID string) error {
-	if err := contextError(ctx); err != nil {
-		return err
-	}
-	if s == nil {
-		return errors.NewCode(errors.InvalidInput, "memory operation store is nil")
-	}
-	if key == "" {
-		return nil
-	}
-	if operationID == "" {
-		return errors.NewCode(errors.InvalidInput, "operation id cannot be empty")
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	s.initializeLocked()
-	existingID, ok := s.idempotencyKeys[key]
+	idx, ok := s.recordOrderIndex[id]
 	if !ok {
-		return nil
-	}
-	if existingID != operationID {
-		return errors.NewCode(errors.Conflict, "idempotency key is owned by another operation").
-			WithContext("idempotency_key", key).
-			WithContext("operation_id", existingID)
-	}
-	_, exists := s.records[existingID]
-	if exists && !s.isIdempotencyReservationLocked(existingID) {
-		return nil
-	}
-	s.removeIdempotencyKeyLocked(key, existingID)
-	delete(s.records, existingID)
-	delete(s.idempotencyReservations, existingID)
-	return nil
-}
-
-func (s *MemoryStore) isIdempotencyReservationLocked(operationID string) bool {
-	_, ok := s.idempotencyReservations[operationID]
-	return ok
-}
-
-func (s *MemoryStore) bindIdempotencyKeyLocked(key string, operationID string) {
-	if key == "" || operationID == "" {
 		return
 	}
-	s.idempotencyKeys[key] = operationID
-	if s.idempotencyKeysByOpID[operationID] == nil {
-		s.idempotencyKeysByOpID[operationID] = make(map[string]struct{})
+	delete(s.recordOrderIndex, id)
+	if idx >= 0 && idx < len(s.recordOrder) && s.recordOrder[idx] == id {
+		s.recordOrder[idx] = ""
 	}
-	s.idempotencyKeysByOpID[operationID][key] = struct{}{}
+	s.maybeCompactRecordOrderLocked()
 }
 
-func (s *MemoryStore) removeIdempotencyKeyLocked(key string, operationID string) {
-	delete(s.idempotencyKeys, key)
-	if operationID == "" {
+// maybeCompactRecordOrderLocked 在占位项占比过高时压缩 recordOrder 并重建索引。
+func (s *MemoryStore) maybeCompactRecordOrderLocked() {
+	stale := len(s.recordOrder) - len(s.recordOrderIndex)
+	if stale < 64 || stale*2 <= len(s.recordOrder) {
 		return
 	}
-	keys := s.idempotencyKeysByOpID[operationID]
-	if keys == nil {
-		return
-	}
-	delete(keys, key)
-	if len(keys) == 0 {
-		delete(s.idempotencyKeysByOpID, operationID)
-	}
-}
-
-// Delete 删除 operation envelope。
-func (s *MemoryStore) Delete(ctx context.Context, id string) error {
-	if err := contextError(ctx); err != nil {
-		return err
-	}
-	if s == nil {
-		return errors.NewCode(errors.InvalidInput, "memory operation store is nil")
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	s.initializeLocked()
-	if id != "" {
-		s.addDeletedTombstoneLocked(id)
-	}
-	for key := range s.idempotencyKeysByOpID[id] {
-		s.removeIdempotencyKeyLocked(key, id)
-	}
-	delete(s.idempotencyKeysByOpID, id)
-	delete(s.records, id)
-	delete(s.idempotencyReservations, id)
-	s.pruneDeletedTombstonesLocked()
-	return nil
-}
-
-func (s *MemoryStore) addDeletedTombstoneLocked(id string) {
-	if _, ok := s.deleted[id]; ok {
-		return
-	}
-	s.deleted[id] = struct{}{}
-	s.deletedOrder = append(s.deletedOrder, id)
-}
-
-func (s *MemoryStore) pruneDeletedTombstonesLocked() {
-	for len(s.deleted) > defaultMaxDeletedTombstones && len(s.deletedOrder) > 0 {
-		id := s.deletedOrder[0]
-		s.deletedOrder = s.deletedOrder[1:]
-		delete(s.deleted, id)
-	}
-	if len(s.deleted) == 0 {
-		s.deletedOrder = nil
-		return
-	}
-	if len(s.deletedOrder) > 2*defaultMaxDeletedTombstones || cap(s.deletedOrder) > 2*defaultMaxDeletedTombstones {
-		s.compactDeletedOrderLocked()
-	}
-}
-
-func (s *MemoryStore) compactDeletedOrderLocked() {
-	if len(s.deleted) == 0 {
-		s.deletedOrder = nil
-		return
-	}
-	seen := make(map[string]struct{}, len(s.deleted))
-	order := make([]string, 0, len(s.deleted))
-	for _, id := range s.deletedOrder {
-		if _, ok := s.deleted[id]; !ok {
+	kept := s.recordOrder[:0]
+	for _, id := range s.recordOrder {
+		if id == "" {
 			continue
 		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		order = append(order, id)
+		kept = append(kept, id)
 	}
-	s.deletedOrder = order
+	s.recordOrder = kept
+	for i, id := range s.recordOrder {
+		s.recordOrderIndex[id] = i
+	}
+	if len(s.recordOrder) == 0 {
+		s.recordOrder = nil
+	}
 }
 
-// PurgeDeleted 清理 Delete 留下的 tombstone，并返回实际清理数量。
-//
-// 说明：MemoryStore 的 tombstone 用于阻止近期 in-flight 幂等调用复活已删除 operation；
-// 长期高频 Delete 场景可在确认相关 in-flight 调用均已结束后调用本方法回收内存。
-// 不传 id 时清理全部 tombstone。
-func (s *MemoryStore) PurgeDeleted(ids ...string) int {
-	if s == nil {
-		return 0
+// evictOverflowRecordsLocked 超出容量上限时按 FIFO 淘汰最旧的非预占记录。
+// 淘汰会同步解除该记录的幂等键绑定；tombstone 拦截范围内的记录不淘汰。
+// protectID 是本次调用刚写入/补存的记录，永不参与本次淘汰——
+// 溢出无法回收时宁可暂时超容量，也不静默丢弃刚报成功的写入。
+func (s *MemoryStore) evictOverflowRecordsLocked(protectID string) {
+	if s.maxRecords <= 0 || len(s.records) <= s.maxRecords {
+		return
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.initializeLocked()
-
-	if len(ids) == 0 {
-		n := len(s.deleted)
-		s.deleted = make(map[string]struct{})
-		s.deletedOrder = nil
-		return n
-	}
-	n := 0
-	for _, id := range ids {
+	overflow := len(s.records) - s.maxRecords
+	kept := s.recordOrder[:0]
+	for _, id := range s.recordOrder {
+		if id == "" {
+			// 已被 Delete 等路径移除的惰性占位，顺手清理。
+			continue
+		}
+		if _, ok := s.records[id]; !ok {
+			// 残留顺序项：仅清理顺序表，不消耗溢出配额。
+			delete(s.recordOrderIndex, id)
+			continue
+		}
+		if overflow <= 0 {
+			kept = append(kept, id)
+			continue
+		}
+		if id == protectID || s.isIdempotencyReservationLocked(id) {
+			kept = append(kept, id)
+			continue
+		}
 		if _, ok := s.deleted[id]; ok {
-			delete(s.deleted, id)
-			n++
+			kept = append(kept, id)
+			continue
 		}
+		for key := range s.idempotencyKeysByOpID[id] {
+			s.removeIdempotencyKeyLocked(key, id)
+		}
+		delete(s.idempotencyKeysByOpID, id)
+		delete(s.records, id)
+		delete(s.recordOrderIndex, id)
+		overflow--
 	}
-	if len(s.deleted) == 0 {
-		s.deletedOrder = nil
-	} else {
-		s.compactDeletedOrderLocked()
+	s.recordOrder = kept
+	for i, id := range s.recordOrder {
+		s.recordOrderIndex[id] = i
 	}
-	return n
+	if len(s.recordOrder) == 0 {
+		s.recordOrder = nil
+	}
 }
 
 func (s *MemoryStore) initializeLocked() {
@@ -398,6 +244,9 @@ func (s *MemoryStore) initializeLocked() {
 	}
 	if s.deleted == nil {
 		s.deleted = make(map[string]struct{})
+	}
+	if s.recordOrderIndex == nil {
+		s.recordOrderIndex = make(map[string]int)
 	}
 }
 

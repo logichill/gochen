@@ -1,6 +1,8 @@
 package query
 
 import (
+	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -194,5 +196,186 @@ func TestParseRange_AllowsIntegerValueForFloatTarget(t *testing.T) {
 	}
 	if rng.Lower == nil || rng.Upper == nil || rng.Lower.Value != 42 || rng.Upper.Value != 42 {
 		t.Fatalf("expected exact float range 42, got %+v", rng)
+	}
+}
+
+func TestParseRange_RejectsNaNAndInf(t *testing.T) {
+	nan := math.NaN()
+	inf := math.Inf(1)
+
+	// Single bound with NaN
+	_, _, err := ParseRange[float64]([]QueryExpr{{
+		Op:    FilterOpGt,
+		Value: QueryValue{Type: FieldTypeFloat, Float: nan},
+	}})
+	if err == nil || !errors.Is(err, errors.InvalidInput) {
+		t.Fatalf("expected InvalidInput for NaN, got %v", err)
+	}
+
+	// Single bound with Inf
+	_, _, err = ParseRange[float64]([]QueryExpr{{
+		Op:    FilterOpLt,
+		Value: QueryValue{Type: FieldTypeFloat, Float: inf},
+	}})
+	if err == nil || !errors.Is(err, errors.InvalidInput) {
+		t.Fatalf("expected InvalidInput for Inf, got %v", err)
+	}
+
+	// Two bounds with NaN
+	_, _, err = ParseRange[float64]([]QueryExpr{
+		{Op: FilterOpGte, Value: QueryValue{Type: FieldTypeFloat, Float: 0}},
+		{Op: FilterOpLte, Value: QueryValue{Type: FieldTypeFloat, Float: nan}},
+	})
+	if err == nil || !errors.Is(err, errors.InvalidInput) {
+		t.Fatalf("expected InvalidInput for range with NaN, got %v", err)
+	}
+}
+
+func TestParseRange_Float32Overflow(t *testing.T) {
+	overflowVal := float64(math.MaxFloat32) * 2
+
+	_, _, err := ParseRange[float32]([]QueryExpr{{
+		Op:    FilterOpEq,
+		Value: QueryValue{Type: FieldTypeFloat, Float: overflowVal},
+	}})
+	if err == nil || !errors.Is(err, errors.InvalidInput) {
+		t.Fatalf("expected InvalidInput for float32 overflow, got %v", err)
+	}
+
+	// Valid float32 should succeed
+	rng, ok, err := ParseRange[float32]([]QueryExpr{{
+		Op:    FilterOpEq,
+		Value: QueryValue{Type: FieldTypeFloat, Float: 3.14},
+	}})
+	if err != nil || !ok {
+		t.Fatalf("expected valid float32 to succeed, got rng=%+v ok=%v err=%v", rng, ok, err)
+	}
+}
+
+// 范围字段上的非范围操作符不得被静默忽略（strict 校验）。
+func TestQuerySchemaDecodeFilters_RejectsNonRangeOperatorOnRangeField(t *testing.T) {
+	for _, field := range []QueryField{
+		IntField("age"),
+		FloatField("score"),
+		TimeField("created_at"),
+		StringField("username", WithFilterOps(FilterOpGt, FilterOpIsNull)),
+		EnumField("status", WithFilterOps(FilterOpGt, FilterOpIsNull)),
+	} {
+		schema := NewQuerySchema(field)
+		_, err := schema.DecodeFilters([]Filter{
+			{Field: field.Name, Op: FilterOpGt, Value: "1"},
+			{Field: field.Name, Op: FilterOpIsNull},
+		})
+		if !errors.Is(err, errors.InvalidInput) {
+			t.Fatalf("field %s: expected invalid input for mixed non-range operator, got %v", field.Name, err)
+		}
+	}
+}
+
+// 字符串/枚举字段在显式授予范围操作符后支持自动范围合并（字典序比较）。
+func TestQuerySchemaDecodeFilters_StringAndEnumAutoRange(t *testing.T) {
+	rangeOps := []FieldOption{WithFilterOps(
+		FilterOpEq, FilterOpGte, FilterOpLt,
+	)}
+	schema := NewQuerySchema(StringField("username", rangeOps...))
+	decoded, err := schema.DecodeFilters([]Filter{
+		{Field: "username", Op: FilterOpGte, Value: "alice"},
+		{Field: "username", Op: FilterOpLt, Value: "bob"},
+	})
+	if err != nil {
+		t.Fatalf("expected string auto-range to be accepted, got %v", err)
+	}
+	if len(decoded.Get("username")) != 2 {
+		t.Fatalf("expected both expressions decoded, got %d", len(decoded.Get("username")))
+	}
+
+	schema = NewQuerySchema(EnumField("status", rangeOps...))
+	_, err = schema.DecodeFilters([]Filter{
+		{Field: "status", Op: FilterOpGte, Value: "active"},
+		{Field: "status", Op: FilterOpLt, Value: "disabled"},
+	})
+	if err != nil {
+		t.Fatalf("expected enum auto-range to be accepted, got %v", err)
+	}
+}
+
+// 布尔字段不支持区间合并，多个表达式必须拒绝。
+func TestQuerySchemaDecodeFilters_BoolDoesNotSupportAutoRange(t *testing.T) {
+	schema := NewQuerySchema(BoolField("enabled"))
+	_, err := schema.DecodeFilters([]Filter{
+		{Field: "enabled", Op: FilterOpEq, Value: "true"},
+		{Field: "enabled", Op: FilterOpEq, Value: "false"},
+	})
+	if !errors.Is(err, errors.InvalidInput) {
+		t.Fatalf("expected invalid input for multiple bool expressions, got %v", err)
+	}
+}
+
+// 验证 IntField / StringField / EnumField 在 DecodeFilters 下执行单条 LIKE、IN、IS NULL、NE 时正常通过，不被误拒。
+func TestQuerySchemaDecodeFilters_AllowsSingleNonRangeOperator(t *testing.T) {
+	schema := NewQuerySchema(
+		IntField("age"),
+		StringField("username"),
+		EnumField("status"),
+	)
+
+	// IntField: single NE, IN, IS NULL
+	for _, f := range []Filter{
+		{Field: "age", Op: FilterOpNe, Value: "10"},
+		{Field: "age", Op: FilterOpIn, Values: []string{"10", "20"}},
+		{Field: "age", Op: FilterOpIsNull},
+	} {
+		decoded, err := schema.DecodeFilters([]Filter{f})
+		if err != nil {
+			t.Fatalf("expected filter %+v to pass, got: %v", f, err)
+		}
+		if len(decoded.Get(f.Field)) != 1 {
+			t.Fatalf("expected 1 decoded expression for %+v, got %d", f, len(decoded.Get(f.Field)))
+		}
+	}
+
+	// StringField: single LIKE, IN, IS NULL, NE
+	for _, f := range []Filter{
+		{Field: "username", Op: FilterOpLike, Value: "%alice%"},
+		{Field: "username", Op: FilterOpIn, Values: []string{"alice", "bob"}},
+		{Field: "username", Op: FilterOpIsNull},
+		{Field: "username", Op: FilterOpNe, Value: "charlie"},
+	} {
+		decoded, err := schema.DecodeFilters([]Filter{f})
+		if err != nil {
+			t.Fatalf("expected filter %+v to pass, got: %v", f, err)
+		}
+		if len(decoded.Get(f.Field)) != 1 {
+			t.Fatalf("expected 1 decoded expression for %+v, got %d", f, len(decoded.Get(f.Field)))
+		}
+	}
+
+	// EnumField: single LIKE, IN, IS NULL, NE
+	for _, f := range []Filter{
+		{Field: "status", Op: FilterOpLike, Value: "act%"},
+		{Field: "status", Op: FilterOpIn, Values: []string{"active", "pending"}},
+		{Field: "status", Op: FilterOpIsNull},
+		{Field: "status", Op: FilterOpNe, Value: "disabled"},
+	} {
+		decoded, err := schema.DecodeFilters([]Filter{f})
+		if err != nil {
+			t.Fatalf("expected filter %+v to pass, got: %v", f, err)
+		}
+		if len(decoded.Get(f.Field)) != 1 {
+			t.Fatalf("expected 1 decoded expression for %+v, got %d", f, len(decoded.Get(f.Field)))
+		}
+	}
+}
+
+func TestParseRange_RejectsInterfaceTargetType(t *testing.T) {
+	_, _, err := ParseRange[any]([]QueryExpr{{
+		Op:    FilterOpEq,
+		Value: QueryValue{Type: FieldTypeInt, Int: 42},
+	}})
+	if err == nil || !errors.Is(err, errors.InvalidInput) {
+		t.Fatalf("expected InvalidInput for interface target type, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "query range does not support uninstantiated interface target type") {
+		t.Fatalf("unexpected error message: %v", err)
 	}
 }

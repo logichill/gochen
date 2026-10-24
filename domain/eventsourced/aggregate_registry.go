@@ -2,6 +2,7 @@ package eventsourced
 
 import (
 	"reflect"
+	"strings"
 	"sync"
 
 	"gochen/domain"
@@ -15,21 +16,19 @@ type MetadataRegistration struct {
 	Error         error // 若在构造配置时提取 tag 失败，暂存此报错等到装配阶段统一抛出
 }
 
-// Metadata 聚合元数据（预编译）。
+// Metadata 聚合元数据（构造后只读）。
 //
-// 在构造/装配阶段通过反射扫描聚合的事件处理方法，
-// 运行时直接使用，无需业务侧手写 BindMetadata 样板。
+// 只能通过 ScanMetadata 或 MetadataRegistry 构造；零值不可用于绑定。
+// 构造/装配阶段缓存反射发现结果，运行时仍通过反射调用处理器。
 type Metadata struct {
-	AggregateType string
-	TargetType    reflect.Type
-	Handlers      map[reflect.Type]*EventHandler // eventGoType -> handler
+	aggregateType string
+	targetType    reflect.Type
+	handlers      map[reflect.Type]eventHandler // eventGoType -> handler
 }
 
-// EventHandler 预编译的事件处理器。
-type EventHandler struct {
-	Method    reflect.Method
-	HasError  bool // 方法是否返回 error
-	ParamType reflect.Type
+type eventHandler struct {
+	method   reflect.Method
+	hasError bool
 }
 
 type metadataKey struct {
@@ -113,7 +112,7 @@ func (r *MetadataRegistry) lookup(key metadataKey) (*Metadata, bool) {
 }
 
 func buildMetadataKey(sample any, aggregateType string) (metadataKey, error) {
-	if aggregateType == "" {
+	if strings.TrimSpace(aggregateType) == "" {
 		return metadataKey{}, errors.NewCode(errors.InvalidInput, "aggregate type cannot be empty")
 	}
 
@@ -122,6 +121,11 @@ func buildMetadataKey(sample any, aggregateType string) (metadataKey, error) {
 		return metadataKey{}, errors.NewCode(errors.InvalidInput, "aggregate sample cannot be nil").
 			WithContext("aggregate_type", aggregateType)
 	}
+	if targetType.Kind() != reflect.Ptr || targetType.Elem().Kind() != reflect.Struct {
+		return metadataKey{}, errors.NewCode(errors.InvalidInput, "aggregate sample must be a pointer to struct").
+			WithContext("aggregate_type", aggregateType).
+			WithContext("target_type", targetType.String())
+	}
 
 	return metadataKey{
 		AggregateType: aggregateType,
@@ -129,15 +133,15 @@ func buildMetadataKey(sample any, aggregateType string) (metadataKey, error) {
 	}, nil
 }
 
-// ScanMetadata 扫描聚合类型的事件处理方法，返回预编译元数据。
+// ScanMetadata 扫描聚合的 ApplyXxx 事件处理方法，返回只读元数据。
+// sample 仅用于获取类型，允许指向聚合结构体的 typed nil。
 func ScanMetadata(sample any, aggregateType string) (*Metadata, error) {
-	if sample == nil {
-		return nil, errors.NewCode(errors.InvalidInput, "aggregate sample cannot be nil").
-			WithContext("aggregate_type", aggregateType)
+	key, err := buildMetadataKey(sample, aggregateType)
+	if err != nil {
+		return nil, err
 	}
-	targetType := reflect.TypeOf(sample)
 
-	handlers, err := discoverEventHandlers(targetType)
+	handlers, err := discoverEventHandlers(key.TargetType)
 	if err != nil {
 		var appErr *errors.AppError
 		if errors.As(err, &appErr) && appErr != nil {
@@ -147,9 +151,9 @@ func ScanMetadata(sample any, aggregateType string) (*Metadata, error) {
 	}
 
 	meta := &Metadata{
-		AggregateType: aggregateType,
-		TargetType:    targetType,
-		Handlers:      handlers,
+		aggregateType: aggregateType,
+		targetType:    key.TargetType,
+		handlers:      handlers,
 	}
 
 	return meta, nil
@@ -158,13 +162,18 @@ func ScanMetadata(sample any, aggregateType string) (*Metadata, error) {
 // ValidateMetadataSet 仅校验 aggregate metadata，不写入注册表。
 func ValidateMetadataSet(registrations ...MetadataRegistration) error {
 	for i, registration := range registrations {
-		if registration.Sample == nil {
-			continue
-		}
 		if registration.Error != nil {
 			return errors.Wrap(registration.Error, errors.InvalidInput, "validate aggregate metadata set").
 				WithContext("index", i).
 				WithContext("aggregate_type", registration.AggregateType)
+		}
+		if registration.Sample == nil {
+			if strings.TrimSpace(registration.AggregateType) != "" && registration.AggregateType != "ignored" {
+				return errors.NewCode(errors.InvalidInput, "aggregate sample is required").
+					WithContext("index", i).
+					WithContext("aggregate_type", registration.AggregateType)
+			}
+			continue
 		}
 		if _, err := ScanMetadata(registration.Sample, registration.AggregateType); err != nil {
 			var appErr *errors.AppError
@@ -187,13 +196,18 @@ func (r *MetadataRegistry) RegisterSet(registrations ...MetadataRegistration) er
 		return errors.NewCode(errors.InvalidInput, "metadata registry cannot be nil")
 	}
 	for i, registration := range registrations {
-		if registration.Sample == nil {
-			continue
-		}
 		if registration.Error != nil {
 			return errors.Wrap(registration.Error, errors.InvalidInput, "register aggregate metadata set").
 				WithContext("index", i).
 				WithContext("aggregate_type", registration.AggregateType)
+		}
+		if registration.Sample == nil {
+			if strings.TrimSpace(registration.AggregateType) != "" && registration.AggregateType != "ignored" {
+				return errors.NewCode(errors.InvalidInput, "aggregate sample is required").
+					WithContext("index", i).
+					WithContext("aggregate_type", registration.AggregateType)
+			}
+			continue
 		}
 		if _, err := r.Register(registration.Sample, registration.AggregateType); err != nil {
 			var appErr *errors.AppError
@@ -228,83 +242,81 @@ func InitAggregate[T comparable](registry *MetadataRegistry, self any, id T, agg
 	return agg, nil
 }
 
-// discoverEventHandlers 发现聚合类型的所有事件处理方法。
-//
-// 说明：
-// - 扫描规则：
-// - - 方法签名：func(receiver, *EventType) 或 func(receiver, *EventType) error
-// - - 参数类型必须实现 IDomainEvent 接口。
-// - - 以事件的 Go 类型（参数类型）作为映射 key，避免跨版本同名 EventType() 冲突。
-// - - 单非 error 返回值（如 bool）不是合法处理器签名：返回值会被应用阶段丢弃，
-// -   发现即报装配错误（InvalidInput），不做静默注册。
-func discoverEventHandlers(t reflect.Type) (map[reflect.Type]*EventHandler, error) {
-	handlers := make(map[reflect.Type]*EventHandler)
-
-	if t == nil {
-		return handlers, nil
-	}
-
-	domainEventInterface := reflect.TypeOf((*domain.IDomainEvent)(nil)).Elem()
-	errorInterface := reflect.TypeOf((*error)(nil)).Elem()
+// discoverEventHandlers 仅发现 ApplyXxx 方法；框架的两个应用入口不参与扫描。
+// 所有候选方法必须满足签名约定，以事件 Go 类型为 key 区分同名事件的不同版本。
+func discoverEventHandlers(t reflect.Type) (map[reflect.Type]eventHandler, error) {
+	handlers := make(map[reflect.Type]eventHandler)
+	domainEventInterface := reflect.TypeFor[domain.IDomainEvent]()
+	errorInterface := reflect.TypeFor[error]()
 
 	for i := 0; i < t.NumMethod(); i++ {
 		method := t.Method(i)
 		mt := method.Type
-
-		if mt.NumIn() != 2 {
+		if !strings.HasPrefix(method.Name, "Apply") || method.Name == "ApplyEvent" || method.Name == "ApplyAndRecord" {
 			continue
 		}
-		if mt.NumOut() > 1 {
-			continue
+		// *T 的反射方法也包含值接收器的包装方法，不能仅检查 mt.In(0)。
+		// 限定为指针方法集独有的方法；指针/接口嵌入的提升方法须显式转发，
+		// 避免把外层同名值方法误判为内层指针方法。
+		if _, callableOnValue := t.Elem().MethodByName(method.Name); callableOnValue {
+			return nil, errors.NewCode(errors.InvalidInput, "event handler must be declared on the aggregate pointer receiver; embedded/promoted methods are not supported and must be forwarded explicitly").
+				WithContext("handler", method.Name).
+				WithContext("target_type", t.String())
+		}
+		if method.Name == "Apply" || mt.IsVariadic() || mt.NumIn() != 2 {
+			return nil, errors.NewCode(errors.InvalidInput, "event handler must be ApplyXxx with exactly one event parameter").
+				WithContext("handler", method.Name).
+				WithContext("target_type", t.String()).
+				WithContext("signature", mt.String())
 		}
 
 		paramType := mt.In(1)
-		if paramType.Kind() != reflect.Ptr {
-			continue
-		}
-		if !paramType.Implements(domainEventInterface) {
-			continue
+		if paramType.Kind() != reflect.Ptr || !paramType.Implements(domainEventInterface) {
+			return nil, errors.NewCode(errors.InvalidInput, "event handler parameter must be a pointer implementing IDomainEvent").
+				WithContext("handler", method.Name).
+				WithContext("target_type", t.String()).
+				WithContext("event_type", paramType.String())
 		}
 
-		hasError := false
-		if mt.NumOut() == 1 {
-			if mt.Out(0) != errorInterface {
-				// 非 error 返回值在应用阶段会被丢弃；静默注册会让开发者误以为
-				// 返回值有语义（是否接受/失败），与其他装配期校验一样 fail-fast。
-				return nil, errors.NewCode(errors.InvalidInput, "event handler must return error or nothing").
-					WithContext("handler", method.Name).
-					WithContext("aggregate_type", t.String()).
-					WithContext("event_type", paramType.String()).
-					WithContext("return_type", mt.Out(0).String())
-			}
-			hasError = true
+		if mt.NumOut() > 1 || (mt.NumOut() == 1 && mt.Out(0) != errorInterface) {
+			return nil, errors.NewCode(errors.InvalidInput, "event handler must return error or nothing").
+				WithContext("handler", method.Name).
+				WithContext("target_type", t.String()).
+				WithContext("event_type", paramType.String()).
+				WithContext("signature", mt.String())
 		}
 		if existing, exists := handlers[paramType]; exists {
 			return nil, errors.NewCode(errors.Conflict, "duplicate event handler").
 				WithContext("event_type", paramType.String()).
-				WithContext("aggregate_type", t.String()).
-				WithContext("existing_handler", existing.Method.Name).
+				WithContext("target_type", t.String()).
+				WithContext("existing_handler", existing.method.Name).
 				WithContext("new_handler", method.Name)
 		}
 
-		handlers[paramType] = &EventHandler{
-			Method:    method,
-			HasError:  hasError,
-			ParamType: paramType,
+		handlers[paramType] = eventHandler{
+			method:   method,
+			hasError: mt.NumOut() == 1,
 		}
 	}
 
 	return handlers, nil
 }
 
-// ApplyWithMetadata 使用预编译元数据应用事件到聚合。
+// ApplyWithMetadata 使用缓存的反射元数据应用事件到聚合。
+// 仅在没有对应处理器时返回 (false, nil)；nil 输入或零值 metadata 返回 InvalidInput。
 func ApplyWithMetadata(self any, metadata *Metadata, evt domain.IDomainEvent) (bool, error) {
-	if metadata == nil || self == nil || evt == nil {
-		return false, nil
+	if isNil(evt) {
+		return false, errors.NewCode(errors.InvalidInput, "event cannot be nil")
+	}
+	if isNil(self) {
+		return false, errors.NewCode(errors.InvalidInput, "aggregate self cannot be nil")
+	}
+	if metadata == nil || metadata.targetType == nil {
+		return false, errors.NewCode(errors.InvalidInput, "aggregate metadata must be constructed by ScanMetadata or MetadataRegistry")
 	}
 
 	eventGoType := reflect.TypeOf(evt)
-	handler, ok := metadata.Handlers[eventGoType]
+	handler, ok := metadata.handlers[eventGoType]
 	if !ok {
 		return false, nil
 	}
@@ -312,14 +324,9 @@ func ApplyWithMetadata(self any, metadata *Metadata, evt domain.IDomainEvent) (b
 	selfValue := reflect.ValueOf(self)
 	evtValue := reflect.ValueOf(evt)
 
-	if !evtValue.IsValid() || !evtValue.Type().AssignableTo(handler.ParamType) {
-		return true, errors.NewCode(errors.Internal, "event type mismatch").
-			WithContext("expected", handler.ParamType.String()).
-			WithContext("actual", eventGoType.String())
-	}
-	if !selfValue.IsValid() || !selfValue.Type().AssignableTo(handler.Method.Type.In(0)) {
+	if selfValue.Type() != metadata.targetType {
 		return true, errors.NewCode(errors.Internal, "receiver type mismatch").
-			WithContext("expected", handler.Method.Type.In(0).String()).
+			WithContext("expected", metadata.targetType.String()).
 			WithContext("actual", selfValue.Type().String())
 	}
 
@@ -336,16 +343,16 @@ func ApplyWithMetadata(self any, metadata *Metadata, evt domain.IDomainEvent) (b
 			}
 		}()
 		args := []reflect.Value{selfValue, evtValue}
-		results = handler.Method.Func.Call(args)
+		results = handler.method.Func.Call(args)
 	}()
 	if panicked {
 		return true, errors.NewCode(errors.Internal, "panic while calling event handler").
-			WithContext("handler", handler.Method.Name).
+			WithContext("handler", handler.method.Name).
 			WithContext("event_type", eventGoType.String()).
 			WithContext("panic", panicVal)
 	}
 
-	if handler.HasError && len(results) == 1 && !results[0].IsNil() {
+	if handler.hasError && !results[0].IsNil() {
 		return true, results[0].Interface().(error)
 	}
 

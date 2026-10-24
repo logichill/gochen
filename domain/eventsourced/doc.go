@@ -14,9 +14,8 @@
 //   - [IEventStore] — 领域事件存储接口。
 //
 // 反射元数据：
-//   - [Metadata] — 预编译的聚合元数据。
+//   - [Metadata] — 构造后只读的聚合元数据。
 //   - [MetadataRegistry] — 当前应用运行时持有的聚合 metadata registry。
-//   - [EventHandler] — 预编译的事件处理器。
 //   - [MetadataRegistration] / [EventSourcedSupport] — 模块级 aggregate metadata 声明语法糖。
 //
 // # 事件处理方法约定。
@@ -32,7 +31,7 @@
 //	    return eventsourced.New[Account, int64](registry, id)
 //	}
 //
-//	func (a *Account) ApplyDeposited(e *Deposited) { // 方法名任意。
+//	func (a *Account) ApplyDeposited(e *Deposited) {
 //	    a.Balance += e.Amount
 //	}
 //
@@ -57,9 +56,14 @@
 //
 // 使用显式 metadata 绑定时的约束：
 //
-//   - 事件处理方法必须是导出方法。
+//   - 事件处理方法必须命名为 ApplyXxx；ApplyEvent / ApplyAndRecord 为框架保留入口。
+//     其他名称的方法不会作为处理器，校验等辅助方法应使用其他前缀。
 //
-//   - 事件参数必须是指针类型（如 *Deposited）
+//   - 处理器必须仅属于聚合指针类型的方法集。值接收器在装配时被拒绝；
+//     值嵌入可提升指针方法，指针/接口嵌入的处理器须在外层用指针接收器显式转发。
+//
+//   - 恰好一个指针事件参数（如 *Deposited），实现 domain.IDomainEvent；
+//     不返回值或仅返回 error，不允许可变参数；不合法的 ApplyXxx 在装配时失败。
 //
 //   - 同一 Go 类型只能有一个处理方法。
 //
@@ -74,4 +78,12 @@
 //
 //   - BindMetadata(self, metadata) / InitAggregate(...) / InitAggregateFromTag(...) / New(...) —
 //     对外统一走 error 型 fail-fast，不再要求 Must* 包装。
+//
+// # 业务使用约束。
+//
+// 命令方法先校验，再调用 ApplyAndRecord；ApplyXxx 仅更新内存状态，不做 I/O、
+// 不读取当前时间或随机数。需要的时间与标识在命令阶段生成后写入事件。
+// ApplyEvent 供仓储顺序回放，不去重；任何应用错误都要求丢弃当前实例并重新加载。
+// 聚合实例不可并发使用，事件在应用后不可修改。业务测试必须覆盖命令失败无副作用、
+// 事件逐条回放与命令执行结果一致，以及需要支持的历史事件版本。
 package eventsourced

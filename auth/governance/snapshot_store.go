@@ -2,6 +2,7 @@ package governance
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -23,11 +24,19 @@ type IPolicySnapshotStore interface {
 
 // snapshotDiagnostics 是快照解析器可暴露的诊断面。
 //
-// 审计层在快照解析完成后经此可选接口读取 CacheHit 与快照 key，
-// 填入 AuthzLogEntry；自定义 IPolicySnapshot 不实现该接口时字段留空。
+// 诊断必须随单次解析结果返回：CacheHit 是“这一次解析”的属性，
+// 不是解析器实例的属性。若做成实例字段，并发请求会互相覆盖，
+// 让授权审计日志里的命中率统计失真。
 type snapshotDiagnostics interface {
 	CacheHit() bool
 	SnapshotKey() string
+}
+
+// snapshotResultDiagnostics 让单次解析结果携带诊断信息。
+// 优先于 snapshotDiagnostics：实现该接口时审计层从解析返回值读取，
+// 而非从共享实例字段读取。
+type snapshotResultDiagnostics interface {
+	SnapshotCacheHit() bool
 }
 
 // storeBackedSnapshot 从存储读取策略快照，并在 TTL 内复用同一版本。
@@ -100,41 +109,81 @@ func WithSnapshotClock(c clock.IClock) SnapshotOption {
 //
 // TTL 过期瞬间的并发调用共享同一次回源加载（single-flight）；
 // 加载失败不缓存，下一次调用会重新回源。
-func (s *storeBackedSnapshot) ResolveSnapshot(ctx context.Context) (PolicySnapshot, error) {
+func (s *storeBackedSnapshot) ResolveSnapshot(ctx context.Context) (snap PolicySnapshot, err error) {
 	s.mu.Lock()
 	if s.hasCache && s.ttl > 0 && s.clock.Now().Sub(s.cachedAt) < s.ttl {
 		s.lastHit = true
 		snapshot := s.cached
 		s.mu.Unlock()
-		return snapshot, nil
+		hitSnap := snapshot.WithSnapshotCacheHit(true)
+		if hitSnap.Key == "" {
+			hitSnap.Key = s.key
+		}
+		recordSnapshotCapture(ctx, hitSnap)
+		return hitSnap, nil
 	}
 	s.lastHit = false
 	if s.inflight != nil {
 		load := s.inflight
 		s.mu.Unlock()
-		return load.wait(ctx)
+		snap, err = load.wait(ctx)
+		if err == nil {
+			if snap.Key == "" {
+				snap.Key = s.key
+			}
+			recordSnapshotCapture(ctx, snap)
+		}
+		return snap, err
 	}
 	load := &snapshotLoad{done: make(chan struct{})}
 	s.inflight = load
 	s.mu.Unlock()
 
-	load.snap, load.err = s.load(ctx)
+	// 无论回源正常返回还是 panic，都必须清理在途状态并关闭 done：
+	// 否则回源 panic 会让 inflight 永远残留、done 永不关闭，所有后续
+	// 并发与后续请求永久死锁挂起。回源 panic 转换为内部错误向上传播，
+	// 等待者拿到 fail-closed 错误，绝不缓存任何未知状态。
+	defer func() {
+		if r := recover(); r != nil {
+			load.err = errors.NewCode(errors.Internal, "policy snapshot load panicked").
+				WithContext("panic", fmt.Sprint(r))
+		}
+		s.mu.Lock()
+		if s.inflight == load {
+			s.inflight = nil
+		}
+		if load.err == nil {
+			s.cached = load.snap
+			s.cachedAt = s.clock.Now()
+			s.hasCache = true
+		}
+		s.mu.Unlock()
+		close(load.done)
+		snap, err = load.snap, load.err
+		if err == nil {
+			if snap.Key == "" {
+				snap.Key = s.key
+			}
+			recordSnapshotCapture(ctx, snap)
+		}
+	}()
 
-	s.mu.Lock()
-	s.inflight = nil
+	load.snap, load.err = s.load(ctx)
 	if load.err == nil {
-		s.cached = load.snap
-		s.cachedAt = s.clock.Now()
-		s.hasCache = true
+		// 回源成功属于 cache miss，显式标注（false 是零值，但写清楚语义）。
+		load.snap = load.snap.WithSnapshotCacheHit(false)
+		if load.snap.Key == "" {
+			load.snap.Key = s.key
+		}
 	}
-	s.mu.Unlock()
-	close(load.done)
 	return load.snap, load.err
 }
 
 // CacheHit 返回最近一次 ResolveSnapshot 是否直接命中 TTL 缓存（诊断用）。
 //
-// 未发生过解析、或最近一次走了回源加载（含共享他人的在途加载）时为 false。
+// Deprecated: 该值是实例级的，并发解析时会被其它请求覆盖。
+// 审计层应改用解析返回值上的 snapshotResultDiagnostics，仅当快照类型
+// 不支持时才回退到这里。保留该方法以兼容自定义实现。
 func (s *storeBackedSnapshot) CacheHit() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()

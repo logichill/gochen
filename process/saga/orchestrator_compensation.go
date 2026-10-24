@@ -28,7 +28,15 @@ func (e *compensationStatePersistError) Unwrap() error {
 }
 
 // compensate 执行补偿。
+//
+// ctx 由调用方传入补偿专用上下文（见 acquireSagaLock/watchSagaLeaseLost）：
+// 与父 ctx 的取消/截止时间解绑（请求取消不再中止回滚），但保留租约失效
+// 信号（租约丢失仍会中止补偿）。在此基础上叠加补偿专用超时上限，
+// 防止 detach 后的补偿无限期执行使 saga 永久停留在 compensating。
 func (o *SagaOrchestrator) compensate(ctx context.Context, saga ISaga, state *SagaState, failedStepIndex int) error {
+	compCtx, cancel := context.WithTimeout(ctx, o.effectiveCompensationTimeout())
+	defer cancel()
+	ctx = compCtx
 	sagaID := saga.ID()
 	steps := saga.Steps()
 

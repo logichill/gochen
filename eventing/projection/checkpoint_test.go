@@ -1,9 +1,11 @@
 package projection
 
 import (
+	"context"
 	"testing"
 	"time"
 
+	"gochen/errors"
 	"gochen/testkit/assert"
 )
 
@@ -116,4 +118,52 @@ func BenchmarkCheckpoint_Clone(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_ = checkpoint.Clone()
 	}
+}
+
+type mockFallbackStoreWithoutForceSaver struct {
+	checkpoints  map[string]*Checkpoint
+	saveFailures int
+}
+
+func (m *mockFallbackStoreWithoutForceSaver) Load(ctx context.Context, name string) (*Checkpoint, error) {
+	if cp, ok := m.checkpoints[name]; ok {
+		return cp.Clone(), nil
+	}
+	return nil, errors.NewCode(errors.NotFound, "not found")
+}
+
+func (m *mockFallbackStoreWithoutForceSaver) Save(ctx context.Context, cp *Checkpoint) error {
+	if m.saveFailures > 0 {
+		m.saveFailures--
+		return errors.NewCode(errors.Database, "simulated disk failure")
+	}
+	m.checkpoints[cp.ProjectionName] = cp.Clone()
+	return nil
+}
+
+func (m *mockFallbackStoreWithoutForceSaver) Delete(ctx context.Context, name string) error {
+	delete(m.checkpoints, name)
+	return nil
+}
+
+func TestForceSaveCheckpoint_RestoresBackupOnSaveFailure(t *testing.T) {
+	ctx := context.Background()
+	store := &mockFallbackStoreWithoutForceSaver{
+		checkpoints: map[string]*Checkpoint{
+			"test-proj": NewCheckpoint("test-proj", 50, "event-50", time.Now()),
+		},
+		saveFailures: 1, // 第一次保存新检查点失败，第二次恢复保存成功
+	}
+
+	newCheckpoint := NewCheckpoint("test-proj", 20, "event-20", time.Now())
+
+	err := forceSaveCheckpoint(ctx, store, newCheckpoint)
+	assert.Error(t, err)
+
+	// 验证旧检查点被成功恢复，未因先删后存而彻底灭失
+	loaded, loadErr := store.Load(ctx, "test-proj")
+	assert.NoError(t, loadErr)
+	assert.NotNil(t, loaded)
+	assert.Equal(t, int64(50), loaded.Position)
+	assert.Equal(t, "event-50", loaded.LastEventID)
 }

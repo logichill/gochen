@@ -2,11 +2,16 @@ package ratelimit
 
 import (
 	"math"
+	"reflect"
+	"sort"
 	"sync"
 	"time"
 
 	"gochen/clock"
 )
+
+// defaultMaxKeys 未经配置时单实例最多跟踪的 key 数量。
+const defaultMaxKeys = 10000
 
 // Config 定义限流器配置。
 type Config struct {
@@ -17,75 +22,13 @@ type Config struct {
 	BurstSize int
 	// WindowSize 用于 key 维度的“闲置清理”窗口（<=0 默认 1 分钟）。
 	WindowSize time.Duration
+	// MaxKeys 单实例最多跟踪的 key 数量上限（<=0 使用 defaultMaxKeys）。
+	// 高基数 key（伪造 IP、随机请求 ID、恶意探测）场景下，超出上限时按
+	// 最早访问时间淘汰，避免 buckets 无界膨胀导致 OOM。
+	MaxKeys int
 
 	// Clock 可选：用于 token refill 与 bucket 清理的时间来源，便于测试稳定推进时间。
 	Clock clock.IClock
-}
-
-type tokenBucket struct {
-	clk clock.IClock
-
-	rate       float64
-	capacity   float64
-	tokens     float64
-	lastRefill time.Time
-	mu         sync.Mutex
-}
-
-// newTokenBucket 创建令牌Bucket。
-func newTokenBucket(clk clock.IClock, rps float64, burst int) *tokenBucket {
-	if clk == nil {
-		clk = clock.NewRealClock()
-	}
-	if rps <= 0 {
-		rps = 1
-	}
-	capacity := burstCapacity(rps, burst)
-	return &tokenBucket{
-		clk:        clk,
-		rate:       rps,
-		capacity:   capacity,
-		tokens:     capacity,
-		lastRefill: clk.Now(),
-	}
-}
-
-// allow 判断条件是否成立。
-func (b *tokenBucket) allow() bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	b.refillLocked(b.clk.Now())
-	if b.tokens >= 1.0 {
-		b.tokens -= 1.0
-		return true
-	}
-	return false
-}
-
-func burstCapacity(rps float64, burst int) float64 {
-	if burst > 0 {
-		return float64(burst)
-	}
-	return math.Max(1, math.Ceil(rps))
-}
-
-func (b *tokenBucket) refillLocked(now time.Time) {
-	elapsed := now.Sub(b.lastRefill).Seconds()
-	if elapsed > 0 {
-		b.tokens += elapsed * b.rate
-		if b.tokens > b.capacity {
-			b.tokens = b.capacity
-		}
-		b.lastRefill = now
-	}
-}
-
-func (b *tokenBucket) available(now time.Time) float64 {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.refillLocked(now)
-	return b.tokens
 }
 
 type bucketEntry struct {
@@ -114,7 +57,10 @@ func New(cfg Config) *Limiter {
 	if cfg.WindowSize <= 0 {
 		cfg.WindowSize = time.Minute
 	}
-	if cfg.Clock == nil {
+	if cfg.MaxKeys <= 0 {
+		cfg.MaxKeys = defaultMaxKeys
+	}
+	if cfg.Clock == nil || isNilClock(cfg.Clock) {
 		cfg.Clock = clock.NewRealClock()
 	}
 	return &Limiter{
@@ -122,6 +68,17 @@ func New(cfg Config) *Limiter {
 		clk:         cfg.Clock,
 		buckets:     make(map[string]*bucketEntry),
 		lastCleanup: cfg.Clock.Now(),
+	}
+}
+
+// isNilClock 识别接口内携带的 typed-nil 时钟，避免运行期调用 Now() 时空指针 panic。
+func isNilClock(clk clock.IClock) bool {
+	rv := reflect.ValueOf(clk)
+	switch rv.Kind() {
+	case reflect.Pointer, reflect.Interface, reflect.Map, reflect.Slice, reflect.Func, reflect.Chan:
+		return rv.IsNil()
+	default:
+		return false
 	}
 }
 
@@ -162,6 +119,10 @@ func (l *Limiter) Allow(key string) bool {
 			lastSeen: now,
 		}
 		l.buckets[key] = entry
+		// 容量上限：超出时按最早访问（最久未活跃）淘汰一批，保证内存有界。
+		if len(l.buckets) > l.cfg.MaxKeys {
+			l.evictOldestLocked(now, len(l.buckets)-l.cfg.MaxKeys)
+		}
 	} else {
 		entry.lastSeen = now
 	}
@@ -186,4 +147,34 @@ func (l *Limiter) Tokens(key string) float64 {
 		return entry.bucket.available(l.clk.Now())
 	}
 	return burstCapacity(l.cfg.RequestsPerSecond, l.cfg.BurstSize)
+}
+
+// evictOldestLocked 按 lastSeen 最久优先淘汰 count 个桶。
+// 必须在持有 l.mu 的前提下调用。批量淘汰以摊薄排序扫描开销，
+// 淘汰的重建桶将获得全新的突发额度，与首次注册语义一致。
+func (l *Limiter) evictOldestLocked(now time.Time, count int) {
+	if count <= 0 || len(l.buckets) == 0 {
+		return
+	}
+	type evictionCandidate struct {
+		key      string
+		lastSeen time.Time
+	}
+	candidates := make([]evictionCandidate, 0, len(l.buckets))
+	for k, entry := range l.buckets {
+		lastSeen := now
+		if entry != nil {
+			lastSeen = entry.lastSeen
+		}
+		candidates = append(candidates, evictionCandidate{key: k, lastSeen: lastSeen})
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].lastSeen.Before(candidates[j].lastSeen)
+	})
+	if count > len(candidates) {
+		count = len(candidates)
+	}
+	for _, c := range candidates[:count] {
+		delete(l.buckets, c.key)
+	}
 }

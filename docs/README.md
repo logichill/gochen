@@ -11,6 +11,7 @@
 | [Quick 装配](guides/quick-assembly.md) | Repo / Application / REST / Host 工厂与列名约定 |
 | [Contrib 适配器](guides/contrib-guide.md) | 第三方适配器职责与接入边界 |
 | [框架架构](architecture/framework-design.md) | 能力分层、依赖方向、生命周期和并发约定 |
+| [源码文件组织](architecture/source-layout.md) | 实现文件前缀、职责拆分与主要模块导航 |
 | [分层授权](architecture/layered-authz.md) | L0–L4、DataScope、写入约束与跨隔离读取 |
 | [开发规范](../SPEC.md) / [仓库约定](../AGENTS.md) | 编码规则、顶级包与依赖矩阵 |
 

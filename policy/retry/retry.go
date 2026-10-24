@@ -212,6 +212,8 @@ func do(ctx context.Context, cfg Config, op OperationWithInfo) error {
 }
 
 func computeDelay(cfg Config, attempt int) time.Duration {
+	// 下界钳制：调用方（含 ComputeDelay 公共入口）传入非正数 attempt 时按首次重试处理，
+	// 避免负数指数放大成极大/负值延迟。
 	if attempt <= 0 {
 		attempt = 1
 	}

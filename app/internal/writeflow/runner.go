@@ -1,3 +1,4 @@
+// Package writeflow 提供应用层写流程的统一装配与执行引擎。
 package writeflow
 
 import (
@@ -13,24 +14,6 @@ type ITxRunner interface {
 	WithinTx(ctx context.Context, fn func(txCtx context.Context) error) error
 }
 
-// Step 表示写流程中的一个阶段。
-type Step func(ctx context.Context) error
-
-// PostCommit 表示事务提交后执行的回调。
-type PostCommit func(ctx context.Context) error
-
-// PostCommits 过滤空回调并转换为事务提交后回调列表。
-func PostCommits(callbacks ...func(context.Context) error) []PostCommit {
-	postCommits := make([]PostCommit, 0, len(callbacks))
-	for _, callback := range callbacks {
-		if callback == nil {
-			continue
-		}
-		postCommits = append(postCommits, callback)
-	}
-	return postCommits
-}
-
 // ValidateBatchSize 校验批量操作数量不超过配置上限。
 func ValidateBatchSize(size int, max int) error {
 	if size > max {
@@ -39,114 +22,145 @@ func ValidateBatchSize(size int, max int) error {
 	return nil
 }
 
-// Plan 描述一次写流程。
-type Plan struct {
-	Before   Step
-	Validate Step
-	Write    Step
-	After    Step
+// Flow 描述一次写流程，固定按 before -> validate -> action -> after -> post-commit 执行。
+//
+// 约定：
+//   - Before/Validate/Action/After 任一失败立即中断，有事务时随之回滚；
+//   - PostCommit 在事务真正提交后执行，失败不会回滚已提交写入；
+//   - 配置了 PostCommit 但未绑定事务执行器时，入口即返回 Unsupported；
+//   - 构造完成后 Flow 只读，可并发复用。
+type Flow[P any] struct {
+	tx ITxRunner
 
-	PostCommits []PostCommit
+	action     func(context.Context, P) error
+	befores    []func(context.Context, P) error
+	validates  []func(P) error
+	afters     []func(context.Context, P) error
+	postCommit func(context.Context, P) error
 
-	// CallbackContext 用于 post-commit 回调；为空时回退到 Run 的 ctx。
-	CallbackContext context.Context
-
-	// BeforeValidateOutsideTx 用于保持 batch 场景现有的预检查语义。
-	BeforeValidateOutsideTx bool
+	// outsideTx 将 Before/Validate 移到事务外预检（批量场景）。
+	outsideTx bool
 }
 
-// Run 按 before -> validate -> write -> after -> register post-commit 执行写流程。
-func Run(ctx context.Context, tx ITxRunner, plan Plan) error {
+// New 创建绑定事务执行器的写流程；tx 为 nil 表示仓储不支持事务。
+func New[P any](tx ITxRunner) *Flow[P] {
+	return &Flow[P]{tx: tx}
+}
+
+// Action 绑定核心写入动作；未配置时 Run 返回错误。
+func (f *Flow[P]) Action(action func(context.Context, P) error) *Flow[P] {
+	f.action = action
+	return f
+}
+
+// Before 追加写入前步骤；nil 视为未配置。
+func (f *Flow[P]) Before(fn func(context.Context, P) error) *Flow[P] {
+	if fn != nil {
+		f.befores = append(f.befores, fn)
+	}
+	return f
+}
+
+// Validate 追加校验步骤；nil 视为未配置。
+func (f *Flow[P]) Validate(fn func(P) error) *Flow[P] {
+	if fn != nil {
+		f.validates = append(f.validates, fn)
+	}
+	return f
+}
+
+// After 追加核心写入后（事务提交前）步骤；nil 视为未配置。
+func (f *Flow[P]) After(fn func(context.Context, P) error) *Flow[P] {
+	if fn != nil {
+		f.afters = append(f.afters, fn)
+	}
+	return f
+}
+
+// PostCommit 配置事务提交后回调；nil 视为未配置。
+func (f *Flow[P]) PostCommit(fn func(context.Context, P) error) *Flow[P] {
+	if fn != nil {
+		f.postCommit = fn
+	}
+	return f
+}
+
+// OutsideTx 将 Before/Validate 移到事务外预检。
+func (f *Flow[P]) OutsideTx() *Flow[P] {
+	f.outsideTx = true
+	return f
+}
+
+// Run 执行写流程。
+func (f *Flow[P]) Run(ctx context.Context, payload P) error {
 	if ctx == nil {
 		return errors.NewCode(errors.InvalidInput, "ctx is nil")
 	}
-	if plan.Write == nil {
-		return errors.NewCode(errors.InvalidInput, "write step is nil")
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-
-	callbackCtx := plan.CallbackContext
-	if callbackCtx == nil {
-		callbackCtx = ctx
+	if f.action == nil {
+		return errors.NewCode(errors.InvalidInput, "action step is nil")
 	}
-
-	if tx == nil && hasPostCommitCallbacks(plan.PostCommits) {
+	if f.postCommit != nil && f.tx == nil {
 		return errors.NewCode(errors.Unsupported, "post-commit hook requires repository to implement ITransactional")
 	}
 
-	if plan.BeforeValidateOutsideTx {
-		if err := runBeforeValidate(ctx, plan); err != nil {
-			return err
-		}
-	}
-
-	if tx == nil {
-		if !plan.BeforeValidateOutsideTx {
-			if err := runBeforeValidate(ctx, plan); err != nil {
+	preflight := func(ctx context.Context) error {
+		for _, fn := range f.befores {
+			if err := fn(ctx, payload); err != nil {
 				return err
 			}
 		}
-		return runWriteAndAfter(ctx, plan)
-	}
-
-	return tx.WithinTx(ctx, func(txCtx context.Context) error {
-		if !plan.BeforeValidateOutsideTx {
-			if err := runBeforeValidate(txCtx, plan); err != nil {
+		for _, fn := range f.validates {
+			if err := fn(payload); err != nil {
 				return err
 			}
 		}
-		if err := runWriteAndAfter(txCtx, plan); err != nil {
+		return nil
+	}
+	write := func(ctx context.Context) error {
+		if err := f.action(ctx, payload); err != nil {
 			return err
 		}
-		return appendPostCommitCallbacks(txCtx, callbackCtx, plan.PostCommits)
+		for _, fn := range f.afters {
+			if err := fn(ctx, payload); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	if f.outsideTx {
+		if err := preflight(ctx); err != nil {
+			return err
+		}
+	}
+	if f.tx == nil {
+		if !f.outsideTx {
+			if err := preflight(ctx); err != nil {
+				return err
+			}
+		}
+		return write(ctx)
+	}
+
+	postCommit := f.postCommit
+	return f.tx.WithinTx(ctx, func(txCtx context.Context) error {
+		if !f.outsideTx {
+			if err := preflight(txCtx); err != nil {
+				return err
+			}
+		}
+		if err := write(txCtx); err != nil {
+			return err
+		}
+		if postCommit == nil {
+			return nil
+		}
+		// 提交后回调用调用方 ctx 执行，不触碰事务资源。
+		return contextx.AppendAfterCommit(txCtx, func(context.Context) error {
+			return postCommit(ctx, payload)
+		})
 	})
-}
-
-func runBeforeValidate(ctx context.Context, plan Plan) error {
-	if plan.Before != nil {
-		if err := plan.Before(ctx); err != nil {
-			return err
-		}
-	}
-	if plan.Validate != nil {
-		if err := plan.Validate(ctx); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func runWriteAndAfter(ctx context.Context, plan Plan) error {
-	if err := plan.Write(ctx); err != nil {
-		return err
-	}
-	if plan.After != nil {
-		if err := plan.After(ctx); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func hasPostCommitCallbacks(callbacks []PostCommit) bool {
-	for _, callback := range callbacks {
-		if callback != nil {
-			return true
-		}
-	}
-	return false
-}
-
-func appendPostCommitCallbacks(txCtx, callbackCtx context.Context, callbacks []PostCommit) error {
-	for _, callback := range callbacks {
-		if callback == nil {
-			continue
-		}
-		cb := callback
-		if err := contextx.AppendAfterCommit(txCtx, func(context.Context) error {
-			return cb(callbackCtx)
-		}); err != nil {
-			return err
-		}
-	}
-	return nil
 }

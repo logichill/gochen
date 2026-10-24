@@ -278,5 +278,83 @@ func TestSyncTransport_PublishAll_DeadlineExceededNotWrapped(t *testing.T) {
 	if err != context.DeadlineExceeded {
 		t.Fatalf("expected context.DeadlineExceeded, got: %v", err)
 	}
+}
 
+type mutatingHandler struct{}
+
+func (mutatingHandler) Handle(_ context.Context, m messaging.IMessage) error {
+	if md := m.GetMetadata(); md != nil {
+		md.Set("mutated", "by_h1")
+	}
+	if p, ok := messaging.PayloadAs[map[string]any](m.GetPayload()); ok {
+		p["mutated"] = "by_h1"
+	}
+	return nil
+}
+
+func (mutatingHandler) Type() string { return "mutating" }
+
+type observingHandler struct {
+	observedVal     string
+	observedPayload map[string]any
+}
+
+func (h *observingHandler) Handle(_ context.Context, m messaging.IMessage) error {
+	if md := m.GetMetadata(); md != nil {
+		h.observedVal, _ = md.Get("mutated")
+	}
+	if p, ok := messaging.PayloadAs[map[string]any](m.GetPayload()); ok {
+		h.observedPayload = p
+	}
+	return nil
+}
+
+func (h *observingHandler) Type() string { return "observing" }
+
+func TestSyncTransport_MultiHandlerIsolation(t *testing.T) {
+	tpt := NewSyncTransport()
+	if err := tpt.Start(context.Background()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer func() { _ = tpt.Stop(context.Background()) }()
+
+	observer := &observingHandler{}
+
+	// 注册顺序：mutatingHandler (i=0) 先执行，observer (i=1) 后执行
+	if _, err := tpt.Subscribe(context.Background(), "T", mutatingHandler{}); err != nil {
+		t.Fatalf("sub mutating: %v", err)
+	}
+	if _, err := tpt.Subscribe(context.Background(), "T", observer); err != nil {
+		t.Fatalf("sub observing: %v", err)
+	}
+
+	payloadMap := map[string]any{"initial": "clean"}
+	meta := messaging.NewMetadata()
+	meta.Set("initial", "clean")
+	msg := &messaging.Message{
+		ID:       "msg-iso-1",
+		Type:     "T",
+		Payload:  messaging.NewPayload(payloadMap),
+		Metadata: meta,
+	}
+
+	if err := tpt.Publish(context.Background(), msg); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	// 验证 observer (i=1) 没有被 mutatingHandler (i=0) 污染
+	if observer.observedVal != "" {
+		t.Fatalf("observer saw polluted metadata: %s", observer.observedVal)
+	}
+	if observer.observedPayload["mutated"] != nil {
+		t.Fatalf("observer saw polluted payload: %+v", observer.observedPayload)
+	}
+
+	// 验证发布者传入的原始 msg 实例也没有被 mutatingHandler 污染
+	if val, ok := msg.GetMetadata().Get("mutated"); ok && val != "" {
+		t.Fatalf("original msg metadata was polluted: %s", val)
+	}
+	if payloadMap["mutated"] != nil {
+		t.Fatalf("original payload was polluted: %+v", payloadMap)
+	}
 }

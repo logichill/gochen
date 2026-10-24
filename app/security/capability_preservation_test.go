@@ -26,16 +26,25 @@ func (o *capOrder) Validate() error { return nil }
 
 // restAuditedSurface 复刻 api/rest.IAuditedService 的方法集（含 Delete）。
 //
-// 刻意在这里重新声明而不是 import：gochen 不依赖 runtime，
-// 而 Go 的接口断言是结构化的——本地声明能等价地验证 REST 侧探测会不会成功。
+// 特意不声明 AuditStore：P2-051 已从能力接口移除该旁路句柄，
+// 这里用来验证装饰器不再向外泄露底层审计存储。
 type restAuditedSurface[T any, ID comparable] interface {
 	HasPurgeCapability() bool
+	HasAuditStore() bool
 	Delete(ctx context.Context, id ID) error
 	Purge(ctx context.Context, id ID) error
 	Restore(ctx context.Context, id ID, by string) error
 	ListDeleted(ctx context.Context, offset, limit int) ([]T, error)
 	AuditTrail(ctx context.Context, id ID, offset, limit int) ([]audited.AuditRecord, error)
+}
+
+// leakyAuditStoreSurface 声明旧的白盒句柄；装饰器不得再满足它。
+type leakyAuditStoreSurface interface {
 	AuditStore() audited.IAuditStore
+
+	HasPurgeCapability() bool
+	Purge(ctx context.Context, id int64) error
+	Restore(ctx context.Context, id int64, by string) error
 }
 
 func newCapApp(t *testing.T, scoped bool) appcrud.IApplication[*capOrder, int64] {
@@ -162,4 +171,87 @@ func allowAllAuthorizer(t *testing.T) authscoped.IAuthorizer {
 	authorizer, err := authscoped.NewAuthorizer(resolver, evaluator)
 	require.NoError(t, err)
 	return authorizer
+}
+
+// capAuditedApp 在普通 CRUD 应用上补齐审计能力面（含旧的白盒句柄）。
+type capAuditedApp struct {
+	appcrud.IApplication[*capOrder, int64]
+}
+
+func (a *capAuditedApp) HasPurgeCapability() bool { return true }
+
+func (a *capAuditedApp) HasAuditStore() bool { return true }
+
+// AuditStore 故意保留旧白盒句柄：用于验证装饰器不会把它透传出去。
+func (a *capAuditedApp) AuditStore() audited.IAuditStore { return nil }
+
+func (a *capAuditedApp) ListDeleted(context.Context, int, int) ([]*capOrder, error) {
+	return nil, nil
+}
+
+func (a *capAuditedApp) GetWithDeleted(ctx context.Context, id int64) (*capOrder, error) {
+	return a.Get(ctx, id)
+}
+
+func (a *capAuditedApp) AuditTrail(context.Context, int64, int, int) ([]audited.AuditRecord, error) {
+	return nil, nil
+}
+
+func (a *capAuditedApp) Restore(context.Context, int64, string) error { return nil }
+
+func (a *capAuditedApp) Purge(context.Context, int64) error { return nil }
+
+// P2-051 回归：装饰器必须透传 HasAuditStore，但不得再暴露 AuditStore 白盒句柄。
+func TestAuditedDecoratorDoesNotLeakAuditStore(t *testing.T) {
+	inner := &capAuditedApp{IApplication: newCapApp(t, false)}
+	secured, err := secaction.New[*capOrder, int64](inner, &allowChecker{}, capPolicy())
+	require.NoError(t, err)
+
+	surface, ok := any(secured).(restAuditedSurface[*capOrder, int64])
+	require.True(t, ok, "audited capability must still be exposed")
+	require.True(t, surface.HasAuditStore())
+
+	_, leaked := any(secured).(leakyAuditStoreSurface)
+	require.False(t, leaked, "audited decorator must not expose raw AuditStore handle")
+}
+
+type narrowCapRepo struct{}
+
+func (narrowCapRepo) Create(context.Context, *capOrder) error       { return nil }
+func (narrowCapRepo) Get(context.Context, int64) (*capOrder, error) { return &capOrder{}, nil }
+func (narrowCapRepo) Update(context.Context, *capOrder) error       { return nil }
+func (narrowCapRepo) Delete(context.Context, int64) error           { return nil }
+func (narrowCapRepo) HasScopeDeclaration() bool                     { return true }
+func (narrowCapRepo) ResourceKind() string                          { return "order" }
+func (narrowCapRepo) ValidateWriteConstraintSupport() error         { return nil }
+
+func TestDecoratorsDoNotFakeMissingBatchOrQueryCapabilities(t *testing.T) {
+	base, err := appcrud.NewApplication[*capOrder, int64](narrowCapRepo{}, nil)
+	require.NoError(t, err)
+
+	scopedSecured, err := secscoped.New[*capOrder, int64](base, allowAllAuthorizer(t), secscoped.Config{
+		EntityType:    "order",
+		Policy:        capPolicy(),
+		ScopeResolver: authscoped.DataScopeResolverFunc(func(context.Context) (authscoped.DataScope, error) { return authscoped.Filtered(101), nil }),
+	})
+	require.NoError(t, err)
+
+	_, hasBatch := any(scopedSecured).(appcrud.IBatchWriter[*capOrder, int64])
+	require.False(t, hasBatch, "scoped decorator must not expose IBatchWriter when repo lacks batch capability")
+	scopedCaps, ok := any(scopedSecured).(appcrud.ICapabilities)
+	require.True(t, ok)
+	require.False(t, scopedCaps.HasBatchCapability())
+	require.False(t, scopedCaps.HasQueryCapability())
+	require.False(t, scopedCaps.HasQueryableCapability())
+
+	actionSecured, err := secaction.New[*capOrder, int64](scopedSecured, &allowChecker{}, capPolicy())
+	require.NoError(t, err)
+
+	_, hasBatch = any(actionSecured).(appcrud.IBatchWriter[*capOrder, int64])
+	require.False(t, hasBatch, "action decorator must not expose IBatchWriter when repo lacks batch capability")
+	actionCaps, ok := any(actionSecured).(appcrud.ICapabilities)
+	require.True(t, ok)
+	require.False(t, actionCaps.HasBatchCapability())
+	require.False(t, actionCaps.HasQueryCapability())
+	require.False(t, actionCaps.HasQueryableCapability())
 }

@@ -100,6 +100,8 @@ func TestParallelPublisher_MarkLoopBatchPublishedFallbackRecoversPerEntryFailure
 		t.Fatal("timed out waiting for mark loop to stop")
 	}
 
+	// 发布成功但标记发布失败时，mark 失败必须计入 RetryCount（有界重投 + DLQ 逃生）。
+	// 回退路径传入的 recovery entry 无 RetryCount，MaxRetries=3 下不触发 DLQ。
 	require.Equal(t, 1, repo.MarkedFailedLen())
 	require.Equal(t, 0, repo.MarkedPublishedLen())
 }

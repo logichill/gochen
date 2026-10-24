@@ -120,3 +120,69 @@ func TestDecodeAdapterFilters_ApplyPropagatesRangeError(t *testing.T) {
 		t.Fatalf("expected InvalidInput, got %v", err)
 	}
 }
+
+// TestFilterBuilder_NilSafety 验证 nil *FilterBuilder 安全链式调用与空操作。
+func TestFilterBuilder_NilSafety(t *testing.T) {
+	var b *FilterBuilder
+	// 链式调用不应该 panic
+	b = b.Eq("name", "alice").
+		Ne("status", "inactive").
+		Like("desc", "%foo%").
+		Gt("age", "18").
+		Gte("age", "18").
+		Lt("age", "30").
+		Lte("age", "30").
+		In("role", "admin", "user").
+		NotIn("role", "guest").
+		IsNull("deleted_at").
+		NotNull("created_at")
+
+	if b != nil {
+		t.Fatalf("expected nil receiver to return nil, got %v", b)
+	}
+	if out := b.Build(); out != nil {
+		t.Fatalf("expected nil Build() output, got %v", out)
+	}
+	if err := b.Apply(&QueryRequest{}); err != nil {
+		t.Fatalf("expected nil Apply error, got %v", err)
+	}
+}
+
+// P2-081 回归：ApplyWithSchema 必须支持范围操作符（按字段类型解码）。
+func TestFilterBuilderApplyWithSchemaSupportsRangeOperators(t *testing.T) {
+	schema := NewQuerySchema(
+		IntField("age", WithFilterOps(FilterOpEq, FilterOpGt, FilterOpGte, FilterOpLt, FilterOpLte)),
+	)
+
+	builder := NewFilterBuilder().Gte("age", "18").Lt("age", "65")
+	request := &QueryRequest{}
+	if err := builder.ApplyWithSchema(request, schema); err != nil {
+		t.Fatalf("ApplyWithSchema: %v", err)
+	}
+	exprs := request.Filters.Get("age")
+	if len(exprs) != 2 {
+		t.Fatalf("expected 2 range expressions, got %d", len(exprs))
+	}
+	if exprs[0].Op != FilterOpGte || exprs[0].Value.Int != 18 {
+		t.Fatalf("unexpected first expr: %+v", exprs[0])
+	}
+	if exprs[1].Op != FilterOpLt || exprs[1].Value.Int != 65 {
+		t.Fatalf("unexpected second expr: %+v", exprs[1])
+	}
+}
+
+// 无 schema 时 Apply 仍按原契约拒绝范围操作符（避免静默放宽读取）。
+func TestFilterBuilderApplyWithoutSchemaRejectsRangeOperators(t *testing.T) {
+	request := &QueryRequest{}
+	if err := NewFilterBuilder().Gt("age", "18").Apply(request); err == nil {
+		t.Fatal("expected Apply without schema to reject range operator")
+	}
+}
+
+// ApplyWithSchema 传入 nil schema 必须 fail-fast。
+func TestFilterBuilderApplyWithSchemaRejectsNilSchema(t *testing.T) {
+	request := &QueryRequest{}
+	if err := NewFilterBuilder().Eq("name", "alice").ApplyWithSchema(request, nil); err == nil {
+		t.Fatal("expected nil schema to be rejected")
+	}
+}

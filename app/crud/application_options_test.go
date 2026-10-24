@@ -12,10 +12,10 @@ func TestApplicationOptionsAreCapturedAtConstruction(t *testing.T) {
 	cfg.MaxBatchSize = 1
 	validator := &trackingValidator{}
 	hookCalls := 0
-	hooks := &Hooks[testEntity, int64]{BeforeCreate: func(context.Context, testEntity) error {
+	hooks := &Hooks[testEntity, int64]{Create: Stage[testEntity]{Before: func(context.Context, testEntity) error {
 		hookCalls++
 		return nil
-	}}
+	}}}
 	opts := &Options[testEntity, int64]{Config: cfg, Validator: validator, Hooks: hooks}
 	app, err := NewApplication(newBatchTestRepo(), opts)
 	if err != nil {
@@ -25,7 +25,7 @@ func TestApplicationOptionsAreCapturedAtConstruction(t *testing.T) {
 	// 调用方继续使用配置对象，不能改写已构造应用的行为。
 	cfg.AutoValidate = false
 	cfg.MaxBatchSize = 100
-	hooks.BeforeCreate = func(context.Context, testEntity) error { return errors.New("replacement hook") }
+	hooks.Create.Before = func(context.Context, testEntity) error { return errors.New("replacement hook") }
 	*opts = Options[testEntity, int64]{}
 	app.Config().MaxBatchSize = 200
 	if err := app.Create(context.Background(), testEntity{id: 1}); err != nil {

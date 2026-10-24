@@ -31,7 +31,7 @@ func (o *SagaOrchestrator) Execute(ctx context.Context, saga ISaga) error {
 			WithContext("saga_id", sagaID)
 	}
 
-	lockedCtx, release, err := o.acquireSagaLock(ctx, sagaID)
+	lockedCtx, compCtx, release, err := o.acquireSagaLock(ctx, sagaID)
 	if err != nil {
 		return err
 	}
@@ -68,7 +68,7 @@ func (o *SagaOrchestrator) Execute(ctx context.Context, saga ISaga) error {
 
 	// 执行步骤
 	for i, step := range steps {
-		if err := o.executeStepWithLeaseGuard(ctx, saga, state, step, i); err != nil {
+		if err := o.executeStepWithLeaseGuard(ctx, compCtx, saga, state, step, i); err != nil {
 			return err
 		}
 		if err := o.markStepCompletedWithLeaseGuard(ctx, state, sagaID, step.Name); err != nil {
@@ -90,7 +90,11 @@ func (o *SagaOrchestrator) Execute(ctx context.Context, saga ISaga) error {
 	return nil
 }
 
-func (o *SagaOrchestrator) executeStepWithLeaseGuard(ctx context.Context, saga ISaga, state *SagaState, step *SagaStep, stepIndex int) error {
+// executeStepWithLeaseGuard 在租约守卫下执行单个步骤。
+// compCtx 是补偿专用上下文（不随父取消、保留租约失效信号），仅在步骤失败
+// 且失败原因不是租约丢失时传给 handleStepFailure：普通取消/超时仍须进入
+// 补偿（回滚已提交副作用），只有租约丢失才短路失败处理。
+func (o *SagaOrchestrator) executeStepWithLeaseGuard(ctx context.Context, compCtx context.Context, saga ISaga, state *SagaState, step *SagaStep, stepIndex int) error {
 	sagaID := saga.ID()
 	if err := ensureSagaLeaseActive(ctx, sagaID); err != nil {
 		return err
@@ -101,10 +105,10 @@ func (o *SagaOrchestrator) executeStepWithLeaseGuard(ctx context.Context, saga I
 		logging.String("step_name", step.Name))
 
 	if err := o.executeStep(ctx, sagaID, step); err != nil {
-		if leaseErr := ensureSagaLeaseActive(ctx, sagaID); leaseErr != nil {
+		if leaseErr := ensureSagaLeaseActive(ctx, sagaID); leaseErr != nil && isSagaLeaseLostError(leaseErr) {
 			return leaseErr
 		}
-		return o.handleStepFailure(ctx, saga, state, step, stepIndex, err)
+		return o.handleStepFailure(compCtx, saga, state, step, stepIndex, err)
 	}
 	return ensureSagaLeaseActive(ctx, sagaID)
 }
@@ -129,6 +133,9 @@ func (o *SagaOrchestrator) markStepCompleted(ctx context.Context, state *SagaSta
 	return nil
 }
 
+// handleStepFailure 处理步骤失败：标记失败、必要时补偿并发布事件。
+// ctx 必须是补偿专用上下文（见 acquireSagaLock）：请求 ctx 取消后失败处理
+// 与补偿仍须继续，只有租约失效（经该 ctx 的 Cause 检测）才会中止。
 func (o *SagaOrchestrator) handleStepFailure(ctx context.Context, saga ISaga, state *SagaState, step *SagaStep, stepIndex int, stepErr error) error {
 	sagaID := saga.ID()
 

@@ -30,12 +30,16 @@ type doc struct {
 
 func (d *doc) Validate() error { return nil }
 
-// deletedAwareRepo 精确模拟软删记录：常规探针查不到，include-deleted 探针查得到。
+// deletedAwareRepo 精确模拟软删/物理删除记录：
+// 常规探针查不到软删记录，include-deleted 探针查得到；
+// 被 Purge（物理擦除）的记录连 include-deleted 探针也查不到。
 type deletedAwareRepo struct {
 	*testkit.MemoryRepository[*doc, int64]
 
 	// deletedIDs 中的记录只能被 include-deleted 探针解析到。
 	deletedIDs map[int64]bool
+	// purgedIDs 中的记录已被物理删除，任何探针都解析不到。
+	purgedIDs  map[int64]bool
 	includeHit int
 }
 
@@ -50,11 +54,12 @@ func newDeletedAwareRepo(deleted ...int64) *deletedAwareRepo {
 			testkit.WithMemoryScope[*doc, int64]("document"),
 		),
 		deletedIDs: ids,
+		purgedIDs:  make(map[int64]bool),
 	}
 }
 
 func (r *deletedAwareRepo) ResolveResourceByID(_ context.Context, id int64) (authscoped.Resource, error) {
-	if r.deletedIDs[id] {
+	if r.deletedIDs[id] || r.purgedIDs[id] {
 		return authscoped.Resource{}, errors.NewCode(errors.NotFound, "record not found")
 	}
 	return r.boundary(id), nil
@@ -62,6 +67,9 @@ func (r *deletedAwareRepo) ResolveResourceByID(_ context.Context, id int64) (aut
 
 func (r *deletedAwareRepo) ResolveResourceByIDIncludingDeleted(_ context.Context, id int64) (authscoped.Resource, error) {
 	r.includeHit++
+	if r.purgedIDs[id] {
+		return authscoped.Resource{}, errors.NewCode(errors.NotFound, "record not found")
+	}
 	return r.boundary(id), nil
 }
 
@@ -90,12 +98,17 @@ func (a *auditedInner) Restore(_ context.Context, id int64, _ string) error {
 
 func (a *auditedInner) ListDeleted(context.Context, int, int) ([]*doc, error) { return nil, nil }
 
+// GetWithDeleted 对齐扩展后的 IApplication.IAuditOperations 能力面。
+func (a *auditedInner) GetWithDeleted(ctx context.Context, id int64) (*doc, error) {
+	return a.Application.Get(ctx, id)
+}
+
 func (a *auditedInner) AuditTrail(_ context.Context, id int64, _, _ int) ([]audited.AuditRecord, error) {
 	a.trailed = append(a.trailed, id)
 	return nil, nil
 }
 
-func (a *auditedInner) AuditStore() audited.IAuditStore { return nil }
+func (a *auditedInner) HasAuditStore() bool { return true }
 
 func newAuditedL3App(t *testing.T, repo *deletedAwareRepo) (appcrud.IApplication[*doc, int64], *auditedInner) {
 	t.Helper()
@@ -186,6 +199,26 @@ func TestAuditTrailResolvesDeletedBoundary(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []int64{7}, inner.trailed)
 	require.Equal(t, 1, repo.includeHit)
+}
+
+// 被 Purge 的实体无法解析边界：AuditTrail 必须 fail-closed（NotFound），
+// 不得降级为动作级授权直读。审计存储链路（IAuditStore.ListAuditRecordsByEntity）
+// 不消费 DataScope、审计记录也没有范围列，动作级降级直读等于允许
+// 持 audit_read 权限者按任意 ID 越范围调阅 Purged 实体的审计史。
+func TestAuditTrailPurgedEntityFailsClosed(t *testing.T) {
+	repo := newDeletedAwareRepo(7)
+	repo.purgedIDs[9] = true
+	secured, inner := newAuditedL3App(t, repo)
+
+	_, err := auditedSurfaceOf(t, secured).AuditTrail(context.Background(), 9, 0, 10)
+
+	require.True(t, errors.Is(err, errors.NotFound),
+		"purged entity audit trail must fail closed")
+	for _, id := range inner.trailed {
+		if id == 9 {
+			t.Fatalf("purged entity audit trail must not be read via downgrade path")
+		}
+	}
 }
 
 // 装饰器的 EntityType 与仓储资源类型不一致时，约束恒匹配不到 → 构造期就该拒绝。

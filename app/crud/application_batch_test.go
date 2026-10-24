@@ -25,9 +25,8 @@ func TestApplication_CreateAll_AllOrNothing_ValidationFailure(t *testing.T) {
 		{id: 2}, // 校验失败
 		{id: 3},
 	}
-	writer := NewBatchWriter(app)
 
-	err = writer.CreateAll(context.Background(), entities)
+	err = app.CreateAll(context.Background(), entities)
 	if err == nil {
 		t.Fatalf("expected error when validation fails, got nil")
 	}
@@ -47,9 +46,8 @@ func TestApplication_CreateAll_AllOrNothing_Success(t *testing.T) {
 	}
 
 	entities := []testEntity{{id: 1}, {id: 2}, {id: 3}}
-	writer := NewBatchWriter(app)
 
-	err = writer.CreateAll(context.Background(), entities)
+	err = app.CreateAll(context.Background(), entities)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -66,22 +64,21 @@ func TestApplication_CreateAll_RunsBeforeAndValidateOncePerEntity(t *testing.T) 
 
 	var beforeCalls int
 	app, err := NewApplication(repo, &Options[testEntity, int64]{Validator: validator, Config: DefaultServiceConfig(), Hooks: &Hooks[testEntity, int64]{
-		BeforeCreate: func(ctx context.Context, entity testEntity) error {
+		Create: Stage[testEntity]{Before: func(_ context.Context, _ testEntity) error {
 			beforeCalls++
 			return nil
-		},
+		}},
 	}})
 	if err != nil {
 		t.Fatalf("new application: %v", err)
 	}
 
-	writer := NewBatchWriter(app)
-	err = writer.CreateAll(context.Background(), []testEntity{{id: 1}, {id: 2}})
+	err = app.CreateAll(context.Background(), []testEntity{{id: 1}, {id: 2}})
 	if err != nil {
 		t.Fatalf("create all: %v", err)
 	}
 	if beforeCalls != 2 {
-		t.Fatalf("expected BeforeCreate once per entity, got %d", beforeCalls)
+		t.Fatalf("expected Before hook once per entity, got %d", beforeCalls)
 	}
 	if validator.called != 2 {
 		t.Fatalf("expected Validate once per entity, got %d", validator.called)
@@ -96,22 +93,21 @@ func TestApplication_UpdateAll_RunsBeforeAndValidateOncePerEntity(t *testing.T) 
 
 	var beforeCalls int
 	app, err := NewApplication(repo, &Options[testEntity, int64]{Validator: validator, Config: DefaultServiceConfig(), Hooks: &Hooks[testEntity, int64]{
-		BeforeUpdate: func(ctx context.Context, entity testEntity) error {
+		Update: Stage[testEntity]{Before: func(_ context.Context, _ testEntity) error {
 			beforeCalls++
 			return nil
-		},
+		}},
 	}})
 	if err != nil {
 		t.Fatalf("new application: %v", err)
 	}
 
-	writer := NewBatchWriter(app)
-	err = writer.UpdateAll(context.Background(), []testEntity{{id: 1}, {id: 2}})
+	err = app.UpdateAll(context.Background(), []testEntity{{id: 1}, {id: 2}})
 	if err != nil {
 		t.Fatalf("update all: %v", err)
 	}
 	if beforeCalls != 2 {
-		t.Fatalf("expected BeforeUpdate once per entity, got %d", beforeCalls)
+		t.Fatalf("expected Before hook once per entity, got %d", beforeCalls)
 	}
 	if validator.called != 2 {
 		t.Fatalf("expected Validate once per entity, got %d", validator.called)
@@ -125,22 +121,21 @@ func TestApplication_DeleteAll_RunsBeforeOncePerID(t *testing.T) {
 
 	var beforeCalls int
 	app, err := NewApplication[testEntity, int64](repo, &Options[testEntity, int64]{Config: DefaultServiceConfig(), Hooks: &Hooks[testEntity, int64]{
-		BeforeDelete: func(ctx context.Context, id int64) error {
+		Delete: Stage[int64]{Before: func(_ context.Context, _ int64) error {
 			beforeCalls++
 			return nil
-		},
+		}},
 	}})
 	if err != nil {
 		t.Fatalf("new application: %v", err)
 	}
 
-	writer := NewBatchWriter(app)
-	err = writer.DeleteAll(context.Background(), []int64{1, 2})
+	err = app.DeleteAll(context.Background(), []int64{1, 2})
 	if err != nil {
 		t.Fatalf("delete all: %v", err)
 	}
 	if beforeCalls != 2 {
-		t.Fatalf("expected BeforeDelete once per id, got %d", beforeCalls)
+		t.Fatalf("expected Before hook once per id, got %d", beforeCalls)
 	}
 }
 
@@ -150,32 +145,33 @@ func TestApplication_CreateAll_AfterHookRunsBeforeCommitAndPostCommitRunsAfterCo
 	var afterCreateSawCommitted bool
 	var postCommitSawCommitted bool
 	app, err := NewApplication(repo, &Options[testEntity, int64]{Config: DefaultServiceConfig(), Hooks: &Hooks[testEntity, int64]{
-		AfterCreate: func(ctx context.Context, entity testEntity) error {
-			if len(repo.creates) > 0 {
-				afterCreateSawCommitted = true
-			}
-			return nil
-		},
-		PostCommitCreate: func(ctx context.Context, entity testEntity) error {
-			if len(repo.creates) > 0 {
-				postCommitSawCommitted = true
-			}
-			return nil
+		Create: Stage[testEntity]{
+			After: func(_ context.Context, entity testEntity) error {
+				if len(repo.creates) > 0 {
+					afterCreateSawCommitted = true
+				}
+				return nil
+			},
+			PostCommit: func(_ context.Context, entity testEntity) error {
+				if len(repo.creates) > 0 {
+					postCommitSawCommitted = true
+				}
+				return nil
+			},
 		},
 	}})
 	if err != nil {
 		t.Fatalf("new application: %v", err)
 	}
 
-	writer := NewBatchWriter(app)
-	if err := writer.CreateAll(context.Background(), []testEntity{{id: 1}, {id: 2}}); err != nil {
+	if err := app.CreateAll(context.Background(), []testEntity{{id: 1}, {id: 2}}); err != nil {
 		t.Fatalf("create all: %v", err)
 	}
 	if afterCreateSawCommitted {
-		t.Fatalf("expected AfterCreate to run before commit in batch path")
+		t.Fatalf("expected After hook to run before commit in batch path")
 	}
 	if !postCommitSawCommitted {
-		t.Fatalf("expected PostCommitCreate to run after commit in batch path")
+		t.Fatalf("expected PostCommit hook to run after commit in batch path")
 	}
 }
 
@@ -184,20 +180,19 @@ func TestApplication_CreateAll_RollsBackWhenAfterCreateFails(t *testing.T) {
 
 	var afterCalls int
 	app, err := NewApplication(repo, &Options[testEntity, int64]{Config: DefaultServiceConfig(), Hooks: &Hooks[testEntity, int64]{
-		AfterCreate: func(ctx context.Context, entity testEntity) error {
+		Create: Stage[testEntity]{After: func(_ context.Context, entity testEntity) error {
 			afterCalls++
 			if entity.id == 2 {
 				return errors.New("after create failed")
 			}
 			return nil
-		},
+		}},
 	}})
 	if err != nil {
 		t.Fatalf("new application: %v", err)
 	}
 
-	writer := NewBatchWriter(app)
-	err = writer.CreateAll(context.Background(), []testEntity{{id: 1}, {id: 2}})
+	err = app.CreateAll(context.Background(), []testEntity{{id: 1}, {id: 2}})
 	if err == nil {
 		t.Fatalf("expected after create failure")
 	}
@@ -220,10 +215,9 @@ func TestApplication_DeleteAll_AllOrNothing_NotFoundFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new application: %v", err)
 	}
-	writer := NewBatchWriter(app)
 
 	// 尝试删除 1, 2, 3（其中 2 不存在）
-	err = writer.DeleteAll(context.Background(), []int64{1, 2, 3})
+	err = app.DeleteAll(context.Background(), []int64{1, 2, 3})
 	if err == nil {
 		t.Fatalf("expected error when entity not found, got nil")
 	}
@@ -248,9 +242,8 @@ func TestApplication_DeleteAll_AllOrNothing_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new application: %v", err)
 	}
-	writer := NewBatchWriter(app)
 
-	err = writer.DeleteAll(context.Background(), []int64{1, 2, 3})
+	err = app.DeleteAll(context.Background(), []int64{1, 2, 3})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -273,8 +266,7 @@ func TestApplication_CreateAll_ExceedsMaxBatchSize(t *testing.T) {
 	}
 
 	entities := []testEntity{{id: 1}, {id: 2}, {id: 3}, {id: 4}}
-	writer := NewBatchWriter(app)
-	err = writer.CreateAll(context.Background(), entities)
+	err = app.CreateAll(context.Background(), entities)
 	if !errors.Is(err, errors.Validation) {
 		t.Fatalf("expected Validation error for exceeding max batch size, got: %v", err)
 	}
@@ -291,8 +283,7 @@ func TestApplication_DeleteAll_ExceedsMaxBatchSize(t *testing.T) {
 		t.Fatalf("new application: %v", err)
 	}
 
-	writer := NewBatchWriter(app)
-	err = writer.DeleteAll(context.Background(), []int64{1, 2, 3, 4})
+	err = app.DeleteAll(context.Background(), []int64{1, 2, 3, 4})
 	if !errors.Is(err, errors.Validation) {
 		t.Fatalf("expected Validation error for exceeding max batch size, got: %v", err)
 	}
@@ -306,8 +297,7 @@ func TestApplication_CreateAll_EmptyListReturnsNil(t *testing.T) {
 		t.Fatalf("new application: %v", err)
 	}
 
-	writer := NewBatchWriter(app)
-	err = writer.CreateAll(context.Background(), []testEntity{})
+	err = app.CreateAll(context.Background(), []testEntity{})
 	if err != nil {
 		t.Fatalf("expected nil error for empty list, got: %v", err)
 	}
@@ -321,9 +311,47 @@ func TestApplication_DeleteAll_EmptyListReturnsNil(t *testing.T) {
 		t.Fatalf("new application: %v", err)
 	}
 
-	writer := NewBatchWriter(app)
-	err = writer.DeleteAll(context.Background(), []int64{})
+	err = app.DeleteAll(context.Background(), []int64{})
 	if err != nil {
 		t.Fatalf("expected nil error for empty list, got: %v", err)
+	}
+}
+
+// TestApplication_DeleteAll_DuplicateIDsIdempotent 验证 DeleteAll 对重复 ID 幂等去重。
+func TestApplication_DeleteAll_DuplicateIDsIdempotent(t *testing.T) {
+	repo := newBatchTestRepo()
+	repo.existingIDs[1] = true
+	repo.existingIDs[2] = true
+
+	app, err := NewApplication(repo, &Options[testEntity, int64]{Config: DefaultServiceConfig()})
+	if err != nil {
+		t.Fatalf("new application: %v", err)
+	}
+
+	err = app.DeleteAll(context.Background(), []int64{1, 1, 2})
+	if err != nil {
+		t.Fatalf("expected DeleteAll to succeed with duplicate IDs, got: %v", err)
+	}
+
+	if repo.existingIDs[1] || repo.existingIDs[2] {
+		t.Fatalf("expected entities 1 and 2 to be deleted, got: %+v", repo.existingIDs)
+	}
+}
+
+// TestApplication_UpdateAll_RejectsDuplicateIDs 验证 UpdateAll 拦截同批次重复实体 ID。
+func TestApplication_UpdateAll_RejectsDuplicateIDs(t *testing.T) {
+	repo := newBatchTestRepo()
+	app, err := NewApplication(repo, &Options[testEntity, int64]{Config: DefaultServiceConfig()})
+	if err != nil {
+		t.Fatalf("new application: %v", err)
+	}
+
+	entities := []testEntity{{id: 1}, {id: 2}, {id: 1}}
+	err = app.UpdateAll(context.Background(), entities)
+	if err == nil {
+		t.Fatal("expected UpdateAll to reject duplicate entity IDs, got nil")
+	}
+	if !errors.Is(err, errors.InvalidInput) {
+		t.Fatalf("expected InvalidInput error, got %v", err)
 	}
 }

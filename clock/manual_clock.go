@@ -1,6 +1,7 @@
 package clock
 
 import (
+	"sort"
 	"sync"
 	"time"
 )
@@ -106,18 +107,27 @@ func (c *ManualClock) Advance(d time.Duration) {
 	c.now = target
 
 	// 触发所有到期（<= now）的 timer。
+	// 收集所有到期的 timer，按 deadline 升序排序（若 deadline 相同按 id 升序），保证触发顺序确定。
+	var dueTimers []*manualTimer
 	for _, t := range c.timers {
-		if !t.active {
-			continue
+		if t != nil && t.active && !t.deadline.After(c.now) {
+			dueTimers = append(dueTimers, t)
 		}
-		if !t.deadline.After(c.now) {
-			t.fireLocked(t.deadline)
+	}
+	sort.Slice(dueTimers, func(i, j int) bool {
+		if dueTimers[i].deadline.Equal(dueTimers[j].deadline) {
+			return dueTimers[i].id < dueTimers[j].id
 		}
+		return dueTimers[i].deadline.Before(dueTimers[j].deadline)
+	})
+	for _, t := range dueTimers {
+		t.fireLocked(t.deadline)
 	}
 
 	// 触发所有到期（<= now）的 ticker；当接收方较慢导致 channel 满时会丢弃 tick。
-	for _, tk := range c.tickers {
-		if !tk.active {
+	for _, id := range sortedIDs(c.tickers) {
+		tk := c.tickers[id]
+		if tk == nil || !tk.active {
 			continue
 		}
 		for !tk.next.After(c.now) {
@@ -128,102 +138,18 @@ func (c *ManualClock) Advance(d time.Duration) {
 	c.mu.Unlock()
 }
 
+// sortedIDs 返回 map 键的升序切片，保证定时器触发顺序确定。
+func sortedIDs[V any](m map[int64]V) []int64 {
+	ids := make([]int64, 0, len(m))
+	for id := range m {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	return ids
+}
+
 // allocIDLocked 分配ID锁内。
 func (c *ManualClock) allocIDLocked() int64 {
 	c.nextID++
 	return c.nextID
-}
-
-type manualTimer struct {
-	clock *ManualClock
-	id    int64
-
-	ch chan time.Time
-
-	active   bool
-	deadline time.Time
-}
-
-// C 返回 timer 的触发 channel。
-func (t *manualTimer) C() <-chan time.Time { return t.ch }
-
-// Stop 停止manual定时器。
-func (t *manualTimer) Stop() bool {
-	t.clock.mu.Lock()
-	defer t.clock.mu.Unlock()
-	return t.stopLocked()
-}
-
-func (t *manualTimer) stopLocked() bool {
-	wasActive := t.active
-	t.active = false
-	delete(t.clock.timers, t.id)
-	// 对齐 time.Timer：Stop/Reset 返回后不得收到此前未消费的 tick。
-	select {
-	case <-t.ch:
-		wasActive = true
-	default:
-	}
-	return wasActive
-}
-
-// Reset 重置状态。
-func (t *manualTimer) Reset(d time.Duration) bool {
-	t.clock.mu.Lock()
-	defer t.clock.mu.Unlock()
-
-	wasActive := t.stopLocked()
-	t.active = true
-	t.deadline = t.clock.now.Add(d)
-	t.clock.timers[t.id] = t
-
-	// 若新的 deadline 已经 <= Now()，则立即触发。
-	if !t.deadline.After(t.clock.now) {
-		t.fireLocked(t.clock.now)
-	}
-	return wasActive
-}
-
-// fireLocked 触发锁内。
-func (t *manualTimer) fireLocked(ts time.Time) {
-	if !t.active {
-		return
-	}
-	t.active = false
-
-	delete(t.clock.timers, t.id)
-	// Best-effort 投递：不阻塞调用方。
-	select {
-	case t.ch <- ts:
-	default:
-	}
-}
-
-type manualTicker struct {
-	clock *ManualClock
-	id    int64
-
-	ch chan time.Time
-
-	active   bool
-	interval time.Duration
-	next     time.Time
-}
-
-// C 返回 ticker 的 tick channel。
-func (t *manualTicker) C() <-chan time.Time { return t.ch }
-
-// Stop 停止 ticker。
-func (t *manualTicker) Stop() {
-	t.clock.mu.Lock()
-	defer t.clock.mu.Unlock()
-	t.active = false
-	delete(t.clock.tickers, t.id)
-}
-
-func (t *manualTicker) trySendLocked(ts time.Time) {
-	select {
-	case t.ch <- ts:
-	default:
-	}
 }

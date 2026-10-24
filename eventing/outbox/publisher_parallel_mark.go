@@ -139,7 +139,12 @@ func (p *ParallelPublisher[ID]) flushPublishedOps(ctx context.Context, flushCtx 
 				p.log.Error(ctx, "recover published entry after mark failure",
 					logging.Int64("entry_id", entry.ID),
 					logging.Error(markErr))
-				recoveryEntry := OutboxEntry[ID]{ID: op.entryID, EventID: op.eventID, ClaimToken: op.claimToken}
+				// 优先使用 worker 入队的完整 entry；DLQ 记录需要事件数据与 RetryCount，
+				// 骨架 entry 会产出脏死信记录并丢失重试进度。
+				recoveryEntry := op.entry
+				if recoveryEntry.ID == 0 {
+					recoveryEntry = OutboxEntry[ID]{ID: op.entryID, EventID: op.eventID, ClaimToken: op.claimToken}
+				}
 				if recoverErr := p.core().recoverPublishedMarkFailure(recoveryCtx, recoveryEntry, markErr); recoverErr != nil {
 					p.log.Error(ctx, "recover published entry failed",
 						logging.Int64("entry_id", entry.ID),

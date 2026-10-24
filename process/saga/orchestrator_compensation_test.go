@@ -486,3 +486,188 @@ func TestSagaOrchestrator_CompensationStatePersistFailure_PreservesCompensatedSe
 	assert.Equal(t, 1, counts[string(EventSagaCompensationCompleted)])
 	assert.Zero(t, counts[string(EventSagaFailed)])
 }
+
+// waitContextCause 阻塞等待 ctx 的 Cause 非空（最长 2 秒），供测试模拟
+// 父取消/租约丢失信号在协程间传播。
+func waitContextCause(ctx context.Context) {
+	deadline := time.Now().Add(2 * time.Second)
+	for context.Cause(ctx) == nil && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// TestSagaOrchestrator_CompensationAbortsWhenLeaseLostAfterParentCancel 钉住
+// 补偿上下文与父取消解绑后的租约保护：请求 ctx 已取消时补偿仍会执行，
+// 但补偿期间租约失效必须中止补偿，而不是在无租约状态下继续下发补偿命令。
+// （回归：WithoutCancel 剥离租约检测后该场景补偿会完整执行。）
+func TestSagaOrchestrator_CompensationAbortsWhenLeaseLostAfterParentCancel(t *testing.T) {
+	ctx, cancelParent := context.WithCancel(context.Background())
+	defer cancelParent()
+
+	cmdExecutor := newTestCommandExecutor()
+	lease := newMockLease()
+	var step1Compensated int
+
+	require.NoError(t, cmdExecutor.RegisterHandler("CmdStep1", func(ctx context.Context, cmd *command.Command) error {
+		return nil
+	}))
+	require.NoError(t, cmdExecutor.RegisterHandler("CmdStep1Comp", func(ctx context.Context, cmd *command.Command) error {
+		step1Compensated++
+		lease.lose(assert.AnError)
+		waitContextCause(ctx) // 补偿专用 ctx 必须收到租约丢失信号
+		return assert.AnError
+	}))
+	require.NoError(t, cmdExecutor.RegisterHandler("CmdStep2", func(ctx context.Context, cmd *command.Command) error {
+		cancelParent() // 常规请求取消
+		waitContextCause(ctx)
+		return assert.AnError
+	}))
+
+	stateStore := NewMemorySagaStateStore()
+	mockBus := &mockSagaEventBus{}
+	orchestrator := newTestSagaOrchestrator(t, cmdExecutor, mockBus, stateStore).
+		WithLockProvider(&mockLeaseLockProvider{lease: lease})
+
+	saga := &failingSaga{}
+	saga.steps = []*SagaStep{
+		NewSagaStep("step1", func(ctx context.Context) (*command.Command, error) {
+			return command.NewCommand("cmd-step1", "CmdStep1", "1", "Step1", nil), nil
+		}).WithCompensation(func(ctx context.Context) (*command.Command, error) {
+			return command.NewCommand("cmd-step1-comp", "CmdStep1Comp", "1", "Step1Comp", nil), nil
+		}),
+		NewSagaStep("step2", func(ctx context.Context) (*command.Command, error) {
+			return command.NewCommand("cmd-step2", "CmdStep2", "1", "Step2", nil), nil
+		}),
+	}
+
+	err := orchestrator.Execute(ctx, saga)
+	require.Error(t, err)
+	require.Truef(t, errors.Is(err, errors.Conflict), "expected lease conflict, got %v", err)
+	require.Equal(t, 1, step1Compensated)
+
+	loaded, loadErr := stateStore.Load(ctx, saga.ID())
+	require.NoError(t, loadErr)
+	require.Truef(t, loaded.IsCompensating(), "expected compensating state, got %v", loaded.Status)
+
+	counts := countSagaEventTypes(mockBus.events)
+	require.Equal(t, 1, counts[string(EventSagaCompensationStarted)])
+	require.Zero(t, counts[string(EventSagaCompensationStepCompleted)])
+	require.Zero(t, counts[string(EventSagaCompensationCompleted)])
+	require.Zero(t, counts[string(EventSagaFailed)])
+}
+
+// TestSagaOrchestrator_NormalCancelStillCompensates 钉住常规取消不再被前置
+// 守卫短路：步骤失败源于父 ctx 取消（非租约丢失）时，失败处理与补偿必须
+// 继续执行并完成回滚。
+// （回归：旧实现把普通取消当作租约错误直接返回，补偿从不执行。）
+func TestSagaOrchestrator_NormalCancelStillCompensates(t *testing.T) {
+	ctx, cancelParent := context.WithCancel(context.Background())
+	defer cancelParent()
+
+	cmdExecutor := newTestCommandExecutor()
+	var step1Compensated int
+
+	require.NoError(t, cmdExecutor.RegisterHandler("CmdStep1", func(ctx context.Context, cmd *command.Command) error {
+		return nil
+	}))
+	require.NoError(t, cmdExecutor.RegisterHandler("CmdStep1Comp", func(ctx context.Context, cmd *command.Command) error {
+		step1Compensated++
+		return nil
+	}))
+	require.NoError(t, cmdExecutor.RegisterHandler("CmdStep2", func(ctx context.Context, cmd *command.Command) error {
+		cancelParent()
+		waitContextCause(ctx)
+		return assert.AnError
+	}))
+
+	stateStore := NewMemorySagaStateStore()
+	mockBus := &mockSagaEventBus{}
+	orchestrator := newTestSagaOrchestrator(t, cmdExecutor, mockBus, stateStore).
+		WithLockProvider(&mockLeaseLockProvider{lease: newMockLease()})
+
+	saga := &failingSaga{}
+	saga.steps = []*SagaStep{
+		NewSagaStep("step1", func(ctx context.Context) (*command.Command, error) {
+			return command.NewCommand("cmd-step1", "CmdStep1", "1", "Step1", nil), nil
+		}).WithCompensation(func(ctx context.Context) (*command.Command, error) {
+			return command.NewCommand("cmd-step1-comp", "CmdStep1Comp", "1", "Step1Comp", nil), nil
+		}),
+		NewSagaStep("step2", func(ctx context.Context) (*command.Command, error) {
+			return command.NewCommand("cmd-step2", "CmdStep2", "1", "Step2", nil), nil
+		}),
+	}
+
+	err := orchestrator.Execute(ctx, saga)
+	require.Error(t, err)
+	require.Truef(t, errors.Is(err, errors.Internal), "expected saga step failure, got %v", err)
+	require.Contains(t, err.Error(), "saga step failed")
+	require.Equal(t, 1, step1Compensated)
+
+	loaded, loadErr := stateStore.Load(ctx, saga.ID())
+	require.NoError(t, loadErr)
+	require.Truef(t, loaded.IsCompensated(), "expected compensated state, got %v", loaded.Status)
+
+	counts := countSagaEventTypes(mockBus.events)
+	require.Equal(t, 1, counts[string(EventSagaCompensationStarted)])
+	require.Equal(t, 1, counts[string(EventSagaCompensationStepCompleted)])
+	require.Equal(t, 1, counts[string(EventSagaCompensationCompleted)])
+}
+
+// TestSagaOrchestrator_CompensationEnforcesDedicatedTimeout 钉住补偿专用超时：
+// 补偿命令长时间不返回时，超时上限兜底中止补偿并进入常规补偿失败路径
+// （终态 Failed + SagaFailed 事件），不会无限期执行。
+// （回归：WithoutCancel detach 丢弃父 deadline 且无任何补偿超时。）
+func TestSagaOrchestrator_CompensationEnforcesDedicatedTimeout(t *testing.T) {
+	ctx := context.Background()
+
+	cmdExecutor := newTestCommandExecutor()
+	var step1Compensated int
+
+	require.NoError(t, cmdExecutor.RegisterHandler("CmdStep1", func(ctx context.Context, cmd *command.Command) error {
+		return nil
+	}))
+	require.NoError(t, cmdExecutor.RegisterHandler("CmdStep1Comp", func(ctx context.Context, cmd *command.Command) error {
+		step1Compensated++
+		<-ctx.Done() // 模拟补偿命令挂死，直到补偿超时
+		return ctx.Err()
+	}))
+	require.NoError(t, cmdExecutor.RegisterHandler("CmdStep2", func(ctx context.Context, cmd *command.Command) error {
+		return assert.AnError
+	}))
+
+	stateStore := NewMemorySagaStateStore()
+	mockBus := &mockSagaEventBus{}
+	orchestrator := newTestSagaOrchestrator(t, cmdExecutor, mockBus, stateStore).
+		WithCompensationTimeout(50 * time.Millisecond)
+
+	saga := &failingSaga{}
+	saga.steps = []*SagaStep{
+		NewSagaStep("step1", func(ctx context.Context) (*command.Command, error) {
+			return command.NewCommand("cmd-step1", "CmdStep1", "1", "Step1", nil), nil
+		}).WithCompensation(func(ctx context.Context) (*command.Command, error) {
+			return command.NewCommand("cmd-step1-comp", "CmdStep1Comp", "1", "Step1Comp", nil), nil
+		}),
+		NewSagaStep("step2", func(ctx context.Context) (*command.Command, error) {
+			return command.NewCommand("cmd-step2", "CmdStep2", "1", "Step2", nil), nil
+		}),
+	}
+
+	err := orchestrator.Execute(ctx, saga)
+	require.Error(t, err)
+	// 超时中止的补偿进入常规补偿失败路径：Internal + 底层携带 DeadlineExceeded。
+	require.Truef(t, errors.Is(err, errors.Internal), "expected internal failure, got %v", err)
+	require.Truef(t, errors.Is(err, context.DeadlineExceeded), "expected deadline cause, got %v", err)
+	require.Contains(t, err.Error(), "compensation failed")
+	require.Equal(t, 1, step1Compensated)
+
+	loaded, loadErr := stateStore.Load(ctx, saga.ID())
+	require.NoError(t, loadErr)
+	require.Truef(t, loaded.IsFailed(), "expected failed state, got %v", loaded.Status)
+	require.False(t, loaded.IsCompensated())
+
+	counts := countSagaEventTypes(mockBus.events)
+	require.Equal(t, 1, counts[string(EventSagaCompensationStarted)])
+	require.Zero(t, counts[string(EventSagaCompensationStepCompleted)])
+	require.Zero(t, counts[string(EventSagaCompensationCompleted)])
+	require.Equal(t, 1, counts[string(EventSagaFailed)])
+}

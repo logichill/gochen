@@ -9,7 +9,6 @@ package cache
 
 import (
 	"container/list"
-	"fmt"
 	"sync"
 	"time"
 
@@ -71,6 +70,19 @@ type Cache[K comparable, V any] struct {
 
 	// 统计信息
 	stats CacheStats
+
+	// lastSweepScanned 最近一次 Set 机会式清扫实际扫描的条目数（持锁写入，
+	// 由 lastOpportunisticSweepScans 持锁读取；仅供包内测试观测扫描截断）。
+	lastSweepScanned int
+
+	// 后台清理协程的生命周期状态（lifecycleMu 保护）：
+	// stopCh 在 Close 时关闭并由下一次 StartCleanup 重建，cleanupDone 在
+	// 清理协程退出时关闭；因此 Close→StartCleanup→Close 序列可安全重复
+	//（审计 P2#20）。不用 sync.WaitGroup：Add/Wait 无法在重启语义下串行化。
+	lifecycleMu    sync.Mutex
+	stopCh         chan struct{}
+	cleanupRunning bool
+	cleanupDone    chan struct{}
 }
 
 // cacheEntry 缓存条目。
@@ -80,51 +92,6 @@ type cacheEntry[K comparable, V any] struct {
 	createdAt  time.Time
 	accessedAt time.Time
 	lruElement *list.Element // LRU 链表中的位置
-}
-
-type eviction[K comparable, V any] struct {
-	key   K
-	value V
-}
-
-// Config 缓存配置，用于控制存储层缓存的行为（TTL、最大条目数、清理策略等）。
-type Config struct {
-	// Name 缓存名称（用于日志和统计）
-	Name string
-
-	// MaxSize 最大缓存条目数，0 表示无限制（不推荐）
-	MaxSize int
-
-	// TTL 缓存过期时间，基于访问时间
-	// 0 表示永不过期
-	TTL time.Duration
-
-	// Clock 可选：用于 Now()/Since() 等时间来源；便于测试稳定推进时间。
-	Clock clock.IClock
-
-	// EnableStats 是否启用统计（默认启用）。
-	//
-	// 说明：
-	// - nil 表示启用（默认）；
-	// - false 表示关闭统计（Hits/Misses/Evictions/Expires 始终为 0）。
-	EnableStats *bool
-
-	// OnEvict 驱逐回调（可选）。
-	//
-	// 说明：
-	// - 回调在内部锁外执行，可重入访问缓存；
-	// - 若回调 panic，本次批量驱逐的后续回调仍会继续执行；全部回调结束后会重新抛出首个 panic。
-	// 使用 any 以支持不同的键值类型。
-	OnEvict func(key, value any)
-}
-
-// CacheStats 缓存统计信息。
-type CacheStats struct {
-	Hits      int64 // 缓存命中次数
-	Misses    int64 // 缓存未命中次数
-	Evictions int64 // LRU 驱逐次数
-	Expires   int64 // TTL 过期次数
-	Size      int   // 当前条目数
 }
 
 // New 创建一个带 LRU 与 TTL 能力的泛型缓存实例。
@@ -148,6 +115,71 @@ func New[K comparable, V any](config Config) *Cache[K, V] {
 		statsEnabled: statsEnabled,
 		items:        make(map[K]*cacheEntry[K, V]),
 		lruList:      list.New(),
+	}
+}
+
+// StartCleanup 启动后台过期清理协程（幂等）。
+//
+// 仅在 TTL > 0 且 CleanupInterval > 0 时实际启动；清理协程已在运行时为空操作。
+// Close 之后再次调用会重新启动清理协程（重启语义）：生命周期状态由单一
+// lifecycleMu 保护，并发 Start/Close 串行化，Close→Start→Close 序列不会
+// 死锁或泄漏清理协程（审计 P2#20 056f2b0a）。
+func (c *Cache[K, V]) StartCleanup() {
+	if c == nil || c.config.TTL <= 0 || c.config.CleanupInterval <= 0 {
+		return
+	}
+	c.lifecycleMu.Lock()
+	defer c.lifecycleMu.Unlock()
+	if c.cleanupRunning {
+		return
+	}
+	stopCh := make(chan struct{})
+	done := make(chan struct{})
+	c.stopCh = stopCh
+	c.cleanupDone = done
+	c.cleanupRunning = true
+	go func() {
+		defer close(done)
+		c.cleanupLoop(stopCh)
+	}()
+}
+
+// Close 停止后台清理协程并等待其退出（幂等且不阻塞在已停止的实例上）。
+//
+// 语义说明：Close 采用"可重启"语义——Close 只停止当前运行的清理协程，
+// 之后可再次调用 StartCleanup 重新启动；未启动时 Close 为空操作。
+func (c *Cache[K, V]) Close() {
+	if c == nil {
+		return
+	}
+	c.lifecycleMu.Lock()
+	if !c.cleanupRunning {
+		c.lifecycleMu.Unlock()
+		return
+	}
+	stopCh := c.stopCh
+	done := c.cleanupDone
+	c.cleanupRunning = false
+	c.lifecycleMu.Unlock()
+
+	if stopCh != nil {
+		close(stopCh)
+	}
+	if done != nil {
+		<-done
+	}
+}
+
+func (c *Cache[K, V]) cleanupLoop(stopCh <-chan struct{}) {
+	ticker := time.NewTicker(c.config.CleanupInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			c.CleanExpired()
+		case <-stopCh:
+			return
+		}
 	}
 }
 
@@ -218,6 +250,29 @@ func (c *Cache[K, V]) Set(key K, value V) {
 		if ev, ok := c.evictOldestUnsafe(); ok {
 			evicted = append(evicted, ev)
 		}
+	} else if c.config.MaxSize <= 0 && c.config.TTL > 0 {
+		// 无上限且启用 TTL 时，Set 顺带回收已过期条目，
+		// 避免“写入热、读取冷”的 key 永久驻留内存。
+		// 按扫描条目数截断（上限 maxOpportunisticSweep）：无论本次实际驱逐
+		// 多少，单次 Set 持写锁的扫描量都有界，与缓存总规模无关（审计
+		// P2#19 7a1eb1b8——旧实现按驱逐数截断，无过期项时扫描不设防，
+		// 每次 Set 退化为 O(n) 全表扫）。截断是抽样式的：map 遍历顺序随机，
+		// 未扫到的过期条目留给后续 Set 或后台清理兜底。
+		scanned := 0
+		for _, entry := range c.items {
+			if scanned >= maxOpportunisticSweep {
+				break
+			}
+			scanned++
+			if c.isExpiredLocked(entry) {
+				evicted = append(evicted, c.removeEntryUnsafe(entry))
+			}
+		}
+		// 记录最近一次机会式清扫的实际扫描量，供包内测试断言截断语义。
+		c.lastSweepScanned = scanned
+		if c.statsEnabled && len(evicted) > 0 {
+			c.stats.Expires += int64(len(evicted))
+		}
 	}
 
 	// 创建新条目
@@ -274,150 +329,4 @@ func (c *Cache[K, V]) Clear() {
 	c.stats.Size = 0
 	c.mu.Unlock()
 	c.notifyEvictions(evicted)
-}
-
-// CleanExpired 主动清理所有已过 TTL 的缓存条目，并返回清理数量。
-func (c *Cache[K, V]) CleanExpired() int {
-	if c.config.TTL <= 0 {
-		return 0 // 永不过期
-	}
-
-	c.mu.Lock()
-
-	cleaned := 0
-	now := c.clock.Now()
-	var evicted []eviction[K, V]
-
-	for _, entry := range c.items {
-		if now.Sub(entry.accessedAt) >= c.config.TTL {
-			ev := c.removeEntryUnsafe(entry)
-			if c.config.OnEvict != nil {
-				evicted = append(evicted, ev)
-			}
-			cleaned++
-		}
-	}
-
-	if c.statsEnabled {
-		c.stats.Expires += int64(cleaned)
-	}
-	c.stats.Size = len(c.items)
-	c.mu.Unlock()
-	c.notifyEvictions(evicted)
-
-	return cleaned
-}
-
-func (c *Cache[K, V]) Stats() CacheStats {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	stats := c.stats
-	stats.Size = len(c.items)
-	return stats
-}
-
-func (c *Cache[K, V]) Size() int {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return len(c.items)
-}
-
-func (c *Cache[K, V]) HitRate() float64 {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	total := c.stats.Hits + c.stats.Misses
-	if total == 0 {
-		return 0
-	}
-	return float64(c.stats.Hits) / float64(total)
-}
-
-// isExpired 判断指定条目是否已经超过 TTL；调用方需自行持锁。
-func (c *Cache[K, V]) isExpired(entry *cacheEntry[K, V]) bool {
-	if c.config.TTL <= 0 {
-		return false
-	}
-	return c.clock.Now().Sub(entry.accessedAt) >= c.config.TTL
-}
-
-// evictOldestUnsafe 删除 LRU 链表尾部的最旧条目；调用方需自行持锁。
-func (c *Cache[K, V]) evictOldestUnsafe() (eviction[K, V], bool) {
-	// 从 LRU 链表尾部获取最久未使用的条目
-	oldest := c.lruList.Back()
-	if oldest == nil {
-		var zero eviction[K, V]
-		return zero, false
-	}
-
-	entry := oldest.Value.(*cacheEntry[K, V])
-	evicted := c.removeEntryUnsafe(entry)
-	if c.statsEnabled {
-		c.stats.Evictions++
-	}
-	return evicted, true
-}
-
-// removeEntryUnsafe 从 map 和 LRU 链表中同时移除一个条目；调用方需自行持锁。
-func (c *Cache[K, V]) removeEntryUnsafe(entry *cacheEntry[K, V]) eviction[K, V] {
-	// 从 LRU 链表中移除
-	if entry.lruElement != nil {
-		c.lruList.Remove(entry.lruElement)
-	}
-
-	// 从 map 中删除
-	delete(c.items, entry.key)
-	c.stats.Size = len(c.items)
-	return eviction[K, V]{key: entry.key, value: entry.value}
-}
-
-func (c *Cache[K, V]) notifyEvictions(evicted []eviction[K, V]) {
-	if c.config.OnEvict == nil {
-		return
-	}
-	// 调用方必须先释放 c.mu，再触发 OnEvict，避免回调反向访问缓存时死锁。
-	// 批量驱逐时即便某个回调 panic，也会继续触发剩余回调，最终重新抛出首个 panic。
-	var firstPanic any
-	havePanic := false
-	for _, ev := range evicted {
-		func() {
-			defer func() {
-				if panicValue := recover(); panicValue != nil && !havePanic {
-					firstPanic = panicValue
-					havePanic = true
-				}
-			}()
-			c.config.OnEvict(ev.key, ev.value)
-		}()
-	}
-	if havePanic {
-		panic(firstPanic)
-	}
-}
-
-func (c *Cache[K, V]) String() string {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	// 在单一锁内计算所有统计信息，避免多次加锁
-	stats := c.stats
-	stats.Size = len(c.items)
-
-	total := stats.Hits + stats.Misses
-	hitRate := 0.0
-	if total > 0 {
-		hitRate = float64(stats.Hits) / float64(total)
-	}
-
-	return fmt.Sprintf("Cache[%s]: size=%d/%d, hits=%d, misses=%d, hit_rate=%.2f%%, evictions=%d, expires=%d",
-		c.name,
-		stats.Size,
-		c.config.MaxSize,
-		stats.Hits,
-		stats.Misses,
-		hitRate*100,
-		stats.Evictions,
-		stats.Expires,
-	)
 }

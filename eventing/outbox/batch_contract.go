@@ -31,19 +31,3 @@ type ClaimedEntry struct {
 	ID         int64
 	ClaimToken string
 }
-
-// BatchPublisher 支持批量发布的发布器。
-//
-// 对 ParallelPublisher 的封装，提供批量标记功能。
-type BatchPublisher[ID comparable] struct {
-	*ParallelPublisher[ID]
-	batchOps IBatchRepository
-}
-
-// NewBatchPublisher 创建批量Publisher。
-func NewBatchPublisher[ID comparable](publisher *ParallelPublisher[ID], batchOps IBatchRepository) *BatchPublisher[ID] {
-	return &BatchPublisher[ID]{
-		ParallelPublisher: publisher,
-		batchOps:          batchOps,
-	}
-}

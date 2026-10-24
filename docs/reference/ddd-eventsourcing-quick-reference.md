@@ -44,7 +44,7 @@ type Deposited struct {
 func (*Deposited) EventType() string { return "MoneyDeposited" }
 
 type Account struct {
-	*domaines.EventSourcedAggregate[int64]
+	*domaines.EventSourcedAggregate[int64] `aggregate:"Account"`
 	Balance int64
 }
 
@@ -60,6 +60,9 @@ func (a *Account) Deposit(amount int64) error {
 func run() error {
 	ctx := context.Background()
 	metadata := domaines.NewMetadataRegistry()
+	if err := metadata.RegisterSet(domaines.AggregateFromTag(&Account{})); err != nil {
+		return err
+	}
 	reg := registry.NewRegistry()
 	if err := reg.Register("MoneyDeposited", func() any { return &Deposited{} }); err != nil {
 		return err
@@ -81,13 +84,7 @@ func run() error {
 		Store:            domainStore,
 		MetadataRegistry: metadata,
 		Factory: func(id int64) (*Account, error) {
-			account := &Account{}
-			aggregate, err := domaines.InitAggregate(metadata, account, id, "Account")
-			if err != nil {
-				return nil, err
-			}
-			account.EventSourcedAggregate = aggregate
-			return account, nil
+			return domaines.New[Account, int64](metadata, id)
 		},
 	})
 	if err != nil {
@@ -118,7 +115,9 @@ func main() {
 }
 ```
 
-MetadataRegistry 按 Go 事件类型预编译 handler。处理方法须导出、事件参数为指针；同一类型不能有多个 handler。保存基线使用聚合的 GetExpectedVersion，聚合身份是 aggregate type 与 ID 的组合。
+MetadataRegistry 按 Go 事件类型缓存 handler；运行时仍使用反射调用。处理方法命名为 `ApplyXxx`，恰好接收一个实现 `IDomainEvent` 的指针参数，只允许无返回值或单个 `error` 返回值；同一类型不能有多个 handler。不合法的候选方法在注册时失败，其他名称的方法不参与路由。保存基线使用聚合的 GetExpectedVersion，聚合身份是 aggregate type 与 ID 的组合。
+
+业务只能通过命令方法产生变更，不能直接调用 `ApplyXxx` 或修改业务字段。`ApplyEvent` 供回放使用，不去重；处理器须确定且无外部副作用，应用失败必须丢弃实例。接入约束和回放验证见[聚合使用指南](../../domain/eventsourced/README.md)。
 
 ## 命令、发布与读模型
 

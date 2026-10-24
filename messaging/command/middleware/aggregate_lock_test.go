@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -509,4 +510,55 @@ func BenchmarkAggregateLockMiddleware_DifferentAggregates(b *testing.B) {
 		cmd := command.NewCommand(fmt.Sprintf("cmd-%d", i), "TestCommand", fmt.Sprintf("%d", i), "Test", nil)
 		_ = middleware.Handle(ctx, cmd, next)
 	}
+}
+
+// TestAggregateLockMiddleware_ContextTimeoutAndCancellation 验证锁等待响应 Context 取消与超时（F13）。
+func TestAggregateLockMiddleware_ContextTimeoutAndCancellation(t *testing.T) {
+	middleware := NewAggregateLockMiddleware(nil)
+
+	holding := make(chan struct{})
+	release := make(chan struct{})
+	firstStarted := make(chan struct{})
+
+	// 1. 第一个 goroutine 获取锁并保持
+	go func() {
+		cmd1 := command.NewCommand("cmd-1", "TestCommand", "agg-timeout", "Test", nil)
+		_ = middleware.Handle(context.Background(), cmd1, func(ctx context.Context, msg messaging.IMessage) error {
+			close(firstStarted)
+			<-release
+			return nil
+		})
+		close(holding)
+	}()
+
+	<-firstStarted
+
+	// 2. 第二个命令使用已超时的 context 尝试获取锁，必须立即返回超时错误且不执行 handler
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	executed := false
+	cmd2 := command.NewCommand("cmd-2", "TestCommand", "agg-timeout", "Test", nil)
+	err := middleware.Handle(timeoutCtx, cmd2, func(ctx context.Context, msg messaging.IMessage) error {
+		executed = true
+		return nil
+	})
+
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, context.DeadlineExceeded))
+	assert.False(t, executed)
+
+	// 3. 释放第一个锁
+	close(release)
+	<-holding
+
+	// 4. 后续正常命令应该能够正常获取锁并执行
+	cmd3 := command.NewCommand("cmd-3", "TestCommand", "agg-timeout", "Test", nil)
+	executed3 := false
+	err3 := middleware.Handle(context.Background(), cmd3, func(ctx context.Context, msg messaging.IMessage) error {
+		executed3 = true
+		return nil
+	})
+	assert.NoError(t, err3)
+	assert.True(t, executed3)
 }

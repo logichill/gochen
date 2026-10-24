@@ -39,8 +39,8 @@ type supportBadAggregate struct {
 	*EventSourcedAggregate[int64]
 }
 
-func (a *supportBadAggregate) Handle1(*supportAggregateEvent) {}
-func (a *supportBadAggregate) Handle2(*supportAggregateEvent) {}
+func (a *supportBadAggregate) ApplyFirst(*supportAggregateEvent)  {}
+func (a *supportBadAggregate) ApplySecond(*supportAggregateEvent) {}
 
 func TestEventSourcedSupportAndRegisterModuleAggregates(t *testing.T) {
 	t.Run("support 返回副本避免外部篡改", func(t *testing.T) {

@@ -96,6 +96,8 @@ func TestParallelPublisher_ProcessEntryPublishedMarkFailureRecoversClaim(t *test
 
 	require.Equal(t, 1, bus.PublishedEventsLen())
 	require.Equal(t, 0, repo.MarkedPublishedLen())
+	// 发布成功但标记发布失败时，mark 失败必须计入 RetryCount（有界重投 + DLQ 逃生），
+	// 不能滞留 PROCESSING 被租约周期无界重复投递且永不进入终态。
 	require.Equal(t, 1, repo.MarkedFailedLen())
 }
 

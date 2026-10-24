@@ -15,23 +15,58 @@ type Parts[T domain.IEntity[ID], ID comparable] struct {
 	Batch crud.IBatchWriter[T, ID]
 	// Audited 是已加固的审计扩展实现；内层非审计 Application 时留 nil。
 	Audited appaudited.IAuditOperations[T, ID]
+	// Capabilities 是内层可选能力探针快照；留 nil 时按 Core 与 Batch 自动推断。
+	Capabilities crud.ICapabilities
 }
 
-// Detect 按内层实际能力填充探测结果，供调用方决定要加固哪些能力面。
+// Detected 按内层实际能力填充探测结果，供调用方决定要加固哪些能力面。
 type Detected[T domain.IEntity[ID], ID comparable] struct {
-	Batch   crud.IBatchWriter[T, ID]
-	Audited appaudited.IAuditOperations[T, ID]
+	Batch        crud.IBatchWriter[T, ID]
+	Audited      appaudited.IAuditOperations[T, ID]
+	Capabilities crud.ICapabilities
+}
+
+type resolvedCapabilities struct {
+	query     bool
+	queryable bool
+	batch     bool
+}
+
+func (c resolvedCapabilities) HasQueryCapability() bool     { return c.query }
+func (c resolvedCapabilities) HasQueryableCapability() bool { return c.queryable }
+func (c resolvedCapabilities) HasBatchCapability() bool     { return c.batch }
+
+// ResolveCapabilities 从内层服务探测查询与批量能力；未显式声明探针时按已实现的接口推断。
+func ResolveCapabilities[T domain.IEntity[ID], ID comparable](inner crud.IApplication[T, ID], hasBatch bool) crud.ICapabilities {
+	caps := resolvedCapabilities{
+		query:     true,
+		queryable: true,
+		batch:     hasBatch,
+	}
+	if probe, ok := any(inner).(interface{ HasQueryCapability() bool }); ok {
+		caps.query = probe.HasQueryCapability()
+	}
+	if probe, ok := any(inner).(interface{ HasQueryableCapability() bool }); ok {
+		caps.queryable = probe.HasQueryableCapability()
+	}
+	if probe, ok := any(inner).(interface{ HasBatchCapability() bool }); ok {
+		caps.batch = hasBatch && probe.HasBatchCapability()
+	}
+	return caps
 }
 
 // Detect 探测内层 Application 提供了哪些可选能力。
 func Detect[T domain.IEntity[ID], ID comparable](inner crud.IApplication[T, ID]) Detected[T, ID] {
 	var out Detected[T, ID]
 	if batch, ok := any(inner).(crud.IBatchWriter[T, ID]); ok {
-		out.Batch = batch
+		if capProbe, ok := any(inner).(interface{ HasBatchCapability() bool }); !ok || capProbe.HasBatchCapability() {
+			out.Batch = batch
+		}
 	}
 	if surface, ok := any(inner).(appaudited.IAuditOperations[T, ID]); ok {
 		out.Audited = surface
 	}
+	out.Capabilities = ResolveCapabilities[T, ID](inner, out.Batch != nil)
 	return out
 }
 
@@ -42,22 +77,26 @@ func Detect[T domain.IEntity[ID], ID comparable](inner crud.IApplication[T, ID])
 
 type shell[T domain.IEntity[ID], ID comparable] struct {
 	crud.IApplication[T, ID]
+	crud.ICapabilities
 }
 
 type shellB[T domain.IEntity[ID], ID comparable] struct {
 	crud.IApplication[T, ID]
 	crud.IBatchWriter[T, ID]
+	crud.ICapabilities
 }
 
 type shellD[T domain.IEntity[ID], ID comparable] struct {
 	crud.IApplication[T, ID]
 	appaudited.IAuditOperations[T, ID]
+	crud.ICapabilities
 }
 
 type shellBD[T domain.IEntity[ID], ID comparable] struct {
 	crud.IApplication[T, ID]
 	crud.IBatchWriter[T, ID]
 	appaudited.IAuditOperations[T, ID]
+	crud.ICapabilities
 }
 
 // Compose 按实际具备的能力返回对应外壳。
@@ -66,15 +105,19 @@ type shellBD[T domain.IEntity[ID], ID comparable] struct {
 func Compose[T domain.IEntity[ID], ID comparable](parts Parts[T, ID]) crud.IApplication[T, ID] {
 	hasBatch := parts.Batch != nil
 	hasAudited := parts.Audited != nil
+	caps := parts.Capabilities
+	if caps == nil {
+		caps = ResolveCapabilities[T, ID](parts.Core, hasBatch)
+	}
 
 	switch {
 	case hasBatch && hasAudited:
-		return &shellBD[T, ID]{parts.Core, parts.Batch, parts.Audited}
+		return &shellBD[T, ID]{parts.Core, parts.Batch, parts.Audited, caps}
 	case hasBatch:
-		return &shellB[T, ID]{parts.Core, parts.Batch}
+		return &shellB[T, ID]{parts.Core, parts.Batch, caps}
 	case hasAudited:
-		return &shellD[T, ID]{parts.Core, parts.Audited}
+		return &shellD[T, ID]{parts.Core, parts.Audited, caps}
 	default:
-		return &shell[T, ID]{parts.Core}
+		return &shell[T, ID]{parts.Core, caps}
 	}
 }

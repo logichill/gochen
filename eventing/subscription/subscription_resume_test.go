@@ -202,6 +202,46 @@ func TestSubscription_Run_AdvancesCursorAfterEachSuccessfulEvent(t *testing.T) {
 	}
 }
 
+func TestSubscription_Run_PersistsLastSuccessfulCursorOnHandlerError(t *testing.T) {
+	es := store.NewMemoryEventStore[int64]()
+	ctx := context.Background()
+
+	e1 := testutil.NewEvent[int64](1, "Agg", "A", 1, nil)
+	e2 := testutil.NewEvent[int64](1, "Agg", "B", 2, nil)
+	e3 := testutil.NewEvent[int64](1, "Agg", "C", 3, nil)
+	if err := es.AppendEvents(ctx, "Agg", 1, []eventing.IStorableEvent[int64]{e1, e2, e3}, 0); err != nil {
+		t.Fatalf("AppendEvents error: %v", err)
+	}
+
+	failErr := errors.New("handler failed on C")
+	cursorStore := &memoryCursorStore{cursors: map[string]string{}}
+	sub, err := New[int64](es, func(ctx context.Context, evt eventing.Event[int64]) error {
+		if evt.GetType() == "C" {
+			return failErr
+		}
+		return nil
+	}, &Config{
+		Name:         "orders",
+		CursorStore:  cursorStore,
+		PollInterval: 5 * time.Millisecond,
+		BatchSize:    10,
+	})
+	if err != nil {
+		t.Fatalf("New subscription failed: %v", err)
+	}
+
+	err = sub.Run(ctx)
+	if !errors.Is(err, failErr) {
+		t.Fatalf("expected handler error, got %v", err)
+	}
+	if got := cursorStore.cursors["orders"]; got != e2.GetID() {
+		t.Fatalf("expected persisted cursor %s, got %s", e2.GetID(), got)
+	}
+	if got := sub.Cursor(); got != e2.GetID() {
+		t.Fatalf("expected in-memory cursor %s, got %s", e2.GetID(), got)
+	}
+}
+
 type memoryCursorStore struct {
 	mu             sync.Mutex
 	cursors        map[string]string

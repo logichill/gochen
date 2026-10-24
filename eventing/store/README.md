@@ -14,11 +14,18 @@
 | `IAtomicEventStore[ID]` | 仅 AppendEventsBatch，按需组合其他读取能力 |
 | `NewMemoryEventStore[ID]()` | 内存事件存储 |
 | `store/cached` | 读缓存、TTL 与统计 |
+| `store/decorator` | 上下文、租户、追踪与存储操作指标装饰器 |
 | `store/snapshot` | 快照存储契约、内存实现与策略 |
 
 完整签名见 [eventstore.go](eventstore.go) 与 [reader.go](reader.go)。完整后端和缓存装饰器使用组合接口，读取消费者无需实现无关的写入或扫描方法。领域存储适配器的三方法端口见 [app/eventsourced/eventstore](../../app/eventsourced/eventstore/README.md)。
 
 SQL Outbox 的事务协作接口位于 `gochen-runtime` 仓库 `eventing/outbox/sqlstore.IEventAppenderWithDB`，只要求 `AppendEventsWithDB`；数据库句柄不进入 Core 事件存储契约。
+
+## 存储装饰器
+
+`decorator.NewMetricsEventStore(inner, recorder)` 包装任意 `IEventStreamStore`，记录追加、加载与全局流扫描的耗时、事件数和错误状态。记录器实现 `decorator.IMetricsRecorder`，可在组合根与缓存、上下文等装饰器显式组合。
+
+原 `cached.MetricsEventStore`、`cached.NewMetricsEventStore` 和 `cached.IMetricsRecorder` 已迁至 `gochen/eventing/store/decorator`。调用方更新导入路径与包限定名即可，构造签名和运行语义保持一致。
 
 ## 聚合与并发
 

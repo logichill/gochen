@@ -4,7 +4,7 @@
 //   - 装饰 crud.IApplication 这一宽接口，并通过 security/internal/capability
 //     按内层实际能力组合外壳，保住批量写、审计扩展与装配期注入等
 //     **可选能力接口**（api/rest 依赖对它们的类型断言做路由与装配决策）；
-//     批量与审计能力面同样经过动作校验，绝不裸转发（见 capability_decorator.go）；
+//     批量与审计能力面同样经过动作校验（见 batch_decorator.go、audited_decorator.go）；
 //   - 校验发生在 Application 层而非 Transport 层，
 //     故 HTTP / CommandBus / Worker / CLI 全入口语义一致，
 //     绕过 REST 直接调用 Application 同样会被拦截；
@@ -18,11 +18,9 @@ package action
 import (
 	"context"
 
-	authaction "gochen/auth/action"
-
 	"gochen/app/crud"
-	"gochen/app/query"
 	"gochen/app/security/internal/capability"
+	authaction "gochen/auth/action"
 	"gochen/domain"
 	"gochen/errors"
 )
@@ -64,7 +62,7 @@ func composeCapabilities[T domain.IEntity[ID], ID comparable](
 	inner crud.IApplication[T, ID],
 ) crud.IApplication[T, ID] {
 	detected := capability.Detect[T, ID](inner)
-	parts := capability.Parts[T, ID]{Core: core}
+	parts := capability.Parts[T, ID]{Core: core, Capabilities: detected.Capabilities}
 	if detected.Batch != nil {
 		parts.Batch = &batchWriter[T, ID]{app: core, inner: detected.Batch}
 	}
@@ -82,79 +80,4 @@ func (a *application[T, ID]) require(ctx context.Context, op authaction.Operatio
 			WithContext("operation", string(op))
 	}
 	return authaction.RequireAction(ctx, a.checker, code)
-}
-
-// --- IWriter ---
-
-func (a *application[T, ID]) Create(ctx context.Context, e T) error {
-	if err := a.require(ctx, authaction.OpCreate); err != nil {
-		return err
-	}
-	return a.inner.Create(ctx, e)
-}
-
-func (a *application[T, ID]) Update(ctx context.Context, e T) error {
-	if err := a.require(ctx, authaction.OpUpdate); err != nil {
-		return err
-	}
-	return a.inner.Update(ctx, e)
-}
-
-func (a *application[T, ID]) Delete(ctx context.Context, id ID) error {
-	if err := a.require(ctx, authaction.OpDelete); err != nil {
-		return err
-	}
-	return a.inner.Delete(ctx, id)
-}
-
-// --- IReader ---
-
-func (a *application[T, ID]) Get(ctx context.Context, id ID) (T, error) {
-	var zero T
-	if err := a.require(ctx, authaction.OpRead); err != nil {
-		return zero, err
-	}
-	return a.inner.Get(ctx, id)
-}
-
-func (a *application[T, ID]) Exists(ctx context.Context, id ID) (bool, error) {
-	if err := a.require(ctx, authaction.OpRead); err != nil {
-		return false, err
-	}
-	return a.inner.Exists(ctx, id)
-}
-
-func (a *application[T, ID]) List(ctx context.Context, offset, limit int) ([]T, error) {
-	if err := a.require(ctx, authaction.OpList); err != nil {
-		return nil, err
-	}
-	return a.inner.List(ctx, offset, limit)
-}
-
-func (a *application[T, ID]) Count(ctx context.Context) (int64, error) {
-	if err := a.require(ctx, authaction.OpList); err != nil {
-		return 0, err
-	}
-	return a.inner.Count(ctx)
-}
-
-func (a *application[T, ID]) ListByQuery(ctx context.Context, quer *query.QueryRequest) ([]T, error) {
-	if err := a.require(ctx, authaction.OpList); err != nil {
-		return nil, err
-	}
-	return a.inner.ListByQuery(ctx, quer)
-}
-
-func (a *application[T, ID]) ListPage(ctx context.Context, request *query.PaginationOptions) (*query.PagedResult[T], error) {
-	if err := a.require(ctx, authaction.OpList); err != nil {
-		return nil, err
-	}
-	return a.inner.ListPage(ctx, request)
-}
-
-func (a *application[T, ID]) CountByQuery(ctx context.Context, quer *query.QueryRequest) (int64, error) {
-	if err := a.require(ctx, authaction.OpList); err != nil {
-		return 0, err
-	}
-	return a.inner.CountByQuery(ctx, quer)
 }

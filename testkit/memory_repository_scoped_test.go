@@ -325,6 +325,28 @@ func TestMemoryRepository_ConstrainedUpdateStampsTenant(t *testing.T) {
 	require.True(t, errors.Is(err, errors.Forbidden))
 }
 
+// 批量更新必须暴露盖戳错误并整批回退，不得半静默成功。
+func TestMemoryRepository_ConstrainedUpdateAllRejectsTenantMismatch(t *testing.T) {
+	repo := newTenantScopedRepo(t)
+	entity := &tenantScopedEntity{Name: "i1"}
+	entity.ID = 1
+	require.NoError(t, repo.Create(tenantConstraintContext("1", "t1"), entity))
+
+	updated := &tenantScopedEntity{Name: "i2"}
+	updated.ID = 1
+	updated.TenantID = "t2"
+
+	err := repo.UpdateAll(tenantConstraintContext("1", "t1"), []*tenantScopedEntity{updated})
+	require.Error(t, err)
+	require.True(t, errors.Is(err, errors.Forbidden))
+
+	got, err := repo.Get(context.Background(), 1)
+	require.NoError(t, err)
+	require.Equal(t, "i1", got.Name)
+	require.Equal(t, "t1", got.GetTenantID())
+	require.Equal(t, "t2", updated.GetTenantID(), "失败的批量更新不得改写调用方实体")
+}
+
 // 约束租户盖不进没有租户槽位的实体 → fail-closed。
 func TestMemoryRepository_ConstrainedWriteRejectsTenantWithoutSlot(t *testing.T) {
 	repo := newScopedMemoryRepo(t)

@@ -274,6 +274,49 @@ func TestBoundScopeWithoutResolverCannotBeWidened(t *testing.T) {
 func TestBoundScopeWithoutResolverSupportsActionOnlyDecision(t *testing.T) {
 	cfg := config()
 	cfg.ScopeResolver = nil
+	// PEP 会先解析主体范围，再把决策范围与其求交；本用例验证的是
+	// 「动作级决策未给出范围时，不应因为它无范围而否定已绑定的主体范围」，
+	// 因此决策必须显式给出可用范围（ScopeGlobal）。若返回 Allow()（无授权
+	// 资源）这种决策，其 DataScope() 是 ScopeDenyAll，即 PDP 明确拒绝，
+	// 按 §4.1 铁律必须拒绝；那个场景由 TestActionAllowWithoutResourcesCannotFallBackToSubjectScope 覆盖。
+	authorizer, err := authscoped.NewAuthorizer(nil, authscoped.EvaluatorFunc(
+		func(context.Context, string, []authscoped.Resource) (authscoped.Decision, error) {
+			// 动作级判定：目标数量为 0，决策将以 IsActionAllowed 为准。
+			return authscoped.Decision{Effect: authscoped.EffectAllow,
+				AuthorizedResources: []authscoped.Resource{{Kind: "order", ID: "*", ManagedScopeID: 101}}}, nil
+		}))
+	require.NoError(t, err)
+	secured, err := secscoped.New[*order, int64](newApp(t, newRepo(true)), authorizer, cfg)
+	require.NoError(t, err)
+	ctx, err := authscoped.WithDataScope(context.Background(), authscoped.Filtered(101))
+	require.NoError(t, err)
+	_, err = secured.List(ctx, 0, 10)
+	require.NoError(t, err)
+}
+
+// 动作级 allow（无授权资源）且**无任何主体范围可回退**时必须 fail-closed，
+// 绝不能把「无范围」当成「无限制」而放行。
+func TestActionAllowWithoutResourcesAndNoSubjectScopeFailsClosed(t *testing.T) {
+	cfg := config()
+	cfg.ScopeResolver = nil
+	authorizer, err := authscoped.NewAuthorizer(nil, authscoped.EvaluatorFunc(
+		func(context.Context, string, []authscoped.Resource) (authscoped.Decision, error) {
+			return authscoped.Allow(), nil
+		}))
+	require.NoError(t, err)
+	secured, err := secscoped.New[*order, int64](newApp(t, newRepo(true)), authorizer, cfg)
+	require.NoError(t, err)
+	// 未绑定主体范围且未配置 ScopeResolver：两边都给不出范围。
+	_, err = secured.List(context.Background(), 0, 10)
+	require.True(t, errors.Is(err, errors.Forbidden),
+		"action-level allow with no resolvable subject scope must fail closed")
+}
+
+// 动作级 allow（无授权资源）但有已绑定主体范围时，回退到主体范围是正确行为：
+// 「无范围」在 allow 决策下表示「未指定范围」，由主体可见范围界定。
+func TestActionAllowWithoutResourcesFallsBackToBoundSubjectScope(t *testing.T) {
+	cfg := config()
+	cfg.ScopeResolver = nil
 	authorizer, err := authscoped.NewAuthorizer(nil, authscoped.EvaluatorFunc(
 		func(context.Context, string, []authscoped.Resource) (authscoped.Decision, error) {
 			return authscoped.Allow(), nil
@@ -285,6 +328,25 @@ func TestBoundScopeWithoutResolverSupportsActionOnlyDecision(t *testing.T) {
 	require.NoError(t, err)
 	_, err = secured.List(ctx, 0, 10)
 	require.NoError(t, err)
+}
+
+// PDP 显式拒绝（EffectDeny）时即使有已绑定主体范围也必须 fail-closed，
+// 绝不能回退到主体范围（fail-open）。
+func TestDenyDecisionCannotFallBackToSubjectScope(t *testing.T) {
+	cfg := config()
+	cfg.ScopeResolver = nil
+	authorizer, err := authscoped.NewAuthorizer(nil, authscoped.EvaluatorFunc(
+		func(context.Context, string, []authscoped.Resource) (authscoped.Decision, error) {
+			return authscoped.Deny(authscoped.ReasonOutOfScope), nil
+		}))
+	require.NoError(t, err)
+	secured, err := secscoped.New[*order, int64](newApp(t, newRepo(true)), authorizer, cfg)
+	require.NoError(t, err)
+	ctx, err := authscoped.WithDataScope(context.Background(), authscoped.Filtered(101))
+	require.NoError(t, err)
+	_, err = secured.List(ctx, 0, 10)
+	require.True(t, errors.Is(err, errors.Forbidden),
+		"deny decision must not fall back to bound subject scope")
 }
 
 // 未配置的操作 fail-closed。
