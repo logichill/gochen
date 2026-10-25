@@ -26,8 +26,9 @@ type Entity[ID comparable] struct {
 }
 
 var (
-	_ domain.IEntity[int64]     = (*Entity[int64])(nil)
-	_ domain.ISettableID[int64] = (*Entity[int64])(nil)
+	_ domain.IEntity[int64]      = (*Entity[int64])(nil)
+	_ domain.ISettableID[int64]  = (*Entity[int64])(nil)
+	_ domain.ISettableVersion    = (*Entity[int64])(nil)
 )
 
 func (e *Entity[ID]) GetID() ID { return e.ID }
@@ -36,3 +37,6 @@ func (e *Entity[ID]) GetVersion() uint64 { return e.Version }
 
 // SetID 设置实体的唯一标识（用于默认仓储的 ID 回填）。
 func (e *Entity[ID]) SetID(id ID) { e.ID = id }
+
+// SetVersion 设置实体的乐观锁版本号（用于仓储的版本推进与初始版本控制）。
+func (e *Entity[ID]) SetVersion(version uint64) { e.Version = version }

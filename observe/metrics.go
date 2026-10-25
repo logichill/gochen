@@ -57,6 +57,18 @@ func (m *DefaultMetrics) Histogram(name string, value float64, labels map[string
 	_ = labels
 }
 
+// RegisterHistogram 注册带分桶的直方图（默认实现为无操作）。
+//
+// 使默认收集器满足"装配期注册"契约（见 runtime/http/middleware 的
+// histogramRegistrar）：无操作实现接受任何注册，也让无指标后端的装配可用。
+func (m *DefaultMetrics) RegisterHistogram(name, help string, labelNames []string, buckets []float64) error {
+	_ = name
+	_ = help
+	_ = labelNames
+	_ = buckets
+	return nil
+}
+
 func (m *DefaultMetrics) Timer(name string, labels map[string]string) ITimer {
 	return &defaultTimer{metrics: m, name: name, labels: labels, start: time.Now()}
 }

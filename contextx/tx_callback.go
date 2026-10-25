@@ -21,6 +21,11 @@ type txLifecycleState struct {
 	// 避免提交与派发之间新注册的回调被静默遗漏或提前派发。
 	committed bool
 	drained   bool
+	// rollbackOnly 表示某个嵌套内层作用域已失败且调用方未使用保存点隔离。
+	// 该标记在同一物理事务的全部作用域间共享（state 以指针存入 ctx）：
+	// 内层失败时置位，owner 在提交点必须拒绝对外承诺提交并回滚数据库写入，
+	// 避免“调用方以为内层已失败、数据却随外层静默提交”。
+	rollbackOnly bool
 }
 
 type txLifecycleStateKey struct{}
@@ -176,6 +181,96 @@ func WithTxLifecycle(ctx context.Context, owned bool) (context.Context, error) {
 func TxLifecycleFromContext(ctx context.Context) (owned bool, ok bool) {
 	_, owned, ok = txLifecycleStateFromContext(ctx)
 	return owned, ok
+}
+
+// MarkTxRollbackOnly 将当前事务标记为 rollback-only。
+//
+// 由嵌套内层作用域在业务函数失败且未使用保存点时调用：同一物理事务的全部
+// 作用域共享该标记，owner 在提交点据此拒绝提交并回滚，保证失败写入不会随
+// 外层静默落库。无事务生命周期时静默返回。
+func MarkTxRollbackOnly(ctx context.Context) {
+	state, _, ok := txLifecycleStateFromContext(ctx)
+	if !ok {
+		return
+	}
+	state.mu.Lock()
+	state.rollbackOnly = true
+	state.mu.Unlock()
+}
+
+// TxRollbackOnly 报告当前事务是否已被某个内层作用域标记为 rollback-only。
+func TxRollbackOnly(ctx context.Context) bool {
+	state, _, ok := txLifecycleStateFromContext(ctx)
+	if !ok {
+		return false
+	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	return state.rollbackOnly
+}
+
+// ClearTxRollbackOnly 清除 rollback-only 标记。
+//
+// 仅供保存点这类"失败已被局部物理撤销"的边界调用：内层失败标记随保存点
+// 回滚一起作废，外层得以继续。除此之外的任何路径清除此标记都会重新打开
+// "失败写入静默提交"的口子，不要在通用流程中使用。
+func ClearTxRollbackOnly(ctx context.Context) {
+	state, _, ok := txLifecycleStateFromContext(ctx)
+	if !ok {
+		return
+	}
+	state.mu.Lock()
+	state.rollbackOnly = false
+	state.mu.Unlock()
+}
+
+// AfterCommitLevel 捕获某一时刻事务回调的水位线（state 与分发器各一份）。
+//
+// 用于保存点这类“只撤销本层新增回调”的场景：进入作用域前捕获，失败时通过
+// TruncateAfterCommitTo 回退到该水位线，保留外层已注册的回调。
+type AfterCommitLevel struct {
+	stateMark     int
+	dispatcherMark int
+	hasDispatcher  bool
+}
+
+// MarkAfterCommitLevel 捕获当前事务回调水位线。
+// 无事务生命周期时返回零值水位线（TruncateAfterCommitTo 对其为 no-op）。
+func MarkAfterCommitLevel(ctx context.Context) AfterCommitLevel {
+	var level AfterCommitLevel
+	if state, _, ok := txLifecycleStateFromContext(ctx); ok {
+		state.mu.Lock()
+		level.stateMark = len(state.callbacks)
+		state.mu.Unlock()
+	}
+	if dispatcher, ok := afterCommitDispatcherFromContext(ctx); ok {
+		if marker, ok := dispatcher.(IAfterCommitMarkableDispatcher); ok {
+			level.dispatcherMark = marker.MarkAfterCommit()
+			level.hasDispatcher = true
+		}
+	}
+	return level
+}
+
+// TruncateAfterCommitTo 将事务回调回退到给定水位线，撤销其后注册的回调。
+//
+// 与 ResetAfterCommit 的区别：本函数只回退到捕获点（保留外层回调），
+// 不封存状态，也不区分 owner——保存点回滚后事务本身仍然继续。
+func TruncateAfterCommitTo(ctx context.Context, level AfterCommitLevel) {
+	if state, _, ok := txLifecycleStateFromContext(ctx); ok {
+		state.mu.Lock()
+		if level.stateMark < len(state.callbacks) {
+			state.callbacks = state.callbacks[:level.stateMark]
+		}
+		state.mu.Unlock()
+	}
+	if level.hasDispatcher {
+		if dispatcher, ok := afterCommitDispatcherFromContext(ctx); ok {
+			if truncater, ok := dispatcher.(IAfterCommitMarkableDispatcher); ok {
+				truncater.TruncateAfterCommit(level.dispatcherMark)
+			}
+		}
+	}
 }
 
 // AppendAfterCommit 向当前事务链路追加真正提交后的回调。

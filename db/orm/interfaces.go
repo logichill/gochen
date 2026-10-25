@@ -32,6 +32,37 @@ type IOrmSession interface {
 	Rollback() error
 }
 
+// ISavepointSession 抽象支持保存点的事务会话（可选能力）。
+//
+// 供需要在事务内做局部回滚的调用方使用：内层失败只撤销本保存点之后的写入，
+// 不影响外层事务。会话不支持保存点时调用方应收到 Unsupported，而不是静默退化为
+// 整体回滚或整体提交。
+type ISavepointSession interface {
+	IOrmSession
+	CreateSavepoint(ctx context.Context, name string) error
+	RollbackToSavepoint(ctx context.Context, name string) error
+	ReleaseSavepoint(ctx context.Context, name string) error
+}
+
+// DatasourceIDOf 返回 ORM 引擎（或其事务会话）所属数据源的进程内稳定标识。
+//
+// 实现方通过 db.IDatasourceIdentityProvider 约定暴露身份；未实现或身份为空时
+// 返回 ok=false，调用方不得据此拒绝或放行，只能跳过归属校验。
+func DatasourceIDOf(engine IOrm) (string, bool) {
+	if engine == nil {
+		return "", false
+	}
+	provider, ok := engine.(interface{ DatasourceID() string })
+	if !ok || provider == nil {
+		return "", false
+	}
+	id := provider.DatasourceID()
+	if id == "" {
+		return "", false
+	}
+	return id, true
+}
+
 // IModel 封装模型级别的基础操作。
 type IModel interface {
 	Meta() *ModelMeta

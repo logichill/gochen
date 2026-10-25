@@ -42,6 +42,19 @@ type IDialectNameProvider interface {
 	DialectName() string
 }
 
+// IDatasourceIdentityProvider 暴露所属数据源的进程内稳定标识（可选能力）。
+//
+// 用于事务上下文的数据源归属校验：仓储复用上下文中的事务会话前，据此确认
+// 该会话属于自己绑定的数据源，防止把 B 仓储的写入静默路由到 A 数据库。
+//
+// 约定：
+//   - 同一物理数据源（连接池）的所有句柄——包括根连接与由它开启的事务——
+//     必须返回相同标识；不同物理数据源必须返回不同标识；
+//   - 标识只需在进程内稳定，典型实现基于底层连接池指针派生。
+type IDatasourceIdentityProvider interface {
+	DatasourceID() string
+}
+
 // IBindParameterLimitProvider 暴露单条语句可携带的占位参数上限。
 //
 // 批量操作（多值 INSERT、`id IN (...)`）据此分片。上限是**驱动**的属性，
