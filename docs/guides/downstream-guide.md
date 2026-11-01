@@ -69,9 +69,9 @@ CRUD 扩展通过 `app/crud.Hooks` 注入，事务和审计要求见 [app](../..
 
 ## 安全接入
 
-按需叠加动作权限、隔离、数据范围和治理能力。Runtime `security.Profile.Build` 装配受保护 Application，Repository 通过 `WithIsolation` / `WithScope` 显式声明安全列。HTTP、Worker、CLI 使用同一 Application。
+按需叠加动作权限、数据范围和治理能力。Application 通过 `Options.Authorizer` 接收 `auth.IAuthorizer`，决策中的写规约随仓储调用执行；Repository 通过 `WithIsolation` 显式声明隔离列，用 `WithResourceKind` 声明授权资源。HTTP、Worker、CLI 使用同一 Application。
 
-构造期必须确认资源类型、范围声明和约束写能力；字段存在不等于安全能力已启用。跨隔离报表使用带留痕的 `WithCrossIsolationReads` 与 `contextx.WithCrossIsolation`，保持普通写入受限。模型、默认判定器与错误边界集中见[分层授权](../architecture/layered-authz.md)。
+构造期必须确认资源声明；字段存在不等于安全能力已启用。跨隔离报表使用带留痕的 `WithCrossIsolationReads` 与 `contextx.WithCrossIsolation`，保持普通写入受限。模型、默认判定器与错误边界集中见[分层授权](../architecture/layered-authz.md)。
 
 ## 事件驱动接入
 

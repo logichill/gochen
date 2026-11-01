@@ -5,6 +5,7 @@ import (
 	esstore "gochen/app/eventsourced/eventstore"
 	"testing"
 
+	"gochen/auth"
 	"gochen/contextx"
 	"gochen/errors"
 	"gochen/eventing"
@@ -61,28 +62,51 @@ func TestRepositoryCommitsAggregateWhenDirectPublicationFails(t *testing.T) {
 	}
 }
 
-type committedFailureRepo struct{ flakyRepo }
-
-func (r *committedFailureRepo) Save(context.Context, *retryTestAggregate) error {
-	r.saveCalls++
-	return contextx.WrapAfterCommitError(errors.NewCode(errors.Concurrency, "snapshot conflict"))
-}
-func TestCommandDoesNotRetryCommittedSaveEvenWithCustomClassifier(t *testing.T) {
-	repo := &committedFailureRepo{}
-	svc, err := NewEventSourcedService[*retryTestAggregate, int64](repo, &EventSourcedServiceOptions[*retryTestAggregate, int64]{ConcurrencyRetry: &RetryConfig{MaxRetries: 3}, IsConcurrencyError: func(error) bool { return true }})
+func TestApplicationReturnsCommittedAggregateWhenPublicationFails(t *testing.T) {
+	ctx := t.Context()
+	events := store.NewMemoryEventStore[int64]()
+	reg, upgraders := newTestRegistryAndUpgraders()
+	if err := reg.Register("ValueSet", func() any { return &valueSetEvent{} }); err != nil {
+		t.Fatal(err)
+	}
+	publisher := &failingPublishBus{}
+	adapter, err := esstore.NewDomainEventStore(esstore.DomainEventStoreOptions[int64]{
+		PublishMode: esstore.PublishModeDirect, AggregateType: "TestAggregate", EventIDGenerator: testEventIDGenerator(), EventStore: events, EventBus: publisher, EventRegistry: reg, UpgraderRegistry: upgraders,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	calls := 0
-	if err := svc.RegisterCommandHandler(&retryTestCommand{}, func(context.Context, IEventSourcedCommand[int64], *retryTestAggregate) error { calls++; return nil }); err != nil {
+	repo, err := newTestEventSourcedRepository[*testAggregate, int64]("TestAggregate", &testAggregate{}, AdaptAggregateFactory(newTestAggregate), adapter)
+	if err != nil {
 		t.Fatal(err)
 	}
-	err = svc.ExecuteCommand(context.Background(), &retryTestCommand{id: 1})
-	if !contextx.IsAfterCommitError(err) || calls != 1 || repo.saveCalls != 1 {
-		t.Fatalf("repeated committed command: calls=%d saves=%d err=%v", calls, repo.saveCalls, err)
+	app, err := NewApplication[*testAggregate, int64](repo, Options[*testAggregate, int64]{
+		Resource: "test.aggregate", Authorizer: auth.Allow(),
+		ConcurrencyRetry: &RetryConfig{MaxRetries: 3},
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	var exhausted *RetryExhaustedError
-	if errors.As(err, &exhausted) {
-		t.Fatal("committed error incorrectly classified as exhausted retry")
+	created, err := app.ExecuteNew(ctx, ActionCreate, func(context.Context) (*testAggregate, error) {
+		aggregate := newTestAggregate(1)
+		return aggregate, aggregate.ApplyAndRecord(&valueSetEvent{V: 5})
+	})
+	if !contextx.IsAfterCommitError(err) || created == nil || created.GetExpectedVersion() != 1 || len(created.GetUncommittedEvents()) != 0 {
+		t.Fatalf("create lost committed result: %+v, %v", created, err)
+	}
+	calls := 0
+	updated, err := app.Execute(ctx, ActionUpdate, 1, func(_ context.Context, aggregate *testAggregate) error {
+		calls++
+		return aggregate.ApplyAndRecord(&valueSetEvent{V: 42})
+	})
+	if !contextx.IsAfterCommitError(err) || updated == nil || updated.Value != 42 || updated.GetExpectedVersion() != 2 {
+		t.Fatalf("update lost committed result: %+v, %v", updated, err)
+	}
+	if calls != 1 || publisher.calls != 2 {
+		t.Fatalf("committed command was retried: commands=%d publications=%d", calls, publisher.calls)
+	}
+	stored, err := repo.Get(ctx, 1)
+	if err != nil || stored.Value != 42 || stored.GetVersion() != 2 {
+		t.Fatalf("persisted state: %+v, %v", stored, err)
 	}
 }

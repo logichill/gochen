@@ -2,152 +2,240 @@ package crud
 
 import (
 	"context"
-
 	"strings"
 	"testing"
 
+	"gochen/auth"
+	"gochen/domain/spec"
 	"gochen/errors"
+	"gochen/testkit"
 )
 
-func TestApplicationValidateLayersDomainBeforeApplicationPolicy(t *testing.T) {
-	order := make([]string, 0, 2)
-	app := &Application[*selfValidatingEntity, int64]{
-		config:    DefaultServiceConfig(),
-		validator: orderedValidator{order: &order},
+func TestNewApplicationRejectsInvalidOptions(t *testing.T) {
+	repo := newTestRepo()
+	cases := []struct {
+		name    string
+		options Options[*testEntity, int64]
+	}{
+		{
+			name:    "missing authorizer",
+			options: Options[*testEntity, int64]{Resource: "doc"},
+		},
+		{
+			name:    "empty resource",
+			options: Options[*testEntity, int64]{Authorizer: auth.Allow()},
+		},
+		{
+			name: "duplicate action",
+			options: Options[*testEntity, int64]{
+				Resource:   "doc",
+				Authorizer: auth.Allow(),
+				Actions:    []auth.Action{{Name: ActionRead, Kind: auth.KindRead}},
+			},
+		},
+		{
+			name: "invalid action kind",
+			options: Options[*testEntity, int64]{
+				Resource:   "doc",
+				Authorizer: auth.Allow(),
+				Actions:    []auth.Action{{Name: "weird", Kind: auth.Kind("bogus")}},
+			},
+		},
+		{
+			name: "audit_read without audit store",
+			options: Options[*testEntity, int64]{
+				Resource:   "doc",
+				Authorizer: auth.Allow(),
+				Actions:    []auth.Action{{Name: ActionAuditRead, Kind: auth.KindRead}},
+			},
+		},
+		{
+			name: "audit store without query port",
+			options: Options[*testEntity, int64]{
+				Resource:   "doc",
+				Authorizer: auth.Allow(),
+				Audit:      saveOnlyAuditStore{},
+			},
+		},
 	}
-	if err := app.Validate(&selfValidatingEntity{id: 1, order: &order}); err != nil {
-		t.Fatalf("Validate() error = %v", err)
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := NewApplication[*testEntity, int64](repo, tt.options); !errors.Is(err, errors.InvalidInput) {
+				t.Fatalf("NewApplication() error = %v, want InvalidInput", err)
+			}
+		})
+	}
+}
+
+func TestNewApplicationRejectsNilRepository(t *testing.T) {
+	if _, err := NewApplication[*testEntity, int64](nil, Options[*testEntity, int64]{
+		Resource:   "doc",
+		Authorizer: auth.Allow(),
+	}); !errors.Is(err, errors.InvalidInput) {
+		t.Fatalf("NewApplication(nil) error = %v, want InvalidInput", err)
+	}
+	var repo *testkit.MemoryRepository[*testEntity, int64]
+	if _, err := NewApplication[*testEntity, int64](repo, Options[*testEntity, int64]{
+		Resource:   "doc",
+		Authorizer: auth.Allow(),
+	}); !errors.Is(err, errors.InvalidInput) {
+		t.Fatalf("NewApplication(typed nil) error = %v, want InvalidInput", err)
+	}
+}
+
+func TestNewApplicationBuildsStandardDescriptor(t *testing.T) {
+	app, _ := newTestApplication(t, Options[*testEntity, int64]{})
+	descriptor := app.Descriptor()
+	if descriptor.Resource != "doc" {
+		t.Fatalf("resource = %q", descriptor.Resource)
+	}
+	names := make([]string, 0, len(descriptor.Actions))
+	for _, action := range descriptor.Actions {
+		names = append(names, action.Name)
+	}
+	if got := strings.Join(names, ","); got != "read,list,create,update,delete" {
+		t.Fatalf("actions = %q", got)
+	}
+	if _, ok := descriptor.Action(ActionAuditRead); ok {
+		t.Fatal("audit_read must not be declared without an audit store")
+	}
+	permission, ok := descriptor.PermissionFor(ActionRead)
+	if !ok || permission != "doc:api:read" {
+		t.Fatalf("permission = %q, %v", permission, ok)
+	}
+	if app.MaxPageSize() != 1000 || app.MaxBulkSize() != 1000 {
+		t.Fatalf("default limits = %d/%d", app.MaxBulkSize(), app.MaxPageSize())
+	}
+}
+
+func TestUsesAllowAuthorizerReflectsPolicy(t *testing.T) {
+	openApp, _ := newTestApplication(t, Options[*testEntity, int64]{})
+	if !openApp.UsesAllowAuthorizer() {
+		t.Fatal("auth.Allow application must report UsesAllowAuthorizer")
+	}
+
+	repo := newTestRepo()
+	restricted, err := NewApplication[*testEntity, int64](repo, Options[*testEntity, int64]{
+		Resource:   "doc",
+		Authorizer: fixedAuthorizer{decision: auth.Decision{Allowed: true}},
+	})
+	if err != nil {
+		t.Fatalf("new application: %v", err)
+	}
+	if restricted.UsesAllowAuthorizer() {
+		t.Fatal("custom authorizer must not report UsesAllowAuthorizer")
+	}
+}
+
+func TestNewReadApplicationOnlyDeclaresReadActions(t *testing.T) {
+	repo := newTestRepo()
+	app, err := NewReadApplication[*testEntity, int64](repo, Options[*testEntity, int64]{
+		Resource:   "doc",
+		Authorizer: auth.Allow(),
+	})
+	if err != nil {
+		t.Fatalf("new read application: %v", err)
+	}
+	descriptor := app.Descriptor()
+	if len(descriptor.Actions) != 2 {
+		t.Fatalf("actions = %+v", descriptor.Actions)
+	}
+	for _, action := range descriptor.Actions {
+		if action.Name != ActionRead && action.Name != ActionList {
+			t.Fatalf("unexpected action %q", action.Name)
+		}
+	}
+
+	ctx := context.Background()
+	if err := app.Create(ctx, &testEntity{Name: "x"}); !errors.Is(err, errors.Forbidden) {
+		t.Fatalf("read application Create() error = %v, want Forbidden", err)
+	}
+	if err := app.Delete(ctx, 1); !errors.Is(err, errors.Forbidden) {
+		t.Fatalf("read application Delete() error = %v, want Forbidden", err)
+	}
+
+	if _, err := NewReadApplication[*testEntity, int64](nil, Options[*testEntity, int64]{
+		Resource:   "doc",
+		Authorizer: auth.Allow(),
+	}); !errors.Is(err, errors.InvalidInput) {
+		t.Fatalf("NewReadApplication(nil) error = %v, want InvalidInput", err)
+	}
+
+	if _, err := NewReadApplication[*testEntity, int64](repo, Options[*testEntity, int64]{
+		Resource:   "doc",
+		Authorizer: auth.Allow(),
+		Actions:    []auth.Action{{Name: "import", Kind: auth.KindCreate}},
+	}); !errors.Is(err, errors.InvalidInput) {
+		t.Fatalf("read application with write action error = %v, want InvalidInput", err)
+	}
+}
+
+func TestCreateValidatesDomainBeforeApplicationPolicy(t *testing.T) {
+	order := make([]string, 0, 2)
+	repo := testkit.NewMemoryRepository[*validatingEntity, int64](testkit.NewInt64Sequence(1))
+	app, err := NewApplication[*validatingEntity, int64](repo, Options[*validatingEntity, int64]{
+		Resource:   "doc",
+		Authorizer: auth.Allow(),
+		Validator:  orderedValidator{order: &order},
+	})
+	if err != nil {
+		t.Fatalf("new application: %v", err)
+	}
+	entity := &validatingEntity{Name: "ok", order: &order}
+	if err := app.Create(context.Background(), entity); err != nil {
+		t.Fatalf("Create() error = %v", err)
 	}
 	if got := strings.Join(order, ","); got != "domain,application" {
 		t.Fatalf("validation order = %q", got)
 	}
+	if entity.GetID() == 0 {
+		t.Fatal("expected repository to assign an ID")
+	}
 }
 
-func TestApplicationValidateStopsAfterDomainInvariantFailure(t *testing.T) {
+func TestCreateStopsAfterDomainInvariantFailure(t *testing.T) {
 	order := make([]string, 0, 2)
-	domainErr := errors.New("domain invariant failed")
-	app := &Application[*selfValidatingEntity, int64]{
-		config:    DefaultServiceConfig(),
-		validator: orderedValidator{order: &order},
+	repo := testkit.NewMemoryRepository[*validatingEntity, int64](testkit.NewInt64Sequence(1))
+	app, err := NewApplication[*validatingEntity, int64](repo, Options[*validatingEntity, int64]{
+		Resource:   "doc",
+		Authorizer: auth.Allow(),
+		Validator:  orderedValidator{order: &order},
+	})
+	if err != nil {
+		t.Fatalf("new application: %v", err)
 	}
-	err := app.Validate(&selfValidatingEntity{id: 1, order: &order, validate: domainErr})
-	if !errors.Is(err, domainErr) {
-		t.Fatalf("Validate() error = %v", err)
+	domainErr := errors.New("domain invariant failed")
+	entity := &validatingEntity{Name: "bad", order: &order, domainErr: domainErr}
+	if err := app.Create(context.Background(), entity); !errors.Is(err, domainErr) {
+		t.Fatalf("Create() error = %v, want domain error", err)
 	}
 	if got := strings.Join(order, ","); got != "domain" {
 		t.Fatalf("validation order = %q", got)
 	}
-}
-
-func TestApplication_NewApplicationNormalizesZeroServiceConfig(t *testing.T) {
-	repo := newBatchTestRepo()
-	app, err := NewApplication(repo, &Options[testEntity, int64]{Config: &ServiceConfig{}})
+	count, err := repo.Count(context.Background(), spec.All())
 	if err != nil {
-		t.Fatalf("new application: %v", err)
+		t.Fatalf("count: %v", err)
 	}
-
-	cfg := app.Config()
-	if cfg.MaxBatchSize != defaultMaxBatchSize {
-		t.Fatalf("expected default max batch size, got %d", cfg.MaxBatchSize)
-	}
-	if cfg.MaxPageSize != defaultMaxPageSize {
-		t.Fatalf("expected default max page size, got %d", cfg.MaxPageSize)
-	}
-
-	err = app.CreateAll(context.Background(), []testEntity{{id: 1}})
-	if err != nil {
-		t.Fatalf("expected zero config batch size to be normalized, got %v", err)
+	if count != 0 {
+		t.Fatalf("expected no persisted entity, got %d", count)
 	}
 }
 
-func TestApplication_NormalizesNegativeServiceConfig(t *testing.T) {
-	repo := newBatchTestRepo()
-	app, err := NewApplication(repo, &Options[testEntity, int64]{Config: &ServiceConfig{
-		MaxBatchSize: -1,
-		MaxPageSize:  -1,
-	}})
-	if err != nil {
-		t.Fatalf("new application: %v", err)
+func TestApplicationValidatorFailureLeavesNothingPersisted(t *testing.T) {
+	validator := &trackingValidator{err: errors.New("policy rejected")}
+	app, repo := newTestApplication(t, Options[*testEntity, int64]{Validator: validator})
+	err := app.Create(context.Background(), &testEntity{Name: "x"})
+	if !errors.Is(err, validator.err) {
+		t.Fatalf("Create() error = %v", err)
 	}
-
-	cfg := app.Config()
-	if cfg.MaxBatchSize != defaultMaxBatchSize {
-		t.Fatalf("expected default max batch size, got %d", cfg.MaxBatchSize)
+	if validator.called != 1 {
+		t.Fatalf("validator calls = %d", validator.called)
 	}
-	if cfg.MaxPageSize != defaultMaxPageSize {
-		t.Fatalf("expected default max page size, got %d", cfg.MaxPageSize)
+	count, countErr := repo.Count(context.Background(), spec.All())
+	if countErr != nil {
+		t.Fatalf("count: %v", countErr)
 	}
-
-}
-
-func TestApplication_ConfigReturnsCopy(t *testing.T) {
-	repo := newBatchTestRepo()
-	app, err := NewApplication(repo, &Options[testEntity, int64]{Config: DefaultServiceConfig()})
-	if err != nil {
-		t.Fatalf("new application: %v", err)
-	}
-
-	cfg := app.Config()
-	cfg.MaxBatchSize = 1
-
-	got := app.Config()
-	if got.MaxBatchSize == 1 {
-		t.Fatalf("expected Config to return copy, got shared pointer")
-	}
-}
-
-type narrowCRUDRepo struct{}
-
-func (narrowCRUDRepo) Create(context.Context, testEntity) error       { return nil }
-func (narrowCRUDRepo) Get(context.Context, int64) (testEntity, error) { return testEntity{}, nil }
-func (narrowCRUDRepo) Update(context.Context, testEntity) error       { return nil }
-func (narrowCRUDRepo) Delete(context.Context, int64) error            { return nil }
-
-func TestApplication_CapabilityProbes(t *testing.T) {
-	narrowApp, err := NewApplication[testEntity, int64](narrowCRUDRepo{}, nil)
-	if err != nil {
-		t.Fatalf("new application: %v", err)
-	}
-	if narrowApp.HasQueryCapability() {
-		t.Fatalf("expected narrowCRUDRepo to lack query capability")
-	}
-	if narrowApp.HasQueryableCapability() {
-		t.Fatalf("expected narrowCRUDRepo to lack queryable capability")
-	}
-	if narrowApp.HasBatchCapability() {
-		t.Fatalf("expected narrowCRUDRepo to lack batch capability")
-	}
-
-	queryOnlyApp, err := NewApplication[testEntity, int64](&recordingRepo{}, nil)
-	if err != nil {
-		t.Fatalf("new application: %v", err)
-	}
-	if !queryOnlyApp.HasQueryCapability() {
-		t.Fatalf("expected recordingRepo to have query capability")
-	}
-	if queryOnlyApp.HasQueryableCapability() {
-		t.Fatalf("expected recordingRepo to lack queryable capability")
-	}
-	if queryOnlyApp.HasBatchCapability() {
-		t.Fatalf("expected recordingRepo to lack batch capability")
-	}
-
-	queryableApp, err := NewApplication[testEntity, int64](&queryRepo{}, nil)
-	if err != nil {
-		t.Fatalf("new application: %v", err)
-	}
-	if !queryableApp.HasQueryCapability() {
-		t.Fatalf("expected queryRepo to have query capability")
-	}
-	if !queryableApp.HasQueryableCapability() {
-		t.Fatalf("expected queryRepo to have queryable capability")
-	}
-
-	txBatchApp, err := NewApplication[testEntity, int64](newBatchTestRepo(), nil)
-	if err != nil {
-		t.Fatalf("new application: %v", err)
-	}
-	if !txBatchApp.HasBatchCapability() {
-		t.Fatalf("expected transactional repo to have batch capability")
+	if count != 0 {
+		t.Fatalf("expected no persisted entity, got %d", count)
 	}
 }

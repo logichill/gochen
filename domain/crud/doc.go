@@ -9,8 +9,7 @@
 //
 // 仓储 ports：
 //   - [IRepository] — 简单 CRUD 仓储接口。
-//   - [IQueryRepository] — CRUD 读扩展接口。
-//   - [IBatchOperations] — 批量操作接口。
+//   - [IBulkOperations] — 批量操作接口。
 //
 // # 查询协议（已外移）
 //
@@ -23,6 +22,4 @@
 //   - Create: 已存在/唯一约束冲突返回 errors.Conflict
 //   - Update: 未找到返回 errors.NotFound；乐观锁冲突返回 errors.Concurrency
 //   - Delete: 默认实现可幂等（未找到不报错）
-//   - Exists: 仅在查询失败时返回错误。
-//   - List/Count: 空结果返回空 slice/0 + nil
 package crud

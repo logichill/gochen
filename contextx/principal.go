@@ -42,23 +42,23 @@ func Operator(ctx context.Context) string {
 }
 
 // WithUserID 返回携带 userID 的 context。
-func WithUserID(ctx context.Context, userID int64) (context.Context, error) {
+func WithUserID(ctx context.Context, userID string) (context.Context, error) {
 	ctx, err := Ensure(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return context.WithValue(ctx, keyUserID, userID), nil
+	return context.WithValue(ctx, keyUserID, strings.TrimSpace(userID)), nil
 }
 
 // UserID 从 context 中获取 userID。
-func UserID(ctx context.Context) int64 {
+func UserID(ctx context.Context) string {
 	if ctx == nil {
-		return 0
+		return ""
 	}
-	if v, ok := ctx.Value(keyUserID).(int64); ok {
-		return v
+	if v, ok := ctx.Value(keyUserID).(string); ok {
+		return strings.TrimSpace(v)
 	}
-	return 0
+	return ""
 }
 
 // WithSessionID 返回携带 sessionID 的 context。

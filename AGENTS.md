@@ -49,8 +49,7 @@
 
    | 包                               | 允许依赖（gochen 内部）                                                                               |
    | -------------------------------- | ----------------------------------------------------------------------------------------------------- |
-   | app（`app/security/*` 除外）     | clock, codec, contextx, domain, errors, eventing, gen, internal, messaging, observe, policy, validate |
-   | app/security/*                   | 上行全部 + auth/{action, scoped}                                                                      |
+   | app                              | auth（仅根契约）, clock, codec, contextx, domain, errors, eventing, gen, internal, messaging, observe, policy, validate |
    | auth（能力子包见 `auth/doc.go`） | clock, contextx, domain, errors, gen, internal, observe                                               |
    | cache                            | clock                                                                                                 |
    | clock / codec / gen / validate   | errors（基础叶子，彼此禁止互相 import，协作用最小结构接口注入）                                       |
@@ -70,8 +69,8 @@
    `testkit → auth/scoped` 用于内存仓储复现 L3 写入约束、租户对齐与版本检查，供无数据库的授权链路测试使用；该依赖不扩展业务包的允许矩阵。
 
 3. **依赖地板**：`domain` 非测试代码只依赖标准库与 `gochen/errors`（及自身子树）；基础叶子（clock/codec/gen/validate）只依赖标准库、`gochen/errors` 与本包子树。
-4. **`app/security` 单向依赖 `auth`**：`app/security/*` 是应用层安全 PEP 装饰器，其职责即把 `auth` 的安全契约应用到 Application 编排中，故允许 `app/security → auth`。该边**严格单向**（`auth` 禁止 import 任何 `app` 包），且基础业务包 `app/crud` / `app/audited` / `app/eventsourced` 必须保持对 `auth` 零依赖。
-5. **安全能力落点**：装饰器只用于接口宽的 Application 层；Repository 层（`domain/crud.IRepository` 仅 4 个方法，其余能力靠类型断言探测）一律用**构造期显式选项**表达安全约束，禁止包装 `IRepository`——否则可选能力接口会丢失或被假冒。具体契约见[分层授权](docs/architecture/layered-authz.md)。
+4. **应用授权契约依赖**：按 D15，`app/crud` / `app/audited` / `app/eventsourced` 通过 `auth` 根包的 `IAuthorizer` 编排授权。依赖严格单向；`auth` 禁止 import `app`，基础应用禁止依赖 `auth/action`、`auth/scoped`、`auth/governance`。`domain/meta`、`domain/crud` 的元数据和仓储能力接口沿用 domain 子树依赖地板。
+5. **安全能力落点**：Application 在用例入口执行授权，把 `spec.Spec` 显式交给 Repository；Repository 构造期用 `WithIsolation` / `WithResourceKind` 声明隔离与资源。可选能力由仓储本体提供，禁止包装 `IRepository`。具体契约见[分层授权](docs/architecture/layered-authz.md)。
 
 6. **具体协作边**：`eventing → process` 仅允许 `eventing/outbox → process/task`；`process → eventing` 仅允许 `process/saga → eventing` / `eventing/bus`。任务监督不反向依赖事件能力。
 7. **默认适配分包**：`app/eventsourced` 保留领域仓储与命令用例；`app/eventsourced/eventstore` 承载事件持久化/快照/历史适配，`app/eventsourced/subscriber` 承载事件处理/投影/注册。核心模板禁止反向依赖这两个可选子包，组合根负责装配。

@@ -1,0 +1,407 @@
+package spec
+
+import (
+	"math"
+	"reflect"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+
+	"gochen/domain/meta"
+	"gochen/errors"
+)
+
+// Role 是框架定义的字段角色；实体通过 domain/meta 的字段标签声明角色字段。
+type Role = meta.Role
+
+const (
+	RoleID     = meta.RoleID
+	RoleTenant = meta.RoleTenant
+	RoleScope  = meta.RoleScope
+	RoleOwner  = meta.RoleOwner
+)
+
+// Spec 是领域层唯一的行级谓词类型。零值不匹配任何实体；非法构造携带错误，
+// 任何解释器遇到它都返回该错误。
+type Spec struct {
+	kind     specKind
+	field    string
+	value    any
+	values   []any
+	name     string
+	args     []any
+	children []Spec
+	err      error
+}
+
+type specKind uint8
+
+const (
+	specNone specKind = iota
+	specAll
+	specEq
+	specIn
+	specIsNull
+	specAnd
+	specOr
+	specNamed
+)
+
+const DefaultINLimit = 1000
+
+var inLimit = struct {
+	sync.RWMutex
+	value      int
+	configured bool
+}{value: DefaultINLimit}
+
+// ConfigureINLimit 设置进程级的 IN 上限，只允许配置一次。请求期不可变。
+func ConfigureINLimit(limit int) error {
+	if limit <= 0 {
+		return errors.NewCode(errors.InvalidInput, "IN limit must be positive")
+	}
+	inLimit.Lock()
+	defer inLimit.Unlock()
+	if inLimit.configured {
+		return errors.NewCode(errors.InvalidInput, "IN limit already configured")
+	}
+	inLimit.value = limit
+	inLimit.configured = true
+	return nil
+}
+
+// INLimit 返回当前进程的 IN 上限。
+func INLimit() int {
+	inLimit.RLock()
+	defer inLimit.RUnlock()
+	return inLimit.value
+}
+
+// All 返回匹配所有实体的规约。
+func All() Spec { return Spec{kind: specAll} }
+
+// Eq 返回 field 等于 v 的规约。v 为 nil 或类型不允许时得到非法规约。
+func Eq[F ~string](field F, v any) Spec {
+	f, err := normalizeField(field)
+	if err != nil {
+		return Spec{err: err}
+	}
+	value, err := normalizeValue(v)
+	if err != nil {
+		return Spec{err: err}
+	}
+	return Spec{kind: specEq, field: f, value: value}
+}
+
+// In 返回 field 属于给定值的规约。空集合等于零值；含 nil、超过 IN 上限或
+// 出现不允许的值类型时得到非法规约。
+func In[F ~string](field F, vs ...any) Spec {
+	f, err := normalizeField(field)
+	if err != nil {
+		return Spec{err: err}
+	}
+	if len(vs) == 0 {
+		return Spec{}
+	}
+	if limit := INLimit(); len(vs) > limit {
+		return Spec{err: errors.NewCode(errors.InvalidInput, "IN exceeds configured limit").
+			WithContext("field", f).
+			WithContext("limit", limit).
+			WithContext("size", len(vs))}
+	}
+	seen := make(map[string]struct{}, len(vs))
+	values := make([]any, 0, len(vs))
+	for _, raw := range vs {
+		v, err := normalizeValue(raw)
+		if err != nil {
+			return Spec{err: err}
+		}
+		key := canonicalValue(v)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		values = append(values, v)
+	}
+	if len(values) == 1 {
+		return Spec{kind: specEq, field: f, value: values[0]}
+	}
+	return Spec{kind: specIn, field: f, values: values}
+}
+
+// IsNull 返回 field 为 NULL 的规约。
+func IsNull[F ~string](field F) Spec {
+	f, err := normalizeField(field)
+	if err != nil {
+		return Spec{err: err}
+	}
+	return Spec{kind: specIsNull, field: f}
+}
+
+// And 组合多个规约。And() 等于 All()；任一子项为零值则结果为零值。
+func And(ss ...Spec) Spec {
+	for _, s := range ss {
+		if s.err != nil {
+			return Spec{err: s.err}
+		}
+	}
+	out := make([]Spec, 0, len(ss))
+	for _, s := range ss {
+		switch s.kind {
+		case specAll:
+			continue
+		case specNone:
+			return Spec{}
+		case specAnd:
+			out = append(out, s.children...)
+		default:
+			out = append(out, s)
+		}
+	}
+	if len(out) == 0 {
+		return All()
+	}
+	if len(out) == 1 {
+		return out[0]
+	}
+	return Spec{kind: specAnd, children: out}
+}
+
+// Or 组合多个规约。Or() 等于零值；任一子项为 All 则结果为 All。
+func Or(ss ...Spec) Spec {
+	for _, s := range ss {
+		if s.err != nil {
+			return Spec{err: s.err}
+		}
+	}
+	out := make([]Spec, 0, len(ss))
+	for _, s := range ss {
+		switch s.kind {
+		case specNone:
+			continue
+		case specAll:
+			return All()
+		case specOr:
+			out = append(out, s.children...)
+		default:
+			out = append(out, s)
+		}
+	}
+	if len(out) == 0 {
+		return Spec{}
+	}
+	if len(out) == 1 {
+		return out[0]
+	}
+	return Spec{kind: specOr, children: out}
+}
+
+// Named 返回到仓储注册的命名条件。
+func Named(name string, args ...any) Spec {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return Spec{err: errors.NewCode(errors.InvalidInput, "named condition name cannot be empty")}
+	}
+	normalized := make([]any, 0, len(args))
+	for _, raw := range args {
+		v, err := normalizeValue(raw)
+		if err != nil {
+			return Spec{err: err}
+		}
+		normalized = append(normalized, v)
+	}
+	return Spec{kind: specNamed, name: name, args: normalized}
+}
+
+// Err 返回规约携带的构造错误。
+func (s Spec) Err() error { return s.err }
+
+// IsAll 报告规约是否匹配所有实体。
+func (s Spec) IsAll() bool { return s.err == nil && s.kind == specAll }
+
+// IsNone 报告规约是否不匹配任何实体。
+func (s Spec) IsNone() bool { return s.err == nil && s.kind == specNone }
+
+// HasNamed 报告规约树中是否包含命名条件。
+func (s Spec) HasNamed() bool {
+	if s.err != nil {
+		return false
+	}
+	if s.kind == specNamed {
+		return true
+	}
+	for _, child := range s.children {
+		if child.HasNamed() {
+			return true
+		}
+	}
+	return false
+}
+
+// ReferencesRole 报告规约树中是否引用了指定角色。
+func (s Spec) ReferencesRole(role Role) bool {
+	if s.err != nil {
+		return false
+	}
+	switch s.kind {
+	case specEq, specIn, specIsNull:
+		if s.field == string(role) {
+			return true
+		}
+	case specAnd, specOr:
+		for _, child := range s.children {
+			if child.ReferencesRole(role) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// NamedNames 返回规约树中命名条件的名称，按名称排序并去重。
+func (s Spec) NamedNames() []string {
+	if s.err != nil {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	collectNamed(s, seen)
+	out := make([]string, 0, len(seen))
+	for name := range seen {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func collectNamed(s Spec, out map[string]struct{}) {
+	switch s.kind {
+	case specNamed:
+		out[s.name] = struct{}{}
+	case specAnd, specOr:
+		for _, child := range s.children {
+			collectNamed(child, out)
+		}
+	}
+}
+
+// Fields 返回规约树引用到的字段或角色，按名称排序并去重。
+func (s Spec) Fields() []string {
+	if s.err != nil {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	collectFields(s, seen)
+	out := make([]string, 0, len(seen))
+	for field := range seen {
+		out = append(out, field)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func collectFields(s Spec, out map[string]struct{}) {
+	switch s.kind {
+	case specEq, specIn, specIsNull:
+		out[s.field] = struct{}{}
+	case specAnd, specOr:
+		for _, child := range s.children {
+			collectFields(child, out)
+		}
+	}
+}
+
+// Canonical 返回规约的规范形式。非法规约返回 "<invalid>"。
+func (s Spec) Canonical() string {
+	if s.err != nil {
+		return "<invalid>"
+	}
+	switch s.kind {
+	case specNone:
+		return "none"
+	case specAll:
+		return "all"
+	case specEq:
+		return "eq(" + s.field + "," + canonicalValue(s.value) + ")"
+	case specIn:
+		parts := make([]string, 0, len(s.values))
+		for _, v := range s.values {
+			parts = append(parts, canonicalValue(v))
+		}
+		return "in(" + s.field + "," + strings.Join(parts, ",") + ")"
+	case specIsNull:
+		return "isnull(" + s.field + ")"
+	case specNamed:
+		parts := make([]string, 0, len(s.args)+1)
+		parts = append(parts, s.name)
+		for _, v := range s.args {
+			parts = append(parts, canonicalValue(v))
+		}
+		return "named(" + strings.Join(parts, ",") + ")"
+	case specAnd, specOr:
+		parts := make([]string, 0, len(s.children))
+		for _, child := range s.children {
+			parts = append(parts, child.Canonical())
+		}
+		sort.Strings(parts)
+		op := "and("
+		if s.kind == specOr {
+			op = "or("
+		}
+		return op + strings.Join(parts, ",") + ")"
+	default:
+		return "<invalid>"
+	}
+}
+
+func normalizeField[F ~string](field F) (string, error) {
+	f := strings.TrimSpace(string(field))
+	if f == "" {
+		return "", errors.NewCode(errors.InvalidInput, "spec field cannot be empty")
+	}
+	if f == string(RoleTenant) {
+		return "", errors.NewCode(errors.InvalidInput, "tenant role cannot be used in a spec")
+	}
+	if strings.HasPrefix(f, "@") && !Role(f).IsValid() {
+		return "", errors.NewCode(errors.InvalidInput, "unknown role in spec").
+			WithContext("field", f)
+	}
+	return f, nil
+}
+
+func normalizeValue(v any) (any, error) {
+	if v == nil {
+		return nil, errors.NewCode(errors.InvalidInput, "spec value cannot be nil; use IsNull")
+	}
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.String:
+		return rv.String(), nil
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return rv.Int(), nil
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		u := rv.Uint()
+		if u > math.MaxInt64 {
+			return nil, errors.NewCode(errors.InvalidInput, "unsigned value overflows int64")
+		}
+		return int64(u), nil
+	case reflect.Bool:
+		return rv.Bool(), nil
+	default:
+		return nil, errors.NewCode(errors.InvalidInput, "unsupported spec value type").
+			WithContext("value_type", rv.Type().String())
+	}
+}
+
+func canonicalValue(v any) string {
+	switch x := v.(type) {
+	case string:
+		return strconv.Quote(x)
+	case int64:
+		return strconv.FormatInt(x, 10)
+	case bool:
+		return strconv.FormatBool(x)
+	default:
+		return "<invalid>"
+	}
+}

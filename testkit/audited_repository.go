@@ -3,7 +3,6 @@ package testkit
 import (
 	"sync"
 
-	appcrud "gochen/app/crud"
 	"gochen/domain/audited"
 	domaincrud "gochen/domain/crud"
 	"gochen/gen"
@@ -32,11 +31,11 @@ func NewAuditedMemoryRepository[T audited.IAuditedEntity[ID], ID comparable](gen
 }
 
 var (
-	_ appcrud.ITransactional                                                = (*AuditedMemoryRepository[audited.IAuditedEntity[int64], int64])(nil)
 	_ domaincrud.IRepository[audited.IAuditedEntity[int64], int64]          = (*AuditedMemoryRepository[audited.IAuditedEntity[int64], int64])(nil)
-	_ domaincrud.IQueryRepository[audited.IAuditedEntity[int64], int64]     = (*AuditedMemoryRepository[audited.IAuditedEntity[int64], int64])(nil)
+	_ domaincrud.IPurgeRepository[audited.IAuditedEntity[int64], int64]     = (*AuditedMemoryRepository[audited.IAuditedEntity[int64], int64])(nil)
 	_ audited.IRestoreRepository[audited.IAuditedEntity[int64], int64]      = (*AuditedMemoryRepository[audited.IAuditedEntity[int64], int64])(nil)
 	_ audited.IDeletedQueryRepository[audited.IAuditedEntity[int64], int64] = (*AuditedMemoryRepository[audited.IAuditedEntity[int64], int64])(nil)
 	_ audited.IAuditStore                                                   = (*AuditedMemoryRepository[audited.IAuditedEntity[int64], int64])(nil)
-	_ audited.IBatchAuditStore                                              = (*AuditedMemoryRepository[audited.IAuditedEntity[int64], int64])(nil)
+	_ audited.IAuditQueryStore                                              = (*AuditedMemoryRepository[audited.IAuditedEntity[int64], int64])(nil)
+	_ audited.IBulkAuditStore                                               = (*AuditedMemoryRepository[audited.IAuditedEntity[int64], int64])(nil)
 )

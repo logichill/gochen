@@ -69,12 +69,12 @@ type ISoftDeletableBy interface {
 //   - ID: 实体主键类型，必须是可比较类型（如 int64、string、uuid.UUID 等）
 type AuditedEntity[ID comparable] struct {
 	crud.Entity[ID]
-	CreatedAt time.Time  `json:"created_at"`
-	CreatedBy string     `json:"created_by"`
-	UpdatedAt time.Time  `json:"updated_at"`
-	UpdatedBy string     `json:"updated_by"`
-	DeletedAt *time.Time `json:"deleted_at,omitempty"`
-	DeletedBy *string    `json:"deleted_by,omitempty"`
+	CreatedAt time.Time  `json:"created_at" managed:"true"`
+	CreatedBy string     `json:"created_by" managed:"true"`
+	UpdatedAt time.Time  `json:"updated_at" managed:"true"`
+	UpdatedBy string     `json:"updated_by" managed:"true"`
+	DeletedAt *time.Time `json:"deleted_at,omitempty" managed:"true"`
+	DeletedBy *string    `json:"deleted_by,omitempty" managed:"true"`
 }
 
 // GetCreatedAt 返回实体的创建时间。

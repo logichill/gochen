@@ -1,9 +1,11 @@
 package testkit
 
 import (
+	"context"
+	"gochen/domain/spec"
 	"sync"
 
-	appcrud "gochen/app/crud"
+	"gochen/app/query"
 	"gochen/domain"
 	domaincrud "gochen/domain/crud"
 	"gochen/gen"
@@ -25,8 +27,11 @@ type MemoryRepository[T domain.IEntity[ID], ID comparable] struct {
 	// （见 memory_repository_cross_isolation.go）。
 	crossIsolationReads bool
 	crossIsolationAudit ICrossIsolationAudit
-	// scopeEntityType 非空表示已显式声明 L3 范围能力（见 memory_repository_scoped.go）。
-	scopeEntityType string
+	// namedMatchers 是内存解释器注册的命名条件（D3：仅读路径与契约测试）。
+	namedMatchers map[string]spec.NamedMatcher
+	interpreter   *spec.Interpreter
+	// dataSourceID 供带审计的应用做构造期同源校验（D17）。
+	dataSourceID string
 }
 
 // NewMemoryRepository 创建泛型内存仓储。
@@ -38,8 +43,9 @@ func NewMemoryRepository[T domain.IEntity[ID], ID comparable](
 	opts ...MemoryOption[T, ID],
 ) *MemoryRepository[T, ID] {
 	r := &MemoryRepository[T, ID]{
-		state:     memoryState[T, ID]{entities: make(map[ID]T)},
-		generator: generator,
+		state:        memoryState[T, ID]{entities: make(map[ID]T)},
+		generator:    generator,
+		dataSourceID: MemoryDataSourceID,
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -52,8 +58,12 @@ func NewMemoryRepository[T domain.IEntity[ID], ID comparable](
 }
 
 var (
-	_ appcrud.ITransactional                                        = (*MemoryRepository[*domaincrud.Entity[int64], int64])(nil)
-	_ domaincrud.IRepository[*domaincrud.Entity[int64], int64]      = (*MemoryRepository[*domaincrud.Entity[int64], int64])(nil)
-	_ domaincrud.IQueryRepository[*domaincrud.Entity[int64], int64] = (*MemoryRepository[*domaincrud.Entity[int64], int64])(nil)
-	_ domaincrud.IBatchOperations[*domaincrud.Entity[int64], int64] = (*MemoryRepository[*domaincrud.Entity[int64], int64])(nil)
+	_ interface {
+		WithinTx(ctx context.Context, fn func(context.Context) error) error
+	} = (*MemoryRepository[*domaincrud.Entity[int64], int64])(nil)
+	_ domaincrud.IRepository[*domaincrud.Entity[int64], int64]     = (*MemoryRepository[*domaincrud.Entity[int64], int64])(nil)
+	_ query.IQueryableRepository[*domaincrud.Entity[int64]]        = (*MemoryRepository[*domaincrud.Entity[int64], int64])(nil)
+	_ domaincrud.IBulkOperations[*domaincrud.Entity[int64], int64] = (*MemoryRepository[*domaincrud.Entity[int64], int64])(nil)
+	_ domaincrud.IDataSourceProvider                               = (*MemoryRepository[*domaincrud.Entity[int64], int64])(nil)
+	_ domaincrud.INamedConditionProvider                           = (*MemoryRepository[*domaincrud.Entity[int64], int64])(nil)
 )

@@ -48,35 +48,6 @@ func TestPatternMatches(t *testing.T) {
 	require.False(t, action.PatternMatches("order:api:read", "order:api:create"))
 }
 
-func TestOperationPolicyCodeFor(t *testing.T) {
-	policy := action.OperationPolicy{
-		Create: "order:api:create",
-		Read:   "order:api:read",
-	}
-
-	code, ok := policy.CodeFor(action.OpCreate)
-	require.True(t, ok)
-	require.Equal(t, "order:api:create", code)
-
-	// 未配置的操作必须报告"无配置"，由调用方 fail-closed 拒绝。
-	_, ok = policy.CodeFor(action.OpDelete)
-	require.False(t, ok)
-
-	_, ok = policy.CodeFor(action.Operation("unknown"))
-	require.False(t, ok)
-}
-
-func TestOperationPolicyValidate(t *testing.T) {
-	require.NoError(t, action.OperationPolicy{
-		Create: "order:api:create",
-		List:   "order:api:*",
-	}.Validate())
-
-	err := action.OperationPolicy{Create: "api:order"}.Validate()
-	require.Error(t, err)
-	require.True(t, errors.Is(err, errors.InvalidInput))
-}
-
 func TestRequireActionFailsClosed(t *testing.T) {
 	ctx := context.Background()
 

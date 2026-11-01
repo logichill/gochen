@@ -229,7 +229,7 @@ func ClearTxRollbackOnly(ctx context.Context) {
 // 用于保存点这类“只撤销本层新增回调”的场景：进入作用域前捕获，失败时通过
 // TruncateAfterCommitTo 回退到该水位线，保留外层已注册的回调。
 type AfterCommitLevel struct {
-	stateMark     int
+	stateMark      int
 	dispatcherMark int
 	hasDispatcher  bool
 }

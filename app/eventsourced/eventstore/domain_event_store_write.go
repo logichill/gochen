@@ -20,7 +20,7 @@ func (a *domainEventStore[ID]) AppendEvents(ctx context.Context, aggregateID ID,
 		return nil
 	}
 
-	storableEvents, err := a.prepareDomainEvents(aggregateID, events, expectedVersion)
+	storableEvents, err := a.prepareDomainEvents(ctx, aggregateID, events, expectedVersion)
 	if err != nil {
 		return err
 	}
@@ -57,7 +57,7 @@ func (a *domainEventStore[ID]) AppendEvents(ctx context.Context, aggregateID ID,
 	return nil
 }
 
-func (a *domainEventStore[ID]) prepareDomainEvents(aggregateID ID, events []domain.IDomainEvent, expectedVersion uint64) ([]eventing.Event[ID], error) {
+func (a *domainEventStore[ID]) prepareDomainEvents(ctx context.Context, aggregateID ID, events []domain.IDomainEvent, expectedVersion uint64) ([]eventing.Event[ID], error) {
 	storableEvents := make([]eventing.Event[ID], 0, len(events))
 	for i, de := range events {
 		if depcheck.IsNil(de) {
@@ -93,6 +93,9 @@ func (a *domainEventStore[ID]) prepareDomainEvents(aggregateID ID, events []doma
 				WithContext("event_type", eventType).
 				WithContext("aggregate_id", aggregateID).
 				WithContext("index", i)
+		}
+		if err := contextx.InjectEventAudit(ctx, evt.GetMetadata()); err != nil {
+			return nil, err
 		}
 		storableEvents = append(storableEvents, *evt)
 	}

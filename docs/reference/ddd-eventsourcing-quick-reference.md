@@ -10,7 +10,7 @@
 | 聚合 | `domain/eventsourced.EventSourcedAggregate`、MetadataRegistry |
 | 领域事件持久化适配 | `app/eventsourced/eventstore.NewDomainEventStore` |
 | 仓储 | `app/eventsourced.NewEventSourcedRepository` |
-| 命令服务 | `app/eventsourced.NewEventSourcedService` |
+| 应用入口 | `app/eventsourced.NewApplication` |
 | 事件事实 | `eventing/store.IEventStreamStore` |
 | 可靠发布 | `eventing/outbox` → `eventing/bus` |
 | 读模型 | `eventing/projection` |
@@ -121,7 +121,7 @@ MetadataRegistry 按 Go 事件类型缓存 handler；运行时仍使用反射调
 
 ## 命令、发布与读模型
 
-`EventSourcedService` 编排加载聚合、执行命令和保存。ConcurrencyRetry 可在保存发生并发冲突时重新执行，handler 必须可重入；最终 Hook 用于接收整个调用的结果。需要 Operation 时使用 `ExecuteCommandWithOperation` 或 `ExecuteCommandWithResolvedOperation`，装配要求见 [Operation](../../app/operation/README.md#应用层接入)。
+`Application` 编排加载聚合、执行命令和保存：`Get` 按 read 规约回放校验，`Execute` 修改已有聚合并在保存冲突时重试（命令函数必须可重入），`ExecuteNew` 新建聚合不做重试，配置 `History` 后 `AuditTrail` 读取事件历史。授权规约在内存中匹配回放后的聚合；操作人、动作、原因与关联 ID 写入事件元数据。命令总线接入使用 `AsExecuteHandler` / `AsExecuteNewHandler`。需要统一信封或延迟收敛跟踪时由传输层使用 Operation 包装应用调用，不再内嵌于事件溯源应用。
 
 `CommandBus.Dispatch` 表示消息投递；`CommandExecutor.Execute` 表示本地同步执行。需要即时业务结果或 Saga 补偿判断时使用执行端口，不能依赖异步投递成功。
 

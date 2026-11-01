@@ -9,6 +9,7 @@ import (
 
 	"gochen/domain/audited"
 	"gochen/domain/crud"
+	"gochen/domain/spec"
 	"gochen/errors"
 )
 
@@ -33,14 +34,14 @@ func TestMemoryRepositoryCRUDAndStablePagination(t *testing.T) {
 	first := &memoryEntity{Name: "first"}
 	second := &memoryEntity{Name: "second"}
 
-	if err := repository.CreateAll(ctx, []*memoryEntity{first, second}); err != nil {
+	if err := repository.CreateBulk(ctx, []*memoryEntity{first, second}, spec.All()); err != nil {
 		t.Fatalf("create all: %v", err)
 	}
 	if first.ID != 1 || second.ID != 2 {
 		t.Fatalf("generated IDs = %d, %d; want 1, 2", first.ID, second.ID)
 	}
 
-	page, err := repository.List(ctx, 1, 1)
+	page, err := repository.List(ctx, 1, 1, spec.All())
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -49,7 +50,7 @@ func TestMemoryRepositoryCRUDAndStablePagination(t *testing.T) {
 	}
 
 	page[0].Name = "caller mutation"
-	stored, err := repository.Get(ctx, second.ID)
+	stored, err := repository.Get(ctx, second.ID, spec.All())
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -58,13 +59,17 @@ func TestMemoryRepositoryCRUDAndStablePagination(t *testing.T) {
 	}
 
 	stored.Name = "updated"
-	if err := repository.Update(ctx, stored); err != nil {
+	if err := repository.Update(ctx, stored, spec.All()); err != nil {
 		t.Fatalf("update: %v", err)
 	}
-	if err := repository.Delete(ctx, first.ID); err != nil {
+	deleteTarget, err := repository.Get(ctx, first.ID, spec.All())
+	if err != nil {
+		t.Fatalf("get delete target: %v", err)
+	}
+	if err := repository.Delete(ctx, deleteTarget, spec.All()); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	count, err := repository.Count(ctx)
+	count, err := repository.Count(ctx, spec.All())
 	if err != nil || count != 1 {
 		t.Fatalf("count = %d, err = %v; want 1, nil", count, err)
 	}
@@ -79,38 +84,38 @@ func TestMemoryRepositorySupportsGenericIDs(t *testing.T) {
 	}))
 	entity := &stringMemoryEntity{Name: "generic"}
 
-	if err := repository.Create(ctx, entity); err != nil {
+	if err := repository.Create(ctx, entity, spec.All()); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	if entity.ID != "entity-1" {
 		t.Fatalf("ID = %q; want entity-1", entity.ID)
 	}
-	if _, err := repository.Get(ctx, "entity-1"); err != nil {
+	if _, err := repository.Get(ctx, "entity-1", spec.All()); err != nil {
 		t.Fatalf("get generated string ID: %v", err)
 	}
 }
 
-func TestMemoryRepositoryBatchUpdateIsAtomic(t *testing.T) {
+func TestMemoryRepositoryBulkUpdateIsAtomic(t *testing.T) {
 	ctx := context.Background()
 	repository := NewMemoryRepository[*memoryEntity, int64](NewInt64Sequence(1))
 	first := &memoryEntity{Name: "first"}
-	if err := repository.Create(ctx, first); err != nil {
+	if err := repository.Create(ctx, first, spec.All()); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
-	err := repository.UpdateAll(ctx, []*memoryEntity{
+	err := repository.UpdateBulk(ctx, []*memoryEntity{
 		{Entity: crud.Entity[int64]{ID: first.ID}, Name: "changed"},
 		{Entity: crud.Entity[int64]{ID: 99}, Name: "missing"},
-	})
+	}, spec.All())
 	if !errors.Is(err, errors.NotFound) {
 		t.Fatalf("update all error = %v; want NotFound", err)
 	}
-	stored, getErr := repository.Get(ctx, first.ID)
+	stored, getErr := repository.Get(ctx, first.ID, spec.All())
 	if getErr != nil {
 		t.Fatalf("get: %v", getErr)
 	}
 	if stored.Name != "first" {
-		t.Fatalf("stored name = %q; failed batch partially applied", stored.Name)
+		t.Fatalf("stored name = %q; failed bulk partially applied", stored.Name)
 	}
 }
 
@@ -120,7 +125,7 @@ func TestMemoryRepositoryTransactionRollbackAndConflict(t *testing.T) {
 	wantErr := stderrors.New("rollback")
 
 	err := repository.WithinTx(ctx, func(txCtx context.Context) error {
-		if err := repository.Create(txCtx, &memoryEntity{Name: "rolled back"}); err != nil {
+		if err := repository.Create(txCtx, &memoryEntity{Name: "rolled back"}, spec.All()); err != nil {
 			return err
 		}
 		return wantErr
@@ -128,7 +133,7 @@ func TestMemoryRepositoryTransactionRollbackAndConflict(t *testing.T) {
 	if !stderrors.Is(err, wantErr) {
 		t.Fatalf("transaction error = %v; want rollback marker", err)
 	}
-	count, err := repository.Count(ctx)
+	count, err := repository.Count(ctx, spec.All())
 	if err != nil || count != 0 {
 		t.Fatalf("count after rollback = %d, err = %v; want 0, nil", count, err)
 	}
@@ -137,10 +142,10 @@ func TestMemoryRepositoryTransactionRollbackAndConflict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	if err := repository.Create(scope.Context(), &memoryEntity{Name: "transaction"}); err != nil {
+	if err := repository.Create(scope.Context(), &memoryEntity{Name: "transaction"}, spec.All()); err != nil {
 		t.Fatalf("transaction create: %v", err)
 	}
-	if err := repository.Create(ctx, &memoryEntity{Name: "concurrent"}); err != nil {
+	if err := repository.Create(ctx, &memoryEntity{Name: "concurrent"}, spec.All()); err != nil {
 		t.Fatalf("concurrent create: %v", err)
 	}
 	if err := repository.Commit(scope); !errors.Is(err, errors.Concurrency) {
@@ -155,24 +160,25 @@ func TestAuditedMemoryRepositoryVisibilityAndAtomicAudit(t *testing.T) {
 	ctx := context.Background()
 	repository := NewAuditedMemoryRepository[*auditedMemoryEntity, int64](NewInt64Sequence(1))
 	entity := &auditedMemoryEntity{Name: "article"}
-	if err := repository.Create(ctx, entity); err != nil {
+	if err := repository.Create(ctx, entity, spec.All()); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
-	stored, err := repository.Get(ctx, entity.ID)
+	stored, err := repository.Get(ctx, entity.ID, spec.All())
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
 	if err := stored.SoftDeleteBy("tester", time.Unix(1, 0).UTC()); err != nil {
 		t.Fatalf("soft delete: %v", err)
 	}
-	if err := repository.Update(ctx, stored); err != nil {
+	// 软删除由 Application 以“读取 → SoftDeleteBy → Update”表达，仓储 Update 必须接受这次落库。
+	if err := repository.Update(ctx, stored, spec.All()); err != nil {
 		t.Fatalf("update deleted entity: %v", err)
 	}
-	if _, err := repository.Get(ctx, entity.ID); !errors.Is(err, errors.NotFound) {
+	if _, err := repository.Get(ctx, entity.ID, spec.All()); !errors.Is(err, errors.NotFound) {
 		t.Fatalf("get deleted error = %v; want NotFound", err)
 	}
-	deleted, err := repository.ListDeleted(ctx, 0, 10)
+	deleted, err := repository.ListDeleted(ctx, 0, 10, spec.All())
 	if err != nil || len(deleted) != 1 {
 		t.Fatalf("deleted list length = %d, err = %v; want 1, nil", len(deleted), err)
 	}
@@ -180,9 +186,9 @@ func TestAuditedMemoryRepositoryVisibilityAndAtomicAudit(t *testing.T) {
 	marker := stderrors.New("abort audited transaction")
 	err = repository.WithinTx(ctx, func(txCtx context.Context) error {
 		_, err := repository.SaveAuditRecord(txCtx, audited.AuditRecord{
-			EntityID:  "1",
-			Operation: audited.AuditOpDelete,
-			Operator:  "tester",
+			EntityID: "1",
+			Action:   "delete",
+			Operator: "tester",
 		})
 		if err != nil {
 			return err
@@ -192,7 +198,7 @@ func TestAuditedMemoryRepositoryVisibilityAndAtomicAudit(t *testing.T) {
 	if !stderrors.Is(err, marker) {
 		t.Fatalf("transaction error = %v; want marker", err)
 	}
-	records, err := repository.ListAuditRecordsByEntity(ctx, "1", 0, 10)
+	records, err := repository.ListAuditRecords(ctx, "1", 0, 10, spec.All())
 	if err != nil || len(records) != 0 {
 		t.Fatalf("records after rollback = %d, err = %v; want 0, nil", len(records), err)
 	}

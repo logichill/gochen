@@ -58,7 +58,7 @@ HTTP handler 可组合 `gochen-runtime/http/operation` 的 `PrepareStreamHeaders
 ## 应用层接入
 
 - 普通 CRUD 或自定义写入口直接使用 `Runner.Execute(ctx, spec, handler)` 包装。
-- `app/eventsourced.EventSourcedService` 提供 `ExecuteCommandWithOperation` 和 `ExecuteCommandWithResolvedOperation`；tracked 要求显式配置 runner，并由组合根为其配置可查询的 Store。
+- `app/eventsourced.Application` 已内建授权、匹配、命令后校验与并发重试；需要 Operation 信封时由传输层用 `Runner.Execute` 包装 `Execute` / `ExecuteNew`。
 - 多步骤补偿和状态机推进使用 [process](../../process/README.md)。
 
 业务已成功但后续步骤失败时返回 `contextx.AfterCommitError`。handler 返回该错误对应 degraded 终态；业务成功后的结果保存失败则返回业务结果与该错误并保留幂等预占。接入方依据 operation ID 核对主操作后，通过 `IResultRecoveryStore.RecoverResult` 补存原结果；已有结果优先，不能以旧信封覆盖新状态，也不应释放预占后重复执行主操作。

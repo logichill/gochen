@@ -20,7 +20,7 @@ Gochen 通过接口和组合根组织领域建模、应用编排与基础设施�
 | --- | --- |
 | `domain` | 实体、聚合、仓储端口；非测试代码只依赖标准库、`gochen/errors` 与自身子树 |
 | `app` | 校验、事务、Hooks、查询、领域事件持久化与写操作协议；具体基础设施由组合根注入 |
-| `auth` / `app/security` | 安全契约与应用层保护；只有 `app/security` 允许依赖 `auth`，基础应用模板不依赖它 |
+| `auth` | 授权端口（`IAuthorizer`）、动作检查、范围规约与治理装饰器；业务 Application 通过 Options 接入 |
 | `eventing` | 事件模型、存储、Outbox、投影、订阅与监控；通过 `messaging` 进行投递 |
 | `messaging` | 消息信封、总线、中间件、Transport 与命令执行；不依赖 `eventing` |
 | `db` / `httpx` | 数据库、ORM 与 HTTP 契约；SQL 方言契约保留 Core；具体方言渲染、SQL 扫描、服务监听和 REST 注册在 Runtime |
@@ -31,7 +31,7 @@ Gochen 通过接口和组合根组织领域建模、应用编排与基础设施�
 
 ## 领域与应用
 
-`domain/crud.IRepository` 只要求 `Create`、`Update`、`Delete`、`Get`。查询、批量、物理删除等是可选能力，由 Application 或适配层在使用前探测。Repository 通过构造选项表达隔离与范围约束；包装窄仓储接口会丢失可选能力或假冒能力，因此禁止用仓储装饰器承载安全策略。
+`domain/crud.IRepository` 只要求 `Create`、`Update`、`Delete`、`Get`。查询、批量、物理删除等由独立 Application 在构造期要求对应仓储能力，传输层显式注入。Repository 通过构造选项表达隔离与范围约束；包装窄仓储接口会丢失可选能力或假冒能力，因此禁止用仓储装饰器承载安全策略。
 
 - CRUD：领域实体 → `app/crud.Application` → Runtime REST。
 - 审计型 CRUD：增加 `domain/audited`、审计 Store 和事务能力，业务写与审计写同事务提交。
@@ -45,7 +45,7 @@ Gochen 通过接口和组合根组织领域建模、应用编排与基础设施�
 
 身份认证在传输边界完成，tenant / operator / user / session / trace / request 通过 `contextx` 传播。Application 层是 HTTP、Worker、CLI 共同调用的授权边界，HTTP Action 中间件只负责提前拒绝。
 
-Runtime `security.Profile.Build` 固定 `Action(Scoped(app))` 的装饰顺序。Scoped 将资源判定与数据范围转为受控写约束，仓储在最终写操作中原子合并隔离、范围、资源和版本条件。治理能力装饰 Authorizer，负责策略快照、决策审计与指标。具体契约见[分层授权](layered-authz.md)。
+Application 通过 `auth.IAuthorizer` 在每个用例入口完成一次判定，返回的 `spec.Spec` 随仓储调用执行：仓储在最终写操作中原子合并隔离、规约与版本条件，写入前做 `WITH CHECK`。治理能力装饰 `scoped.IAuthorizer`，负责策略快照、决策审计与指标。具体契约见[分层授权](layered-authz.md)。
 
 ## 事件与消息链路
 
@@ -103,6 +103,6 @@ Operation SSE 位于 Runtime `http/operation`；监控端点策略及公开响�
 
 `contextx.AfterCommitError` 统一表示主操作成功、后续步骤失败。ES 仓储据此更新提交基线，命令重试排除该类错误，Operation 使用 degraded 表达 handler 的提交后失败。若业务成功但 Operation 结果记录失败，则保留幂等预占并返回原结果供核对和补存。
 
-`app/crud.IApplication` 只包含 CRUD 读写用例。配置、校验器与 Hooks 通过 `crud.Options` 在构造时确定，REST 注册不修改应用。安全外壳仅按实际 Batch / Audited 业务能力组合，不向外转发裸仓储或配置；L3 在构造时通过装配接口读取仓储与批量限制。
+`app/crud.IApplication` 只包含 CRUD 读写用例。配置、校验器与 Hooks 通过 `crud.Options` 在构造时确定，REST 注册不修改应用。各能力分别构造和保护，基础 CRUD 不暴露查询/批量；安全外壳不向外转发裸仓储或配置。L3 显式接收由实际仓储与规范化配置构造的 Dependencies。Application 本身承担应用服务职责，不另设 Service 聚合层。
 
-审计运行能力以 `app/audited.IAuditOperations` 为唯一方法集，Application、安全包装和 REST 能力探测共同消费。`HasPurgeCapability()` 报告硬删除能力，传输层不穿透 Application 探测 Repository。HTTP 的批量/分页限制与应用业务限制分别配置，传输层不能放宽业务限制。
+审计运行能力以 `app/audited.IAuditOperations` 为方法集，永久删除独立使用 `IPurger`。REST 显式注入各能力，并用 EnableAudit/EnablePurge 控制扩展端点；审计实体写路由的依赖校验不受 EnableAudit 影响。HTTP 的批量/分页限制与应用业务限制分别配置，传输层不能放宽业务限制。

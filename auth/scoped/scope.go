@@ -2,7 +2,7 @@
 //
 // 设计边界：
 //   - 本包只有契约与纯值对象，物理执行由具体 Repo 在构造期显式声明安全列完成；
-//   - PEP 编排位于 gochen/app/security/scoped，本包不依赖任何 app 包；
+//   - 应用层判定经 `scoped.New` / `FullAuthorizer` 组装，本包不依赖任何 app 包；
 //   - 取代原 gochen/domain/access 与 gochen/auth 根包中的范围/资源/决策资产。
 package scoped
 

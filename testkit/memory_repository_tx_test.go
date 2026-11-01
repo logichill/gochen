@@ -6,6 +6,7 @@ import (
 
 	"gochen/contextx"
 	"gochen/domain/audited"
+	"gochen/domain/spec"
 	"gochen/errors"
 )
 
@@ -14,15 +15,15 @@ import (
 // 不撤销已执行写入）；外层与其后提交照常生效。
 func TestNestedMemoryTxInnerRollbackKeepsInnerWritesRuntimeParity(t *testing.T) {
 	r := NewMemoryRepository[*stringMemoryEntity, string](nil)
-	if err := r.Create(context.Background(), &stringMemoryEntity{ID: "a", Name: "outer"}); err != nil {
+	if err := r.Create(context.Background(), &stringMemoryEntity{ID: "a", Name: "outer"}, spec.All()); err != nil {
 		t.Fatal(err)
 	}
 	err := r.WithinTx(context.Background(), func(outerCtx context.Context) error {
-		if err := r.Create(outerCtx, &stringMemoryEntity{ID: "b", Name: "outer-direct"}); err != nil {
+		if err := r.Create(outerCtx, &stringMemoryEntity{ID: "b", Name: "outer-direct"}, spec.All()); err != nil {
 			return err
 		}
 		innerErr := r.WithinTx(outerCtx, func(innerCtx context.Context) error {
-			if err := r.Create(innerCtx, &stringMemoryEntity{ID: "c", Name: "nested"}); err != nil {
+			if err := r.Create(innerCtx, &stringMemoryEntity{ID: "c", Name: "nested"}, spec.All()); err != nil {
 				return err
 			}
 			return context.Canceled // 触发内层回滚（no-op）
@@ -36,14 +37,14 @@ func TestNestedMemoryTxInnerRollbackKeepsInnerWritesRuntimeParity(t *testing.T) 
 		t.Fatalf("outer tx must commit after inner rollback, got %v", err)
 	}
 	// 内层写入不因内层回滚被撤销（与生产 SQL 嵌套语义一致）
-	if ok, _ := r.Exists(context.Background(), "c"); !ok {
+	if ok, _ := r.Exists(context.Background(), "c", spec.All()); !ok {
 		t.Fatal("inner write must survive inner rollback (runtime parity)")
 	}
 	// 外层在进入内层前的写入必须保留
-	if ok, _ := r.Exists(context.Background(), "b"); !ok {
+	if ok, _ := r.Exists(context.Background(), "b", spec.All()); !ok {
 		t.Fatal("outer write lost after inner rollback")
 	}
-	if e, err := r.Get(context.Background(), "b"); err != nil || e.Name != "outer-direct" {
+	if e, err := r.Get(context.Background(), "b", spec.All()); err != nil || e.Name != "outer-direct" {
 		t.Fatalf("outer write value lost: entity=%+v err=%v", e, err)
 	}
 }
@@ -51,21 +52,21 @@ func TestNestedMemoryTxInnerRollbackKeepsInnerWritesRuntimeParity(t *testing.T) 
 // 外层自身回滚不受 aborted 标记影响（回归保护）。
 func TestMemoryTxOuterRollbackStillWorks(t *testing.T) {
 	r := NewMemoryRepository[*stringMemoryEntity, string](nil)
-	if err := r.Create(context.Background(), &stringMemoryEntity{ID: "a"}); err != nil {
+	if err := r.Create(context.Background(), &stringMemoryEntity{ID: "a"}, spec.All()); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.WithinTx(context.Background(), func(ctx context.Context) error {
-		if err := r.Create(ctx, &stringMemoryEntity{ID: "b"}); err != nil {
+		if err := r.Create(ctx, &stringMemoryEntity{ID: "b"}, spec.All()); err != nil {
 			return err
 		}
 		return errRollback
 	}); err == nil {
 		t.Fatal("expected rollback")
 	}
-	if ok, _ := r.Exists(context.Background(), "b"); ok {
+	if ok, _ := r.Exists(context.Background(), "b", spec.All()); ok {
 		t.Fatal("write survived outer rollback")
 	}
-	if ok, _ := r.Exists(context.Background(), "a"); !ok {
+	if ok, _ := r.Exists(context.Background(), "a", spec.All()); !ok {
 		t.Fatal("pre-tx entity lost")
 	}
 }
@@ -74,11 +75,11 @@ func TestMemoryTxOuterRollbackStillWorks(t *testing.T) {
 func TestMemoryTxPlainCommitStillWorks(t *testing.T) {
 	r := NewMemoryRepository[*stringMemoryEntity, string](nil)
 	if err := r.WithinTx(context.Background(), func(ctx context.Context) error {
-		return r.Create(ctx, &stringMemoryEntity{ID: "x"})
+		return r.Create(ctx, &stringMemoryEntity{ID: "x"}, spec.All())
 	}); err != nil {
 		t.Fatalf("plain tx: %v", err)
 	}
-	if ok, _ := r.Exists(context.Background(), "x"); !ok {
+	if ok, _ := r.Exists(context.Background(), "x", spec.All()); !ok {
 		t.Fatal("plain tx write lost")
 	}
 }
@@ -127,15 +128,15 @@ var errRollback = errors.NewCode(errors.FailedPrecondition, "rollback requested"
 func TestNestedMemoryTxMultiLevelInnerRollbackNoOpRuntimeParity(t *testing.T) {
 	r := NewMemoryRepository[*stringMemoryEntity, string](nil)
 	err := r.WithinTx(context.Background(), func(l1 context.Context) error {
-		if err := r.Create(l1, &stringMemoryEntity{ID: "l1", Name: "level1"}); err != nil {
+		if err := r.Create(l1, &stringMemoryEntity{ID: "l1", Name: "level1"}, spec.All()); err != nil {
 			return err
 		}
 		return r.WithinTx(l1, func(l2 context.Context) error {
-			if err := r.Create(l2, &stringMemoryEntity{ID: "l2", Name: "level2"}); err != nil {
+			if err := r.Create(l2, &stringMemoryEntity{ID: "l2", Name: "level2"}, spec.All()); err != nil {
 				return err
 			}
 			innerErr := r.WithinTx(l2, func(l3 context.Context) error {
-				if err := r.Create(l3, &stringMemoryEntity{ID: "l3", Name: "level3-dirty"}); err != nil {
+				if err := r.Create(l3, &stringMemoryEntity{ID: "l3", Name: "level3-dirty"}, spec.All()); err != nil {
 					return err
 				}
 				return context.Canceled
@@ -150,7 +151,7 @@ func TestNestedMemoryTxMultiLevelInnerRollbackNoOpRuntimeParity(t *testing.T) {
 		t.Fatalf("outer commit: %v", err)
 	}
 	for _, id := range []string{"l1", "l2", "l3"} {
-		if ok, _ := r.Exists(context.Background(), id); !ok {
+		if ok, _ := r.Exists(context.Background(), id, spec.All()); !ok {
 			t.Fatalf("write %q lost after inner rollback (runtime parity)", id)
 		}
 	}
@@ -161,7 +162,7 @@ func TestNestedMemoryTxInnerCommitMergesIntoOuter(t *testing.T) {
 	r := NewMemoryRepository[*stringMemoryEntity, string](nil)
 	err := r.WithinTx(context.Background(), func(outer context.Context) error {
 		innerErr := r.WithinTx(outer, func(inner context.Context) error {
-			return r.Create(inner, &stringMemoryEntity{ID: "merged", Name: "inner"})
+			return r.Create(inner, &stringMemoryEntity{ID: "merged", Name: "inner"}, spec.All())
 		})
 		if innerErr != nil {
 			return innerErr
@@ -171,7 +172,7 @@ func TestNestedMemoryTxInnerCommitMergesIntoOuter(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected outer rollback")
 	}
-	if ok, _ := r.Exists(context.Background(), "merged"); ok {
+	if ok, _ := r.Exists(context.Background(), "merged", spec.All()); ok {
 		t.Fatal("inner-committed write must be discarded when outer rolls back")
 	}
 }
@@ -184,14 +185,14 @@ func TestNestedMemoryTxRepeatedCommitKeepsOuterSavepoint(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if err := r.Create(l1.Context(), &stringMemoryEntity{ID: "l1"}); err != nil {
+		if err := r.Create(l1.Context(), &stringMemoryEntity{ID: "l1"}, spec.All()); err != nil {
 			return err
 		}
 		l2, err := r.BeginTx(l1.Context())
 		if err != nil {
 			return err
 		}
-		if err := r.Create(l2.Context(), &stringMemoryEntity{ID: "l2"}); err != nil {
+		if err := r.Create(l2.Context(), &stringMemoryEntity{ID: "l2"}, spec.All()); err != nil {
 			return err
 		}
 		if err := r.Commit(l2); err != nil {
@@ -206,7 +207,7 @@ func TestNestedMemoryTxRepeatedCommitKeepsOuterSavepoint(t *testing.T) {
 		t.Fatalf("outer commit after nested rollback must succeed, got %v", err)
 	}
 	for _, id := range []string{"l1", "l2"} {
-		if ok, _ := r.Exists(context.Background(), id); !ok {
+		if ok, _ := r.Exists(context.Background(), id, spec.All()); !ok {
 			t.Fatalf("nested write %q lost (runtime parity)", id)
 		}
 	}
@@ -220,7 +221,7 @@ func TestNestedMemoryTxRepeatedRollbackIsIdempotent(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if err := r.Create(l1.Context(), &stringMemoryEntity{ID: "l1"}); err != nil {
+		if err := r.Create(l1.Context(), &stringMemoryEntity{ID: "l1"}, spec.All()); err != nil {
 			return err
 		}
 		if err := r.Rollback(l1); err != nil {
@@ -231,7 +232,7 @@ func TestNestedMemoryTxRepeatedRollbackIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("outer commit after repeated nested rollback must succeed, got %v", err)
 	}
-	if ok, _ := r.Exists(context.Background(), "l1"); !ok {
+	if ok, _ := r.Exists(context.Background(), "l1", spec.All()); !ok {
 		t.Fatal("nested write must survive nested rollback (runtime parity)")
 	}
 }
@@ -248,9 +249,9 @@ func TestAuditedNestedTxRepeatedCommitIsIdempotentNoOp(t *testing.T) {
 			return err
 		}
 		if _, err := r.SaveAuditRecord(l1.Context(), audited.AuditRecord{
-			EntityID:  "1",
-			Operation: audited.AuditOpCreate,
-			Operator:  "l1",
+			EntityID: "1",
+			Action:   "create",
+			Operator: "l1",
 		}); err != nil {
 			return err
 		}
@@ -259,9 +260,9 @@ func TestAuditedNestedTxRepeatedCommitIsIdempotentNoOp(t *testing.T) {
 			return err
 		}
 		if _, err := r.SaveAuditRecord(l2.Context(), audited.AuditRecord{
-			EntityID:  "1",
-			Operation: audited.AuditOpUpdate,
-			Operator:  "l2",
+			EntityID: "1",
+			Action:   "update",
+			Operator: "l2",
 		}); err != nil {
 			return err
 		}
@@ -277,7 +278,7 @@ func TestAuditedNestedTxRepeatedCommitIsIdempotentNoOp(t *testing.T) {
 		t.Fatalf("outer commit after nested rollback must succeed, got %v", err)
 	}
 
-	records, err := r.ListAuditRecordsByEntity(ctx, "1", 0, 10)
+	records, err := r.ListAuditRecords(ctx, "1", 0, 10, spec.All())
 	if err != nil {
 		t.Fatalf("list audit records: %v", err)
 	}
@@ -293,17 +294,17 @@ func TestAuditedNestedTxInnerRollbackKeepsInnerAuditRuntimeParity(t *testing.T) 
 
 	err := r.WithinTx(ctx, func(outer context.Context) error {
 		if _, err := r.SaveAuditRecord(outer, audited.AuditRecord{
-			EntityID:  "1",
-			Operation: audited.AuditOpCreate,
-			Operator:  "outer",
+			EntityID: "1",
+			Action:   "create",
+			Operator: "outer",
 		}); err != nil {
 			return err
 		}
 		innerErr := r.WithinTx(outer, func(inner context.Context) error {
 			if _, err := r.SaveAuditRecord(inner, audited.AuditRecord{
-				EntityID:  "1",
-				Operation: audited.AuditOpDelete,
-				Operator:  "inner",
+				EntityID: "1",
+				Action:   "delete",
+				Operator: "inner",
 			}); err != nil {
 				return err
 			}
@@ -318,7 +319,7 @@ func TestAuditedNestedTxInnerRollbackKeepsInnerAuditRuntimeParity(t *testing.T) 
 		t.Fatalf("outer commit: %v", err)
 	}
 
-	records, err := r.ListAuditRecordsByEntity(ctx, "1", 0, 10)
+	records, err := r.ListAuditRecords(ctx, "1", 0, 10, spec.All())
 	if err != nil {
 		t.Fatalf("list audit records: %v", err)
 	}
@@ -353,7 +354,7 @@ func TestChainNestedResourceTxCommitDoesNotSealHostCallbacks(t *testing.T) {
 			}); err != nil {
 				return err
 			}
-			return inner.Create(innerCtx, &stringMemoryEntity{ID: "inner"})
+			return inner.Create(innerCtx, &stringMemoryEntity{ID: "inner"}, spec.All())
 		}); err != nil {
 			return err
 		}
@@ -370,7 +371,7 @@ func TestChainNestedResourceTxCommitDoesNotSealHostCallbacks(t *testing.T) {
 	if !hostCbRan || !innerCbRan || !hostLateCbRan {
 		t.Fatalf("all after-commit callbacks must run on host commit: host=%v inner=%v late=%v", hostCbRan, innerCbRan, hostLateCbRan)
 	}
-	if ok, _ := inner.Exists(ctx, "inner"); !ok {
+	if ok, _ := inner.Exists(ctx, "inner", spec.All()); !ok {
 		t.Fatal("inner resource tx data must be committed")
 	}
 }
@@ -398,7 +399,7 @@ func TestChainNestedResourceTxRollbackKeepsHostCallbacks(t *testing.T) {
 			}); err != nil {
 				return err
 			}
-			if err := inner.Create(innerCtx, &stringMemoryEntity{ID: "inner"}); err != nil {
+			if err := inner.Create(innerCtx, &stringMemoryEntity{ID: "inner"}, spec.All()); err != nil {
 				return err
 			}
 			return errInnerResource
@@ -421,7 +422,7 @@ func TestChainNestedResourceTxRollbackKeepsHostCallbacks(t *testing.T) {
 	if innerCbRan {
 		t.Fatal("after-commit callback registered in rolled-back inner resource tx must not run")
 	}
-	if ok, _ := inner.Exists(ctx, "inner"); ok {
+	if ok, _ := inner.Exists(ctx, "inner", spec.All()); ok {
 		t.Fatal("inner resource tx data must be rolled back")
 	}
 }
@@ -448,9 +449,9 @@ func TestAuditedChainNestedResourceTxKeepsHostCallbacks(t *testing.T) {
 				return err
 			}
 			if _, err := inner.SaveAuditRecord(innerCtx, audited.AuditRecord{
-				EntityID:  "1",
-				Operation: audited.AuditOpCreate,
-				Operator:  "inner",
+				EntityID: "1",
+				Action:   "create",
+				Operator: "inner",
 			}); err != nil {
 				return err
 			}
@@ -466,7 +467,7 @@ func TestAuditedChainNestedResourceTxKeepsHostCallbacks(t *testing.T) {
 	if !hostCbRan || !innerCbRan {
 		t.Fatalf("all after-commit callbacks must run on host commit: host=%v inner=%v", hostCbRan, innerCbRan)
 	}
-	records, listErr := inner.ListAuditRecordsByEntity(ctx, "1", 0, 10)
+	records, listErr := inner.ListAuditRecords(ctx, "1", 0, 10, spec.All())
 	if listErr != nil {
 		t.Fatalf("list audit records: %v", listErr)
 	}

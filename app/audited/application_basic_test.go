@@ -2,248 +2,270 @@ package audited
 
 import (
 	"context"
-
+	"encoding/json"
+	"strconv"
 	"testing"
 	"time"
 
 	appcrud "gochen/app/crud"
-	"gochen/contextx"
-
-	"gochen/domain/audited"
-	"gochen/domain/crud"
+	"gochen/auth"
+	domaudited "gochen/domain/audited"
 	"gochen/errors"
 )
 
-// TestAuditedApplication_Create_FailsFastWithoutOperator 验证 AuditedApplication Create FailsFastWithoutOperator。
-func TestAuditedApplication_Create_FailsFastWithoutOperator(t *testing.T) {
-	repo := newMemAuditedRepo()
-	store := &recordingAuditStore{}
-	app, err := NewApplication(repo, store, nil)
-	if err != nil {
-		t.Fatalf("new audited app: %v", err)
-	}
+func TestNewApplicationValidatesPorts(t *testing.T) {
+	repo := newAuditRepo()
+	valid := Options[*auditDoc, int64]{Resource: "doc", Authorizer: auth.Allow()}
 
-	e := &auditedTestEntity{AuditedEntity: &audited.AuditedEntity[int64]{Entity: crud.Entity[int64]{ID: 1}}}
-	if err := app.Create(context.Background(), e); !errors.Is(err, errors.InvalidInput) {
-		t.Fatalf("expected InvalidInput, got %v", err)
+	if _, err := NewApplication[*auditDoc, int64](nil, repo, valid); !errors.Is(err, errors.InvalidInput) {
+		t.Fatalf("NewApplication(nil repo) = %v, want InvalidInput", err)
 	}
-	if repo.creates != 0 {
-		t.Fatalf("expected Create not persisted when operator missing, got creates=%d", repo.creates)
+	if _, err := NewApplication[*auditDoc, int64](repo, nil, valid); !errors.Is(err, errors.InvalidInput) {
+		t.Fatalf("NewApplication(nil audit store) = %v, want InvalidInput", err)
+	}
+	if _, err := NewApplication[*auditDoc, int64](repo, saveOnlyAuditStore{}, valid); !errors.Is(err, errors.InvalidInput) {
+		t.Fatalf("NewApplication(store without query port) = %v, want InvalidInput", err)
+	}
+	if _, err := NewApplication[*auditDoc, int64](repo, otherSourceAuditStore{}, valid); !errors.Is(err, errors.InvalidInput) {
+		t.Fatalf("NewApplication(data source mismatch) = %v, want InvalidInput", err)
+	}
+	if _, err := NewApplication[*auditDoc, int64](repo, repo, Options[*auditDoc, int64]{
+		Authorizer: auth.Allow(),
+	}); !errors.Is(err, errors.InvalidInput) {
+		t.Fatalf("NewApplication(empty resource) = %v, want InvalidInput", err)
 	}
 }
 
-// TestAuditedApplication_Create_WritesAuditRecord 验证 AuditedApplication Create WritesAuditRecord。
-func TestAuditedApplication_Create_WritesAuditRecord(t *testing.T) {
-	repo := newMemAuditedRepo()
-	store := &recordingAuditStore{}
-	app, err := NewApplication(repo, store, nil)
-	if err != nil {
-		t.Fatalf("new audited app: %v", err)
+func TestDescriptorListsLifecycleActions(t *testing.T) {
+	app, _ := newAuditedApplication(t, Options[*auditDoc, int64]{})
+	names := make(map[string]bool)
+	for _, action := range app.Descriptor().Actions {
+		names[action.Name] = true
 	}
+	want := []string{
+		"read", "list", "create", "update", "delete",
+		"restore", "purge", "audit_read", "list_deleted",
+	}
+	if len(app.Descriptor().Actions) != len(want) {
+		t.Fatalf("actions = %+v", app.Descriptor().Actions)
+	}
+	for _, name := range want {
+		if !names[name] {
+			t.Fatalf("descriptor missing action %q", name)
+		}
+	}
+}
 
-	ctx, err := contextx.WithOperator(context.Background(), "alice")
-	if err != nil {
-		t.Fatalf("WithOperator returned error: %v", err)
+func TestActionPermissionsOverrideLifecycleActions(t *testing.T) {
+	app, _ := newAuditedApplication(t, Options[*auditDoc, int64]{
+		Options: appcrud.Options[*auditDoc, int64]{
+			ActionPermissions: map[string]string{
+				"create":       "doc:api:manage",
+				"restore":      "doc:api:manage",
+				"purge":        "doc:api:manage",
+				"list_deleted": "doc:api:manage",
+			},
+		},
+	})
+	for _, name := range []string{"create", "restore", "purge", "list_deleted"} {
+		permission, ok := app.Descriptor().PermissionFor(name)
+		if !ok || permission != "doc:api:manage" {
+			t.Fatalf("%s permission = %q, %v; want doc:api:manage", name, permission, ok)
+		}
 	}
-	e := &auditedTestEntity{AuditedEntity: &audited.AuditedEntity[int64]{Entity: crud.Entity[int64]{ID: 1}}}
+	if permission, _ := app.Descriptor().PermissionFor("read"); permission != "doc:api:read" {
+		t.Fatalf("read permission = %q; want default", permission)
+	}
+}
+
+func TestActionPermissionsRejectUnknownAction(t *testing.T) {
+	repo := newAuditRepo()
+	_, err := NewApplication[*auditDoc, int64](repo, repo, Options[*auditDoc, int64]{
+		Options: appcrud.Options[*auditDoc, int64]{
+			Resource:          "doc",
+			Authorizer:        auth.Allow(),
+			ActionPermissions: map[string]string{"import": "doc:api:manage"},
+		},
+	})
+	if !errors.Is(err, errors.InvalidInput) {
+		t.Fatalf("NewApplication(unknown action override) = %v, want InvalidInput", err)
+	}
+}
+
+func TestCreateRequiresOperator(t *testing.T) {
+	app, _ := newAuditedApplication(t, Options[*auditDoc, int64]{})
+	err := app.Create(context.Background(), &auditDoc{Name: "a"})
+	requireErrorCode(t, err, errors.InvalidInput)
+	count, err := app.Count(context.Background())
+	if err != nil || count != 0 {
+		t.Fatalf("audit write without operator must not persist, Count() = %d, %v", count, err)
+	}
+}
+
+func TestCreatePersistsAndWritesAudit(t *testing.T) {
+	app, repo := newAuditedApplication(t, Options[*auditDoc, int64]{})
+	ctx := operatorContext(t, "alice")
+	entity := &auditDoc{Name: "first", State: "new"}
 	before := time.Now()
-	if err := app.Create(ctx, e); err != nil {
-		t.Fatalf("create failed: %v", err)
+
+	if err := app.Create(ctx, entity); err != nil {
+		t.Fatalf("Create(): %v", err)
 	}
 	after := time.Now()
-	if repo.creates != 1 {
-		t.Fatalf("expected creates=1, got %d", repo.creates)
+
+	stored, err := app.Get(ctx, entity.GetID())
+	if err != nil {
+		t.Fatalf("Get(): %v", err)
 	}
-	if len(store.records) != 1 {
-		t.Fatalf("expected 1 audit record, got %d", len(store.records))
+	if stored.Name != "first" || stored.State != "new" || stored.GetVersion() != 0 {
+		t.Fatalf("stored = %+v", stored)
 	}
-	if store.records[0].Operation != audited.AuditOpCreate || store.records[0].Operator != "alice" || store.records[0].EntityID != "1" {
-		t.Fatalf("unexpected audit record: %+v", store.records[0])
+
+	records := auditRecords(t, repo, ctx, entity.GetID())
+	if len(records) != 1 {
+		t.Fatalf("audit records = %d, want 1", len(records))
 	}
-	if ts := store.records[0].Timestamp; ts.Before(before) || ts.After(after) {
-		t.Fatalf("expected audit timestamp within [%v, %v], got %v", before, after, ts)
+	record := records[0]
+	if record.Action != "create" || record.Operator != "alice" {
+		t.Fatalf("record = %+v", record)
+	}
+	if record.ResourceKind != "doc" || record.EntityID != strconv.FormatInt(entity.GetID(), 10) {
+		t.Fatalf("record boundary = %+v", record)
+	}
+	if record.Timestamp.Before(before) || record.Timestamp.After(after) {
+		t.Fatalf("timestamp = %v, want within [%v, %v]", record.Timestamp, before, after)
+	}
+	var snapshot map[string]any
+	if err := json.Unmarshal(record.Changes, &snapshot); err != nil {
+		t.Fatalf("decode snapshot: %v", err)
+	}
+	if snapshot["name"] != "first" || snapshot["state"] != "new" {
+		t.Fatalf("snapshot = %+v", snapshot)
 	}
 }
 
-func TestAuditedApplication_Create_PostCommitHookRunsAfterOuterCommit(t *testing.T) {
-	repo := newMemAuditedRepo()
-	store := &recordingAuditStore{}
+func TestUpdateWritesBusinessFieldDiff(t *testing.T) {
+	app, repo := newAuditedApplication(t, Options[*auditDoc, int64]{})
+	ctx := operatorContext(t, "alice")
+	created := mustCreateDoc(t, app, ctx, "old")
 
-	var afterCreateSawCommitted bool
-	var postCommitSawCommitted bool
-	app, err := NewApplication(repo, store, &appcrud.Options[*auditedTestEntity, int64]{Hooks: &appcrud.Hooks[*auditedTestEntity, int64]{
-		Create: appcrud.Stage[*auditedTestEntity]{
-			After: func(_ context.Context, entity *auditedTestEntity) error {
-				_, afterCreateSawCommitted = repo.items[entity.GetID()]
-				return nil
+	loaded, err := app.Get(ctx, created.GetID())
+	if err != nil {
+		t.Fatalf("Get(): %v", err)
+	}
+	loaded.Name = "new"
+	loaded.State = "active"
+	if err := app.Update(ctx, loaded); err != nil {
+		t.Fatalf("Update(): %v", err)
+	}
+
+	records := auditRecords(t, repo, ctx, created.GetID())
+	if len(records) != 2 {
+		t.Fatalf("audit records = %d, want 2", len(records))
+	}
+	if records[1].Action != "update" {
+		t.Fatalf("action = %q, want update", records[1].Action)
+	}
+	var diffs []domaudited.FieldChange
+	if err := json.Unmarshal(records[1].Changes, &diffs); err != nil {
+		t.Fatalf("decode diff: %v", err)
+	}
+	changes := make(map[string]domaudited.FieldChange, len(diffs))
+	for _, diff := range diffs {
+		changes[diff.Field] = diff
+	}
+	if len(changes) != 2 {
+		t.Fatalf("expected only business fields, got %+v", diffs)
+	}
+	if got := changes["name"]; got.Old != "old" || got.New != "new" {
+		t.Fatalf("name diff = %+v", got)
+	}
+	if got := changes["state"]; got.Old != "new" || got.New != "active" {
+		t.Fatalf("state diff = %+v", got)
+	}
+	if _, ok := changes["version"]; ok {
+		t.Fatal("managed version must not appear in the diff")
+	}
+	if _, ok := changes["updated_at"]; ok {
+		t.Fatal("managed updated_at must not appear in the diff")
+	}
+}
+
+func TestUpdateWithoutChangesSkipsWriteAndAudit(t *testing.T) {
+	app, repo := newAuditedApplication(t, Options[*auditDoc, int64]{})
+	ctx := operatorContext(t, "alice")
+	created := mustCreateDoc(t, app, ctx, "same")
+
+	loaded, err := app.Get(ctx, created.GetID())
+	if err != nil {
+		t.Fatalf("Get(): %v", err)
+	}
+	if err := app.Update(ctx, loaded); err != nil {
+		t.Fatalf("Update(): %v", err)
+	}
+	stored, err := app.Get(ctx, created.GetID())
+	if err != nil {
+		t.Fatalf("Get(): %v", err)
+	}
+	if stored.GetVersion() != 0 {
+		t.Fatalf("no-op update advanced version to %d", stored.GetVersion())
+	}
+	if records := auditRecords(t, repo, ctx, created.GetID()); len(records) != 1 {
+		t.Fatalf("no-op update wrote audit records: %+v", records)
+	}
+}
+
+func TestCreateRollsBackWhenAfterHookFails(t *testing.T) {
+	want := errors.New("after create failed")
+	app, repo := newAuditedApplication(t, Options[*auditDoc, int64]{
+		Options: appcrud.Options[*auditDoc, int64]{
+			Hooks: appcrud.Hooks[*auditDoc]{
+				appcrud.ActionCreate: appcrud.Stage[*auditDoc]{
+					After: func(context.Context, *auditDoc) error { return want },
+				},
 			},
-			PostCommit: func(_ context.Context, entity *auditedTestEntity) error {
-				_, postCommitSawCommitted = repo.items[entity.GetID()]
-				return nil
-			},
 		},
-	}})
-	if err != nil {
-		t.Fatalf("new audited app: %v", err)
-	}
+	})
+	ctx := operatorContext(t, "alice")
+	entity := &auditDoc{Name: "doomed"}
 
-	ctx, err := contextx.WithOperator(context.Background(), "alice")
-	if err != nil {
-		t.Fatalf("WithOperator returned error: %v", err)
+	if err := app.Create(ctx, entity); !errors.Is(err, want) {
+		t.Fatalf("Create() = %v, want hook error", err)
 	}
-	e := &auditedTestEntity{AuditedEntity: &audited.AuditedEntity[int64]{Entity: crud.Entity[int64]{ID: 1}}}
-	if err := app.Create(ctx, e); err != nil {
-		t.Fatalf("create failed: %v", err)
+	if _, err := app.Get(ctx, entity.GetID()); !errors.Is(err, errors.NotFound) {
+		t.Fatalf("entity survived rollback: %v", err)
 	}
-	if afterCreateSawCommitted {
-		t.Fatalf("expected after hook to run before outer transaction commit")
-	}
-	if !postCommitSawCommitted {
-		t.Fatalf("expected post-commit hook to observe outer transaction commit")
+	if records := auditRecords(t, repo, ctx, entity.GetID()); len(records) != 0 {
+		t.Fatalf("audit survived rollback: %+v", records)
 	}
 }
 
-func TestAuditedApplication_Create_RollsBackWhenAfterCreateFails(t *testing.T) {
-	repo := newMemAuditedRepo()
-	store := &recordingAuditStore{}
+func TestCreateRollsBackWhenAuditStoreFails(t *testing.T) {
+	repo := newAuditRepo()
+	store := &failingAuditStore{
+		AuditedMemoryRepository: repo,
+		err:                     errors.NewCode(errors.Internal, "audit store down"),
+	}
+	app, _ := newAuditedApplicationWith(t, repo, store, Options[*auditDoc, int64]{})
+	ctx := operatorContext(t, "alice")
 
-	app, err := NewApplication(repo, store, &appcrud.Options[*auditedTestEntity, int64]{Hooks: &appcrud.Hooks[*auditedTestEntity, int64]{
-		Create: appcrud.Stage[*auditedTestEntity]{After: func(context.Context, *auditedTestEntity) error {
-			return errors.NewCode(errors.Internal, "after create failed")
-		}},
-	}})
-	if err != nil {
-		t.Fatalf("new audited app: %v", err)
-	}
-
-	ctx, err := contextx.WithOperator(context.Background(), "alice")
-	if err != nil {
-		t.Fatalf("WithOperator returned error: %v", err)
-	}
-	e := &auditedTestEntity{AuditedEntity: &audited.AuditedEntity[int64]{Entity: crud.Entity[int64]{ID: 1}}}
-	if err := app.Create(ctx, e); err == nil {
-		t.Fatalf("expected create to fail when after hook fails")
-	}
-	if _, err := repo.Get(context.Background(), 1); !errors.Is(err, errors.NotFound) {
-		t.Fatalf("expected entity not persisted after rollback, got err=%v", err)
-	}
-	if len(store.records) != 0 {
-		t.Fatalf("expected no audit record after rollback, got %d", len(store.records))
+	err := app.Create(ctx, &auditDoc{Name: "a"})
+	requireErrorCode(t, err, errors.Internal)
+	count, err := app.Count(ctx)
+	if err != nil || count != 0 {
+		t.Fatalf("entity survived audit failure, Count() = %d, %v", count, err)
 	}
 }
 
-func TestAuditedApplication_Create_RollsBackWhenSnapshotMarshalFails(t *testing.T) {
-	repo := newMemAuditedRepo()
-	store := &recordingAuditStore{}
-	app, err := NewApplication(repo, store, nil)
-	if err != nil {
-		t.Fatalf("new audited app: %v", err)
-	}
+func TestCreateRejectsUnmarshalableSnapshot(t *testing.T) {
+	app, _ := newAuditedApplication(t, Options[*auditDoc, int64]{})
+	ctx := operatorContext(t, "alice")
+	entity := &auditDoc{Name: "a", Extra: make(chan int)}
 
-	ctx, err := contextx.WithOperator(context.Background(), "alice")
-	if err != nil {
-		t.Fatalf("WithOperator returned error: %v", err)
-	}
-	e := &auditedTestEntity{
-		AuditedEntity: &audited.AuditedEntity[int64]{Entity: crud.Entity[int64]{ID: 1}},
-		Snapshot:      make(chan int),
-	}
-	if err := app.Create(ctx, e); !errors.Is(err, errors.Internal) {
-		t.Fatalf("expected Internal when snapshot marshal fails, got %v", err)
-	}
-	if _, err := repo.Get(context.Background(), 1); !errors.Is(err, errors.NotFound) {
-		t.Fatalf("expected entity not persisted when snapshot marshal fails, got err=%v", err)
-	}
-	if len(store.records) != 0 {
-		t.Fatalf("expected no audit record after snapshot marshal failure, got %d", len(store.records))
-	}
-}
-
-func TestAuditedApplication_Update_RejectsStaleVersion(t *testing.T) {
-	repo := newMemAuditedRepo()
-	store := &recordingAuditStore{}
-	app, err := NewApplication(repo, store, nil)
-	if err != nil {
-		t.Fatalf("new audited app: %v", err)
-	}
-	repo.items[1] = &auditedTestEntity{
-		AuditedEntity: &audited.AuditedEntity[int64]{Entity: crud.Entity[int64]{ID: 1, Version: 1}},
-		Name:          "original",
-	}
-
-	ctx, err := contextx.WithOperator(context.Background(), "alice")
-	if err != nil {
-		t.Fatalf("WithOperator returned error: %v", err)
-	}
-	stale := &auditedTestEntity{
-		AuditedEntity: &audited.AuditedEntity[int64]{Entity: crud.Entity[int64]{ID: 1, Version: 2}},
-		Name:          "stale",
-	}
-	err = app.Update(ctx, stale)
-	if !errors.Is(err, errors.Conflict) {
-		t.Fatalf("expected Conflict for stale version, got %v", err)
-	}
-	if repo.updates != 0 {
-		t.Fatalf("expected repository Update not to run, got %d calls", repo.updates)
-	}
-	if len(store.records) != 0 {
-		t.Fatalf("expected no audit record after version conflict, got %d", len(store.records))
-	}
-	if got := repo.items[1]; got == nil || got.Name != "original" || got.GetVersion() != 1 {
-		t.Fatalf("stored entity changed after version conflict: %+v", got)
-	}
-}
-
-func TestAuditedApplication_Update_PreservesManagedFields(t *testing.T) {
-	repo := newMemAuditedRepo()
-	store := &recordingAuditStore{}
-	app, err := NewApplication(repo, store, nil)
-	if err != nil {
-		t.Fatalf("new audited app: %v", err)
-	}
-	createdAt := time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)
-	updatedAt := time.Date(2024, 2, 3, 4, 5, 6, 0, time.UTC)
-	original := &auditedTestEntity{
-		AuditedEntity: &audited.AuditedEntity[int64]{
-			Entity:    crud.Entity[int64]{ID: 1, Version: 1},
-			CreatedAt: createdAt,
-			CreatedBy: "owner",
-			UpdatedAt: updatedAt,
-			UpdatedBy: "previous-editor",
-		},
-		Name: "original",
-	}
-	repo.items[1] = original
-
-	ctx, err := contextx.WithOperator(context.Background(), "alice")
-	if err != nil {
-		t.Fatalf("WithOperator returned error: %v", err)
-	}
-	updated := &auditedTestEntity{
-		AuditedEntity: &audited.AuditedEntity[int64]{
-			Entity:    crud.Entity[int64]{ID: 1, Version: 1},
-			CreatedAt: time.Now(),
-			CreatedBy: "attacker",
-			UpdatedAt: time.Now(),
-			UpdatedBy: "attacker",
-			DeletedBy: func() *string { v := "attacker"; return &v }(),
-		},
-		Name: "updated",
-	}
-	if err := app.Update(ctx, updated); err != nil {
-		t.Fatalf("update: %v", err)
-	}
-	got := repo.items[1]
-	if !got.CreatedAt.Equal(createdAt) || got.CreatedBy != "owner" {
-		t.Fatalf("managed created fields changed: at=%v by=%q", got.CreatedAt, got.CreatedBy)
-	}
-	if got.IsDeleted() {
-		t.Fatalf("regular update must not soft-delete an entity")
-	}
-	if got.DeletedBy != nil {
-		t.Fatalf("regular update replaced managed deleted_by: %v", *got.DeletedBy)
-	}
-	if !got.UpdatedAt.Equal(updatedAt) || got.UpdatedBy != "previous-editor" {
-		t.Fatalf("managed updated fields changed: at=%v by=%q", got.UpdatedAt, got.UpdatedBy)
+	err := app.Create(ctx, entity)
+	requireErrorCode(t, err, errors.Internal)
+	count, err := app.Count(ctx)
+	if err != nil || count != 0 {
+		t.Fatalf("entity survived snapshot failure, Count() = %d, %v", count, err)
 	}
 }

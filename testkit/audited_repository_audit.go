@@ -4,7 +4,9 @@ import (
 	"context"
 	"strings"
 
+	"gochen/contextx"
 	"gochen/domain/audited"
+	"gochen/domain/spec"
 	"gochen/errors"
 )
 
@@ -66,14 +68,30 @@ func (r *AuditedMemoryRepository[T, ID]) SaveAuditRecords(ctx context.Context, r
 	return nil
 }
 
-// ListAuditRecordsByEntity 按实体 ID 返回审计记录分页结果。
-func (r *AuditedMemoryRepository[T, ID]) ListAuditRecordsByEntity(ctx context.Context, entityID string, offset, limit int) ([]audited.AuditRecord, error) {
+// ListAuditRecords 按实体 ID 与规约返回审计记录分页结果。
+//
+// 规约作用于审计记录自身的边界列（@id / @scope / @owner），
+// 不依赖业务实体是否仍然存在；已物理删除的记录不会出现在结果中。
+func (r *AuditedMemoryRepository[T, ID]) ListAuditRecords(ctx context.Context, entityID string, offset, limit int, s spec.Spec) ([]audited.AuditRecord, error) {
 	if err := validateContext(ctx); err != nil {
 		return nil, err
 	}
 	entityID = strings.TrimSpace(entityID)
 	if entityID == "" {
 		return nil, errors.NewCode(errors.InvalidInput, "audit entity ID is required")
+	}
+	if err := s.Err(); err != nil {
+		return nil, errors.Wrap(err, errors.Internal, "invalid audit spec")
+	}
+	if s.HasNamed() {
+		return nil, errors.NewCode(errors.Internal, "audit spec must not contain named conditions")
+	}
+	for _, field := range s.Fields() {
+		switch field {
+		case string(spec.RoleID), string(spec.RoleScope), string(spec.RoleOwner):
+		default:
+			return nil, errors.NewCode(errors.Internal, "audit spec may only reference the id, scope or owner roles").WithContext("field", field)
+		}
 	}
 	var records []audited.AuditRecord
 	if transactionState, ok := r.auditedTransactionFromContext(ctx); ok {
@@ -89,16 +107,33 @@ func (r *AuditedMemoryRepository[T, ID]) ListAuditRecordsByEntity(ctx context.Co
 		records = cloneAuditRecords(r.audits[entityID])
 		r.auditMu.RUnlock()
 	}
-	start, end := pageBounds(len(records), offset, limit)
-	return records[start:end], nil
+	interpreter := spec.NewInterpreter()
+	visible := make([]audited.AuditRecord, 0, len(records))
+	for _, record := range records {
+		if record.TenantID != contextx.TenantID(ctx) {
+			continue
+		}
+		if kind := strings.TrimSpace(audited.AuditResourceKind(ctx)); kind != "" && record.ResourceKind != kind {
+			continue
+		}
+		ok, matchErr := interpreter.Match(s, &record)
+		if matchErr != nil {
+			return nil, matchErr
+		}
+		if ok {
+			visible = append(visible, record)
+		}
+	}
+	start, end := pageBounds(len(visible), offset, limit)
+	return visible[start:end], nil
 }
 
 func validateAuditRecord(record audited.AuditRecord) error {
 	if strings.TrimSpace(record.EntityID) == "" {
 		return errors.NewCode(errors.InvalidInput, "audit entity ID is required")
 	}
-	if strings.TrimSpace(string(record.Operation)) == "" {
-		return errors.NewCode(errors.InvalidInput, "audit operation is required")
+	if strings.TrimSpace(record.Action) == "" {
+		return errors.NewCode(errors.InvalidInput, "audit action is required")
 	}
 	if strings.TrimSpace(record.Operator) == "" {
 		return errors.NewCode(errors.InvalidInput, "audit operator is required")

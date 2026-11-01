@@ -39,7 +39,7 @@
 
 6. **源文件 (Files)**
 
-   - 同一类型的实现跨文件时，使用稳定的主体前缀和职责后缀，例如 `application_batch.go`、`engine_lifecycle.go`、`manager_replay.go`。
+   - 同一类型的实现跨文件时，使用稳定的主体前缀和职责后缀，例如 `application_bulk.go`、`engine_lifecycle.go`、`manager_replay.go`。
    - 主文件承载类型定义和构造；读写、批量、生命周期等方法及其专用辅助逻辑按职责内聚。独立接口、配置、状态类型和算法按自身职责命名。
    - 文件拆分保持包、方法集、共享状态与执行语义一致；只为整理文件时，不新增包装类型或装饰器。已有包装器是否保留，以其能力和行为契约判断。
    - 按职责拆分，不设文件行数或文件数量指标。具体组织见[源码文件组织](docs/architecture/source-layout.md)。

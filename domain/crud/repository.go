@@ -5,81 +5,62 @@ package crud
 
 import (
 	"context"
+	"gochen/domain/spec"
+
 	"gochen/domain"
 )
 
 // IRepository 简单 CRUD 仓储接口。
-// 适用于配置记录型数据（字典表、分类等）
+// 适用于配置记录型数据（字典表、分类等）。
+//
+// 所有读写都强制携带规约：读取按规约过滤，写入在落库前以规约做 WITH CHECK。
 //
 // # 错误契约。
 //
 // 所有方法统一使用 gochen/errors 错误码，调用方可通过 errors.Is(err, code) 判断：
 //
-//   - Get: 未找到返回 errors.NotFound（返回零值 + NotFound）
-//   - Create: 已存在/唯一约束冲突返回 errors.Conflict；其他为基础设施错误。
-//   - Update: 未找到返回 errors.NotFound；乐观锁/并发写冲突返回 errors.Concurrency
-//   - Delete: 默认实现可幂等（未找到不报错）；若实现选择严格语义，可在未找到时返回 errors.NotFound
-//   - List/Count/Exists: 不属于基础写模型仓储，见可选扩展 IQueryRepository
+//   - Get: 未找到（含被规约过滤）返回 errors.NotFound（返回零值 + NotFound）
+//   - Create: 实体不满足规约返回 errors.Forbidden；已存在/唯一约束冲突返回 errors.Conflict
+//   - Update: 实体不满足规约返回 errors.Forbidden；未找到返回 errors.NotFound；
+//     乐观锁/并发写冲突返回 errors.Concurrency；访问控制列不进入 SET
+//   - Delete: 一律物理删除；实体不满足规约返回 errors.Forbidden；
+//     未找到返回 errors.NotFound；并发写冲突返回 errors.Concurrency
 type IRepository[T domain.IEntity[ID], ID comparable] interface {
-	// Create 创建实体
-	Create(ctx context.Context, e T) error
+	// Get 通过 ID 获取实体；已软删的记录对普通读取不可见。
+	Get(ctx context.Context, id ID, s spec.Spec) (T, error)
 
-	// Update 更新实体
-	Update(ctx context.Context, e T) error
+	// Create 创建实体；写入前以规约做 WITH CHECK。
+	Create(ctx context.Context, e T, s spec.Spec) error
 
-	// Delete 删除实体。
-	//
-	// 说明：
-	// - Delete 表示“业务删除”语义：具体是软删还是物理删除，由仓储实现决定；
-	// - 若需要明确的“物理删除（不可恢复）”语义，请使用可选扩展 `IPurgeRepository` 的 `Purge`。
-	Delete(ctx context.Context, id ID) error
+	// Update 更新实体；写入前以规约做 WITH CHECK，WHERE 为 id ∧ 规约 ∧ version。
+	Update(ctx context.Context, e T, s spec.Spec) error
 
-	// Get 通过 ID 获取实体
-	Get(ctx context.Context, id ID) (T, error)
-}
-
-// IQueryRepository 定义 CRUD 场景下的可选读扩展能力。
-//
-// 说明：
-// - 将列表、计数、存在性检查从基础 IRepository 中拆出，避免所有仓储默认承载 UI/列表查询语义；
-// - Application / API 可在需要时通过类型断言探测该能力并做 fail-fast 处理。
-type IQueryRepository[T domain.IEntity[ID], ID comparable] interface {
-	// List 分页查询（偏移量 + 限制）
-	List(ctx context.Context, offset, limit int) ([]T, error)
-
-	// Count 统计总数
-	Count(ctx context.Context) (int64, error)
-
-	// Exists 检查实体是否存在
-	Exists(ctx context.Context, id ID) (bool, error)
+	// Delete 物理删除实体；传入已加载的实体以带上版本与边界。
+	Delete(ctx context.Context, e T, s spec.Spec) error
 }
 
 // IPurgeRepository 定义“物理删除（不可恢复）”的可选扩展能力。
 //
 // 说明：
-// - 当实体具备软删能力时，Delete 往往实现为软删；此时 Purge 用于明确表达“永久删除”；
-// - Purge 不进入基础 IRepository，以避免将“危险操作”默认为所有仓储必须实现。
+// - 普通 Delete 已是物理删除，Purge 保留给审计资源的永久删除流程；
+// - 读取边界字段取自删除前的实体。
 type IPurgeRepository[T domain.IEntity[ID], ID comparable] interface {
-	// Purge 永久删除实体（物理删除，不可恢复）。
-	Purge(ctx context.Context, id ID) error
+	// Purge 永久删除实体（物理删除，不可恢复），包括已软删的行。
+	Purge(ctx context.Context, e T, s spec.Spec) error
 }
 
-// IBatchOperations 定义批量操作接口（可选扩展）
+// IBulkOperations 定义批量操作接口（可选扩展）。
 //
-// 提供批量 CRUD 操作能力，用于提升大量数据操作的性能。
-// 适用于需要批量导入、批量更新或批量删除的场景。
-//
-// 最佳实践：
-//   - 批量操作应在事务中执行，保证原子性。
-//   - 考虑分批处理，避免单次操作数据量过大。
-//   - 提供进度回调或错误处理机制。
-type IBatchOperations[T domain.IEntity[ID], ID comparable] interface {
-	// CreateAll 批量创建实体
-	CreateAll(ctx context.Context, entities []T) error
+// Bulk 在本包内是“一次调用处理多个实体”的原子语义：逐条执行与批量执行必须产生
+// 相同的 WITH CHECK、错误分类与回滚结果，任一实体失败则全部回滚，不存在部分成功。
+// 批量操作的规约对每个实体分别求值。
+type IBulkOperations[T domain.IEntity[ID], ID comparable] interface {
+	// CreateBulk 批量创建实体。
+	CreateBulk(ctx context.Context, entities []T, s spec.Spec) error
 
-	// UpdateAll 批量更新实体
-	UpdateAll(ctx context.Context, entities []T) error
+	// UpdateBulk 批量更新实体。
+	UpdateBulk(ctx context.Context, entities []T, s spec.Spec) error
 
-	// DeleteAll 批量删除实体
-	DeleteAll(ctx context.Context, ids []ID) error
+	// DeleteBulk 批量物理删除实体；传入已加载的实体以带上版本。
+	DeleteBulk(ctx context.Context, entities []T, s spec.Spec) error
 }

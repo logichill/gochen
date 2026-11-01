@@ -6,7 +6,7 @@
 
 | 子包 | 内容 | 场景 |
 | --- | --- | --- |
-| `domain/crud` | `Entity`、`TenantEntity`、仓储与可选查询 / 批量接口 | 一般管理数据 |
+| `domain/crud` | `Entity`、`TenantEntity`、仓储与批量 / 清洗接口 | 一般管理数据 |
 | `domain/audited` | 审计字段、软删除、恢复和审计存储端口 | 需要审计轨迹的管理数据 |
 | `domain/eventsourced` | 聚合基类、metadata、领域事件存储与仓储端口 | 通过事件流重建业务状态 |
 
@@ -15,7 +15,7 @@
 - `IEntity[ID]` 要求 `GetID()` 和 `GetVersion()`；`ISettableID` 提供可选 ID 回填能力。
 - `IValidatable.Validate()` 表达不依赖外部资源的领域不变量。需要数据库或上下文的校验通过应用层注入。
 - `ITimestamps` 与 `ISoftDeletable` 是独立能力；带 operator 的软删除由 `domain/audited` 补充。
-- `domain/crud.IRepository` 只有 `Create`、`Update`、`Delete`、`Get`。`IQueryRepository`、`IBatchOperations`、`IPurgeRepository` 等按需实现。
+- `domain/crud.IRepository` 只有 `Create`、`Update`、`Delete`、`Get`。`IBulkOperations`、`IPurgeRepository` 等按需实现；列表与计数走 `app/query.IQueryableRepository`，只读应用入口为 `app/crud.IReadRepository`。
 
 仓储错误通过 `gochen/errors` 表达；基础仓储的 Delete 可采用幂等或严格未命中语义，具体实现须明确。领域查询优先使用有业务含义的方法；`app/query` 是适配器查询协议，不属于领域层依赖。
 

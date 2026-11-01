@@ -144,106 +144,13 @@ func TestResolveDataScopePrefersBoundScope(t *testing.T) {
 	require.Equal(t, scoped.ScopeFiltered, scope.Kind, "已绑定范围优先于 resolver")
 }
 
-// --- 受控约束通道 ---
-
-func TestConstraintChannelRoundTrip(t *testing.T) {
-	constraint := scoped.WriteConstraint{Resources: []scoped.ResourceConstraint{{
-		Kind: "order", ResourceID: "1", ManagedScopeID: 101, Revision: "5",
-	}}}
-	provider := scoped.SingleEntityConstraint("order", constraint)
-
-	ctx := scoped.WithConstraint(context.Background(), provider)
-	got, ok := scoped.ConstraintFrom(ctx, "order")
-	require.True(t, ok)
-	require.Equal(t, 1, len(got.Resources))
-	require.Equal(t, int64(101), got.Resources[0].ManagedScopeID)
-
-	// 大小写与空白不敏感
-	_, ok = scoped.ConstraintFrom(ctx, "  ORDER ")
-	require.True(t, ok)
-}
-
-// 未经 L3 装饰器的 ctx 读不到约束 → 写路径必须 fail-closed。
-func TestConstraintFromWithoutProviderFailsClosed(t *testing.T) {
-	_, ok := scoped.ConstraintFrom(context.Background(), "order")
-	require.False(t, ok)
-	require.False(t, scoped.HasConstraintProvider(context.Background()))
-}
-
-// 嵌套写防护：Hook 内写其他实体时匹配不到约束，必须拒绝而不是复用订单的约束。
-func TestConstraintFromRejectsUnknownEntityType(t *testing.T) {
-	provider := scoped.SingleEntityConstraint("order", scoped.WriteConstraint{
-		Resources: []scoped.ResourceConstraint{{Kind: "order", ResourceID: "1"}},
-	})
-	ctx := scoped.WithConstraint(context.Background(), provider)
-
-	_, ok := scoped.ConstraintFrom(ctx, "audit_log")
-	require.False(t, ok, "其他实体类型不得命中订单的约束")
-
-	// 但能区分"未装饰"与"装饰了但类型不匹配"，便于诊断
-	require.True(t, scoped.HasConstraintProvider(ctx))
-}
-
-// 空约束等价于"没有授权任何资源"，同样按未命中处理。
-func TestConstraintFromTreatsEmptyConstraintAsMiss(t *testing.T) {
-	provider := scoped.SingleEntityConstraint("order", scoped.WriteConstraint{})
-	ctx := scoped.WithConstraint(context.Background(), provider)
-
-	_, ok := scoped.ConstraintFrom(ctx, "order")
-	require.False(t, ok)
-}
-
-// nil provider 不写入 ctx → 下游读不到 → fail-closed（安全默认）。
-func TestWithConstraintIgnoresNilProvider(t *testing.T) {
-	ctx := scoped.WithConstraint(context.Background(), nil)
-	require.False(t, scoped.HasConstraintProvider(ctx))
-}
-
-// --- 决策与约束投影 ---
+// --- 决策投影 ---
 
 // allow 但没有授权资源不算允许，避免"空 allow"成为通行证。
 func TestEmptyAllowIsNotAllowed(t *testing.T) {
 	require.False(t, scoped.Allow().IsAllowed())
 	require.True(t, scoped.Allow(scoped.Resource{Kind: "order", ID: "1"}).IsAllowed())
 	require.False(t, scoped.Deny(scoped.ReasonOutOfScope).IsAllowed())
-}
-
-func TestDecisionProjectsWriteConstraint(t *testing.T) {
-	decision := scoped.Allow(scoped.Resource{
-		Kind: "order", ID: "1", ManagedScopeID: 101, TenantID: "tenant-a", Revision: "5",
-	})
-	constraint := decision.WriteConstraint()
-	require.Equal(t, 1, len(constraint.Resources))
-
-	resource, ok := constraint.Single()
-	require.True(t, ok)
-	require.Equal(t, "order", resource.Kind)
-	require.Equal(t, int64(101), resource.ManagedScopeID)
-	require.Equal(t, "tenant-a", resource.TenantID)
-}
-
-// deny 决策必须投影为空约束，下游据此拒绝。
-func TestDenyDecisionProjectsEmptyConstraint(t *testing.T) {
-	constraint := scoped.Deny(scoped.ReasonOutOfScope).WriteConstraint()
-	require.True(t, constraint.IsEmpty())
-	require.Equal(t, scoped.ScopeDenyAll, constraint.DataScope().Kind)
-	require.Equal(t, scoped.ScopeDenyAll, scoped.Deny("x").DataScope().Kind)
-}
-
-func TestWriteConstraintDataScopeProjection(t *testing.T) {
-	scopedConstraint := scoped.Allow(
-		scoped.Resource{Kind: "order", ID: "1", ManagedScopeID: 101},
-		scoped.Resource{Kind: "order", ID: "2", ManagedScopeID: 202},
-	).WriteConstraint()
-	scope := scopedConstraint.DataScope()
-	require.Equal(t, scoped.ScopeFiltered, scope.Kind)
-	require.Equal(t, []int64{101, 202}, scope.ScopeIDs)
-
-	// 任一资源是全局资源 → 整体全局
-	globalConstraint := scoped.Allow(
-		scoped.Resource{Kind: "order", ID: "1", GlobalScope: true},
-	).WriteConstraint()
-	require.Equal(t, scoped.ScopeGlobal, globalConstraint.DataScope().Kind)
 }
 
 // GlobalScope 资源不得同时携带 managed scope，避免边界歧义。

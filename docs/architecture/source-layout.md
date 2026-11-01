@@ -8,15 +8,15 @@
 
 | 包 | 主体与实现文件 |
 | --- | --- |
-| `app/crud`、`app/audited` | `application.go` 与 `application_*.go` 承载读写、批量、钩子、审计和生命周期，具体分工见 [app](../../app/README.md#crud-与审计实现的文件组织) |
+| `app/crud`、`app/audited` | `application.go` 与 `application_*.go` 承载 CRUD、钩子、审计和生命周期；`query_application.go`、`queryable_application.go`、`batch_application.go`、`purge_application.go` 承载独立能力，具体分工见 [app](../../app/README.md#crud-与审计实现的文件组织) |
 | `app/eventsourced` | `command_service.go` 及 `command_service_hooks.go`、`command_service_operation.go`；`command_hooks.go` 和 `command_operation.go` 保留钩子与 resolver 契约；`repository_read.go`、`repository_write.go` 承载普通仓储读写 |
 | `app/operation` | `runner_execute.go`、`runner_idempotency.go`、`runner_result.go` 承载执行、幂等和结果构建；`context.go` 定义操作 ID 上下文；`memory_store_*.go` 承载存储扩展 |
 | `app/operation/internal/singleflight` | `registry.go` 管理进行中的调用，`call.go` 承载等待与结果，`singleflight.go` 编排 owner 执行与异常收尾 |
 | `app/query` | `schema.go`、`schema_validate.go` 管理查询结构与校验；`field.go`、`field_value.go` 定义字段与值转换；`filter_builder.go`、`query_filters.go` 承载条件构建与集合；`range_parse.go`、`range_convert.go` 承载区间解析与类型转换 |
 | `app/query/querybind` | `bind.go` 遍历查询目标并选择解码器，`bind_value.go` 承载默认值绑定与类型赋值 |
-| `app/security/action`、`app/security/scoped` | `crud_decorator.go` 与 `crud_decorator_read.go`、`crud_decorator_write.go` 组织基础权限包装；scoped 的范围处理位于 `crud_decorator_scope.go`；`batch_decorator.go`、`audited_decorator.go` 保留独立可选能力包装 |
+| `auth/action` | `action.go` 定义动作码与通配匹配，`checker.go` 承载 `IActionChecker`，`rbac.go` 组合纯动作授权器 |
 | `auth/governance` | `decorator.go` 固定治理组合顺序，`decorator_snapshot.go`、`decorator_audit.go`、`decorator_metrics.go` 分别实现快照、审计、指标；契约与配置位于 `snapshot.go`、`audit.go`、`audit_sanitize.go`、`metrics.go`、`options.go` |
-| `auth/scoped` | `decision.go` 表达判定结果，`authorizer.go` 承载授权执行；`scope_context.go` 承载范围上下文与解析；`resource_registry.go` 承载资源解析器注册表 |
+| `auth/scoped` | `decision.go` 表达判定结果，`authorizer.go` 承载授权执行，`full.go` 组合权限码与规约解析；`scope_context.go` 承载范围上下文与解析；`resource_registry.go` 承载资源解析器注册表 |
 | `cache` | `cache.go` 保留缓存对象与基本读写，`cache_eviction.go` 管理过期、淘汰与回调，`cache_stats.go` 承载统计，`config.go` 定义配置 |
 | `clock` | `manual_clock.go` 承载手动时钟与时间推进，`manual_clock_timer.go` 实现其 Timer / Ticker，继续共享时钟锁 |
 | `contextx` | `tx_callback.go` 管理事务链路的提交后回调，`after_commit_dispatcher.go` 实现可挂接到事务会话的独立分发器 |
@@ -59,4 +59,4 @@ Outbox 的批量标记直接通过 `ParallelPublisher.SetBatchOperations` 配置
 
 已经内聚的代码继续保持原组织。例如 `codec` 的独立编解码器、`db` 的契约与数据库错误识别、`domain` 的实体与事件元数据机制、`errors` 的错误模型、`gen` 的各类生成器、`validate` 的规则族，以及 `schema_infer.go`、工作流 `graph.go`、重试和熔断算法。Saga 已按 `orchestrator_*.go` 组织；示例和脚本按各自场景组织。它们无需为了统一文件长度继续拆分。
 
-测试可以继续按跨文件的行为场景组织，不要求与实现文件一一对应。`require` 的失败终止语义、重建 checkpoint 的强制保存语义、路由包装器的冲突登记与链式调用语义，以及权限包装器的能力探测与授权语义均应保留。
+测试可以继续按跨文件的行为场景组织，不要求与实现文件一一对应。`require` 的失败终止语义、重建 checkpoint 的强制保存语义、路由包装器的冲突登记与链式调用语义，以及各应用能力的显式构造与授权语义均应保留。

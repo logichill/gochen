@@ -77,34 +77,3 @@ func Allow(resources ...Resource) Decision {
 func Deny(reasonCode string) Decision {
 	return Decision{Effect: EffectDeny, ReasonCode: strings.TrimSpace(reasonCode)}
 }
-
-// WriteConstraint 把 allow 决策投影为显式写入约束。
-//
-// 非 allow 或无授权资源时返回空约束——下游读到空约束必须拒绝。
-func (d Decision) WriteConstraint() WriteConstraint {
-	constraint := WriteConstraint{}
-	if !d.IsAllowed() {
-		return constraint
-	}
-	constraint.Resources = make([]ResourceConstraint, 0, len(d.AuthorizedResources))
-	for _, resource := range d.AuthorizedResources {
-		resource = resource.Normalize()
-		constraint.Resources = append(constraint.Resources, ResourceConstraint{
-			Kind:           resource.Kind,
-			ResourceID:     resource.ID,
-			ManagedScopeID: resource.ManagedScopeID,
-			GlobalScope:    resource.GlobalScope,
-			TenantID:       resource.TenantID,
-			Revision:       resource.Revision,
-		})
-	}
-	return constraint
-}
-
-// DataScope 把 allow 决策授权的资源投影为数据范围。
-func (d Decision) DataScope() DataScope {
-	if !d.IsAllowed() {
-		return DenyAll()
-	}
-	return d.WriteConstraint().DataScope()
-}

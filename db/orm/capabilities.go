@@ -13,8 +13,8 @@ const (
 	CapabilityPreload Capability = "preload"
 	// CapabilityAssociationWrite 是常量。
 	CapabilityAssociationWrite Capability = "association_write"
-	// CapabilityBatchWrite 是常量。
-	CapabilityBatchWrite Capability = "batch_write"
+	// CapabilityBulkWrite 是常量。
+	CapabilityBulkWrite Capability = "bulk_write"
 	// CapabilityTransaction 是常量。
 	CapabilityTransaction Capability = "transaction"
 	// CapabilityOptimisticLock 是常量。

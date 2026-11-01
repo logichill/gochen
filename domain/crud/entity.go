@@ -21,14 +21,14 @@ import "gochen/domain"
 // 类型参数：
 //   - ID: 实体主键类型，必须是可比较类型（如 int64、string、uuid.UUID 等）
 type Entity[ID comparable] struct {
-	ID      ID     `json:"id"`
-	Version uint64 `json:"version"`
+	ID      ID     `json:"id" role:"id" managed:"true"`
+	Version uint64 `json:"version" managed:"true"`
 }
 
 var (
-	_ domain.IEntity[int64]      = (*Entity[int64])(nil)
-	_ domain.ISettableID[int64]  = (*Entity[int64])(nil)
-	_ domain.ISettableVersion    = (*Entity[int64])(nil)
+	_ domain.IEntity[int64]     = (*Entity[int64])(nil)
+	_ domain.ISettableID[int64] = (*Entity[int64])(nil)
+	_ domain.ISettableVersion   = (*Entity[int64])(nil)
 )
 
 func (e *Entity[ID]) GetID() ID { return e.ID }

@@ -22,8 +22,8 @@
 //
 // 其它约定：
 //   - 全部能力默认 fail-closed：配置缺失、解析失败、范围为空一律拒绝；
-//   - 安全 PEP 装饰器位于 gochen/app/security/*，
-//     标准装配入口位于 runtime/security；
+//   - 安全 PEP 由业务 Application 直接调用 `auth.IAuthorizer` 完成，
+//     决策中的 `spec.Spec` 交给仓储执行；
 //   - 权限目录（registry / catalog sync）属于 Host 可选扩展，
 //     位于 runtime/host/authz。
 package auth

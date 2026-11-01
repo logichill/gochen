@@ -14,10 +14,10 @@ type ITxRunner interface {
 	WithinTx(ctx context.Context, fn func(txCtx context.Context) error) error
 }
 
-// ValidateBatchSize 校验批量操作数量不超过配置上限。
-func ValidateBatchSize(size int, max int) error {
+// ValidateBulkSize 校验批量操作数量不超过配置上限。
+func ValidateBulkSize(size int, max int) error {
 	if size > max {
-		return errors.NewCode(errors.Validation, fmt.Sprintf("batch size exceeds maximum limit of %d", max))
+		return errors.NewCode(errors.Validation, fmt.Sprintf("bulk size exceeds maximum limit of %d", max))
 	}
 	return nil
 }

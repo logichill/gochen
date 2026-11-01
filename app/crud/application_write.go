@@ -1,52 +1,65 @@
 package crud
 
-import (
-	"context"
+import "context"
 
-	"gochen/app/internal/depcheck"
-	"gochen/domain"
-	"gochen/errors"
-	"gochen/validate"
-)
-
-// Create 创建实体，执行完整的生命周期钩子。
-func (s *Application[T, ID]) Create(ctx context.Context, entity T) error {
-	if depcheck.IsNil(entity) {
-		return errors.NewCode(errors.InvalidInput, "entity cannot be nil")
-	}
-	return s.flows.create.Run(ctx, entity)
+// Create 创建单个实体。
+func (a *Application[T, ID]) Create(ctx context.Context, entity T) error {
+	return a.core.Create(ctx, entity)
 }
 
-// Update 更新实体，执行完整的生命周期钩子。
-func (s *Application[T, ID]) Update(ctx context.Context, entity T) error {
-	if depcheck.IsNil(entity) {
-		return errors.NewCode(errors.InvalidInput, "entity cannot be nil")
-	}
-	return s.flows.update.Run(ctx, entity)
+// Update 更新单个实体；无业务字段变更时跳过写入与审计。
+func (a *Application[T, ID]) Update(ctx context.Context, entity T) error {
+	return a.core.Update(ctx, entity)
 }
 
-// Delete 删除实体，执行完整的生命周期钩子。
-func (s *Application[T, ID]) Delete(ctx context.Context, id ID) error {
-	return s.flows.delete.Run(ctx, id)
+// Delete 物理删除单个实体。
+func (a *Application[T, ID]) Delete(ctx context.Context, id ID) error {
+	return a.core.Delete(ctx, id)
 }
 
-// Validate 先校验实体领域不变量，再执行可注入的应用策略校验。
-func (s *Application[T, ID]) Validate(entity T) error {
-	cfg := s.serviceConfig()
-	if !cfg.AutoValidate {
-		return nil
-	}
-	if validatable, ok := any(entity).(domain.IValidatable); ok {
-		if err := validatable.Validate(); err != nil {
-			return err
-		}
-	}
-	if validator := s.validatorSnapshot(); validator != nil {
-		return validator.Validate(entity)
-	}
-	return nil
+// DeleteBulk 一次授权、一个事务物理删除多个实体。
+func (a *Application[T, ID]) DeleteBulk(ctx context.Context, ids []ID) error {
+	return a.core.DeleteBulk(ctx, ids)
 }
 
-func (s *Application[T, ID]) validatorSnapshot() validate.IValidator {
-	return s.validator
+// Execute 修改已有实体。
+func (a *Application[T, ID]) Execute(
+	ctx context.Context,
+	action string,
+	id ID,
+	fn func(ctx context.Context, e T) error,
+	opts ...ExecOption,
+) (T, error) {
+	return a.core.Execute(ctx, action, id, fn, opts...)
+}
+
+// ExecuteNew 新建实体。
+func (a *Application[T, ID]) ExecuteNew(
+	ctx context.Context,
+	action string,
+	fn func(ctx context.Context) (T, error),
+	opts ...ExecOption,
+) (T, error) {
+	return a.core.ExecuteNew(ctx, action, fn, opts...)
+}
+
+// ExecuteBulk 一次授权、一个事务修改多个实体。
+func (a *Application[T, ID]) ExecuteBulk(
+	ctx context.Context,
+	action string,
+	ids []ID,
+	fn func(ctx context.Context, e T) error,
+	opts ...ExecOption,
+) ([]T, error) {
+	return a.core.ExecuteBulk(ctx, action, ids, fn, opts...)
+}
+
+// ExecuteNewBulk 一次授权、一个事务新建多个实体。
+func (a *Application[T, ID]) ExecuteNewBulk(
+	ctx context.Context,
+	action string,
+	fn func(ctx context.Context) ([]T, error),
+	opts ...ExecOption,
+) ([]T, error) {
+	return a.core.ExecuteNewBulk(ctx, action, fn, opts...)
 }

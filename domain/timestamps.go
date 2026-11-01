@@ -16,8 +16,8 @@ type ITimestamps interface {
 // - 该结构体不包含 DeletedAt/DeletedBy；
 // - 软删除语义由 `domain.ISoftDeletable` 承担。
 type Timestamps struct {
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	CreatedAt time.Time `json:"created_at" managed:"true"`
+	UpdatedAt time.Time `json:"updated_at" managed:"true"`
 }
 
 var _ ITimestamps = (*Timestamps)(nil)

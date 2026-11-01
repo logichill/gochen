@@ -1,77 +1,191 @@
-// Package crud 提供通用 CRUD 应用服务（用例编排）模板。
+// Package crud 提供 CRUD 应用服务模板。
+//
+// Application 是业务侧唯一入口：授权、事务、钩子与审计由内部执行骨架统一编排。
 package crud
 
 import (
+	"strings"
+
+	"gochen/app/internal/depcheck"
+	"gochen/app/internal/execution"
+	"gochen/auth"
 	"gochen/domain"
-	"gochen/domain/crud"
+	domaudited "gochen/domain/audited"
 	"gochen/errors"
-	"gochen/validate"
 )
 
-// Application 应用服务实现。
+// Application 编排通用 CRUD 用例。
 type Application[T domain.IEntity[ID], ID comparable] struct {
-	repository crud.IRepository[T, ID]
-	validator  validate.IValidator
-	config     *ServiceConfig
-	hooks      Hooks[T, ID]
-	flows      flows[T, ID]
+	core *execution.Core[T, ID]
 }
 
-var _ ICapabilities = (*Application[domain.IEntity[int64], int64])(nil)
-
-// NewApplication 创建应用服务实例。
+// NewApplication 创建可读写的 CRUD 应用。
 //
-// 参数：
-// - repository：实体仓储（承载 CRUD 的实际读写与查询）。
-// - options：构造期配置（nil 使用默认值）；配置和钩子均复制后持有。
-//
-// 返回：
-// - err：repository 为空等输入错误会返回 err。
+// 标准动作：read / list / create / update / delete；配置 Options.Audit 时
+// 另加 audit_read，并提供 AuditTrail。
 func NewApplication[T domain.IEntity[ID], ID comparable](
-	repository crud.IRepository[T, ID],
-	options *Options[T, ID],
+	repo Repository[T, ID],
+	options Options[T, ID],
 ) (*Application[T, ID], error) {
-	if repository == nil {
+	if depcheck.IsNil(repo) {
 		return nil, errors.NewCode(errors.InvalidInput, "repository cannot be nil")
 	}
-	var opts Options[T, ID]
-	if options != nil {
-		opts = *options
+	audits, err := auditQueryStore(options.Audit)
+	if err != nil {
+		return nil, err
 	}
-	if opts.Config == nil {
-		opts.Config = DefaultServiceConfig()
+	if err := rejectUndeclaredAudit(options.Actions, audits); err != nil {
+		return nil, err
 	}
-	copyCfg := *opts.Config
-	normalizeServiceConfig(&copyCfg)
-
-	app := &Application[T, ID]{
-		repository: repository,
-		validator:  opts.Validator,
-		config:     &copyCfg,
+	defaults, err := standardActions(options.Resource, options.ActionPermissions, true, !depcheck.IsNil(audits))
+	if err != nil {
+		return nil, err
 	}
-	if opts.Hooks != nil {
-		app.hooks = *opts.Hooks
+	core, err := execution.New(execution.Options[T, ID]{
+		Resource:   options.Resource,
+		Authorizer: options.Authorizer,
+		Actions:    options.Actions,
+		Defaults:   defaults,
+		Hooks:      options.Hooks,
+		Validator:  options.Validator,
+		Limits:     options.Limits,
+		Repo:       repo,
+		Read:       repo,
+		Tx:         repo,
+		Audit:      options.Audit,
+		Audits:     audits,
+	})
+	if err != nil {
+		return nil, err
 	}
-	app.flows = app.buildFlows()
-	return app, nil
+	return &Application[T, ID]{core: core}, nil
 }
 
-// Repository 返回组合根装配所需的底层仓储。
-func (s *Application[T, ID]) Repository() crud.IRepository[T, ID] { return s.repository }
-
-// Config 返回构造期应用配置的副本。
-func (s *Application[T, ID]) Config() *ServiceConfig {
-	return cloneServiceConfig(s.config)
-}
-
-// Hooks 返回构造期钩子快照（值拷贝）。
-func (s *Application[T, ID]) Hooks() Hooks[T, ID] { return s.hooks }
-
-func (s *Application[T, ID]) serviceConfig() ServiceConfig {
-	if s.config == nil {
-		return *DefaultServiceConfig()
+// NewReadApplication 创建只读 CRUD 应用。
+//
+// 标准动作只有 read / list；配置 Options.Audit 时另加 audit_read。
+func NewReadApplication[T domain.IEntity[ID], ID comparable](
+	repo IReadRepository[T, ID],
+	options Options[T, ID],
+) (*Application[T, ID], error) {
+	if depcheck.IsNil(repo) {
+		return nil, errors.NewCode(errors.InvalidInput, "repository cannot be nil")
 	}
-	cfg := *s.config
-	normalizeServiceConfig(&cfg)
-	return cfg
+	audits, err := auditQueryStore(options.Audit)
+	if err != nil {
+		return nil, err
+	}
+	if err := rejectUndeclaredAudit(options.Actions, audits); err != nil {
+		return nil, err
+	}
+	defaults, err := standardActions(options.Resource, options.ActionPermissions, false, !depcheck.IsNil(audits))
+	if err != nil {
+		return nil, err
+	}
+	core, err := execution.New(execution.Options[T, ID]{
+		Resource:   options.Resource,
+		Authorizer: options.Authorizer,
+		Actions:    options.Actions,
+		Defaults:   defaults,
+		Hooks:      options.Hooks,
+		Validator:  options.Validator,
+		Limits:     options.Limits,
+		Read:       repo,
+		Audit:      options.Audit,
+		Audits:     audits,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &Application[T, ID]{core: core}, nil
 }
+
+// standardActions 构造标准动作清单；permissions 按动作名覆盖默认权限码。
+func standardActions(resource string, permissions map[string]string, writable, withAudit bool) ([]auth.Action, error) {
+	resource = strings.TrimSpace(resource)
+	names := []string{ActionRead, ActionList}
+	if writable {
+		names = append(names, ActionCreate, ActionUpdate, ActionDelete)
+	}
+	if withAudit {
+		names = append(names, ActionAuditRead)
+	}
+	known := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		known[name] = struct{}{}
+	}
+	for name := range permissions {
+		if _, ok := known[name]; !ok {
+			return nil, errors.NewCode(errors.InvalidInput, "action permission override references an unknown action").
+				WithContext("action", name)
+		}
+	}
+
+	permissionFor := func(name string) string {
+		if code := strings.TrimSpace(permissions[name]); code != "" {
+			return code
+		}
+		if resource == "" {
+			return ""
+		}
+		return resource + ":api:" + name
+	}
+
+	actions := make([]auth.Action, 0, len(names))
+	for _, name := range names {
+		kind := auth.KindRead
+		switch name {
+		case ActionList:
+			kind = auth.KindList
+		case ActionCreate:
+			kind = auth.KindCreate
+		case ActionUpdate:
+			kind = auth.KindUpdate
+		case ActionDelete:
+			kind = auth.KindDelete
+		}
+		actions = append(actions, auth.Action{
+			Name:       name,
+			Permission: permissionFor(name),
+			Kind:       kind,
+		})
+	}
+	return actions, nil
+}
+
+func auditQueryStore(audit domaudited.IAuditStore) (domaudited.IAuditQueryStore, error) {
+	if depcheck.IsNil(audit) {
+		return nil, nil
+	}
+	store, ok := any(audit).(domaudited.IAuditQueryStore)
+	if !ok || depcheck.IsNil(store) {
+		return nil, errors.NewCode(errors.InvalidInput, "audit store must implement IAuditQueryStore")
+	}
+	return store, nil
+}
+
+func rejectUndeclaredAudit(actions []auth.Action, store domaudited.IAuditQueryStore) error {
+	if !depcheck.IsNil(store) {
+		return nil
+	}
+	for _, action := range actions {
+		if action.Name == ActionAuditRead {
+			return errors.NewCode(errors.InvalidInput, "audit_read requires an audit store")
+		}
+	}
+	return nil
+}
+
+// Descriptor 返回构造期冻结的资源动作清单。
+func (a *Application[T, ID]) Descriptor() auth.Descriptor {
+	return a.core.Descriptor()
+}
+
+// MaxPageSize 返回单页上限。
+func (a *Application[T, ID]) MaxPageSize() int { return a.core.MaxPageSize() }
+
+// MaxBulkSize 返回批量上限。
+func (a *Application[T, ID]) MaxBulkSize() int { return a.core.MaxBulkSize() }
+
+// UsesAllowAuthorizer 报告当前应用是否使用一律放行的授权器（D17 启动清单）。
+func (a *Application[T, ID]) UsesAllowAuthorizer() bool { return a.core.UsesAllowAuthorizer() }

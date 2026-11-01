@@ -5,10 +5,16 @@ import (
 	"testing"
 
 	"gochen/contextx"
+	"gochen/domain/crud"
+	"gochen/domain/spec"
 	"gochen/errors"
 	"gochen/testkit"
 	"gochen/testkit/require"
 )
+
+func isoDocWithID(id int64) *isoDoc {
+	return &isoDoc{TenantEntity: crud.TenantEntity[int64]{Entity: crud.Entity[int64]{ID: id}}}
+}
 
 // L2 跨隔离只读阀门的内存侧行为特征测试。
 //
@@ -50,8 +56,8 @@ func crossIsolationCtx(t *testing.T) context.Context {
 
 func seedTwoTenants(t *testing.T, repo *testkit.MemoryRepository[*isoDoc, int64]) {
 	t.Helper()
-	require.NoError(t, repo.Create(tenantCtx(t, "tenant-a"), &isoDoc{Title: "a"}))
-	require.NoError(t, repo.Create(tenantCtx(t, "tenant-b"), &isoDoc{Title: "b"}))
+	require.NoError(t, repo.Create(tenantCtx(t, "tenant-a"), &isoDoc{Title: "a"}, spec.All()))
+	require.NoError(t, repo.Create(tenantCtx(t, "tenant-b"), &isoDoc{Title: "b"}, spec.All()))
 }
 
 // 1) 两道闸都合上：读跨越全部隔离空间，且留下一条痕迹。
@@ -60,7 +66,7 @@ func TestMemoryCrossIsolation_ReadsSpanAllSpacesAndAreAudited(t *testing.T) {
 	repo := newCrossIsolationRepo(t, audit)
 	seedTwoTenants(t, repo)
 
-	docs, err := repo.List(crossIsolationCtx(t), 0, 0)
+	docs, err := repo.List(crossIsolationCtx(t), 0, 0, spec.All())
 	require.NoError(t, err)
 	require.Equal(t, 2, len(docs))
 
@@ -68,13 +74,13 @@ func TestMemoryCrossIsolation_ReadsSpanAllSpacesAndAreAudited(t *testing.T) {
 	require.Equal(t, "monthly_billing_reconciliation", audit.records[0].Reason)
 	require.Equal(t, "platform_cron_worker", audit.records[0].Operator)
 
-	count, err := repo.Count(crossIsolationCtx(t))
+	count, err := repo.Count(crossIsolationCtx(t), spec.All())
 	require.NoError(t, err)
 	require.Equal(t, int64(2), count)
 	require.Equal(t, 2, len(audit.records))
 
 	// 单体读同样放行：数据迁移与巡检需要按 ID 取到别的隔离空间的记录。
-	got, err := repo.Get(crossIsolationCtx(t), 2)
+	got, err := repo.Get(crossIsolationCtx(t), 2, spec.All())
 	require.NoError(t, err)
 	require.Equal(t, "b", got.Title)
 }
@@ -85,15 +91,15 @@ func TestMemoryCrossIsolation_WithoutCredentialStaysIsolated(t *testing.T) {
 	repo := newCrossIsolationRepo(t, audit)
 	seedTwoTenants(t, repo)
 
-	docs, err := repo.List(tenantCtx(t, "tenant-a"), 0, 0)
+	docs, err := repo.List(tenantCtx(t, "tenant-a"), 0, 0, spec.All())
 	require.NoError(t, err)
 	require.Equal(t, 1, len(docs))
 	require.Equal(t, "a", docs[0].Title)
 
-	_, err = repo.Get(tenantCtx(t, "tenant-b"), 1)
+	_, err = repo.Get(tenantCtx(t, "tenant-b"), 1, spec.All())
 	require.True(t, errors.Is(err, errors.NotFound))
 
-	_, err = repo.Count(context.Background())
+	_, err = repo.Count(context.Background(), spec.All())
 	require.True(t, errors.Is(err, errors.Forbidden))
 
 	require.Equal(t, 0, len(audit.records))
@@ -104,12 +110,12 @@ func TestMemoryCrossIsolation_CredentialIsInertWithoutDeclaration(t *testing.T) 
 	repo := newIsolatedRepo(t)
 	seedTwoTenants(t, repo)
 
-	_, err := repo.Count(crossIsolationCtx(t))
+	_, err := repo.Count(crossIsolationCtx(t), spec.All())
 	require.True(t, errors.Is(err, errors.Forbidden))
 
 	ctx, err := contextx.WithTenantID(crossIsolationCtx(t), "tenant-a")
 	require.NoError(t, err)
-	docs, err := repo.List(ctx, 0, 0)
+	docs, err := repo.List(ctx, 0, 0, spec.All())
 	require.NoError(t, err)
 	require.Equal(t, 1, len(docs))
 }
@@ -122,7 +128,7 @@ func TestMemoryCrossIsolation_AuditFailureBlocksRead(t *testing.T) {
 	repo := newCrossIsolationRepo(t, audit)
 	seedTwoTenants(t, repo)
 
-	_, err := repo.List(crossIsolationCtx(t), 0, 0)
+	_, err := repo.List(crossIsolationCtx(t), 0, 0, spec.All())
 	require.True(t, errors.Is(err, errors.Forbidden))
 }
 
@@ -133,20 +139,20 @@ func TestMemoryCrossIsolation_WritesAreAlwaysRefused(t *testing.T) {
 	seedTwoTenants(t, repo)
 
 	ctx := crossIsolationCtx(t)
-	require.True(t, errors.Is(repo.Create(ctx, &isoDoc{Title: "c"}), errors.Forbidden))
-	require.True(t, errors.Is(repo.Update(ctx, &isoDoc{Title: "tampered"}), errors.Forbidden))
-	require.True(t, errors.Is(repo.Delete(ctx, 1), errors.Forbidden))
-	require.True(t, errors.Is(repo.Purge(ctx, 1), errors.Forbidden))
-	require.True(t, errors.Is(repo.CreateAll(ctx, []*isoDoc{{Title: "d"}}), errors.Forbidden))
-	require.True(t, errors.Is(repo.UpdateAll(ctx, []*isoDoc{{Title: "e"}}), errors.Forbidden))
-	require.True(t, errors.Is(repo.DeleteAll(ctx, []int64{1}), errors.Forbidden))
+	require.True(t, errors.Is(repo.Create(ctx, &isoDoc{Title: "c"}, spec.All()), errors.Forbidden))
+	require.True(t, errors.Is(repo.Update(ctx, &isoDoc{Title: "tampered"}, spec.All()), errors.Forbidden))
+	require.True(t, errors.Is(repo.Delete(ctx, isoDocWithID(1), spec.All()), errors.Forbidden))
+	require.True(t, errors.Is(repo.Purge(ctx, isoDocWithID(1), spec.All()), errors.Forbidden))
+	require.True(t, errors.Is(repo.CreateBulk(ctx, []*isoDoc{{Title: "d"}}, spec.All()), errors.Forbidden))
+	require.True(t, errors.Is(repo.UpdateBulk(ctx, []*isoDoc{{Title: "e"}}, spec.All()), errors.Forbidden))
+	require.True(t, errors.Is(repo.DeleteBulk(ctx, []*isoDoc{isoDocWithID(1)}, spec.All()), errors.Forbidden))
 
 	// 带着隔离键的写同样被拒。
 	writeCtx, err := contextx.WithTenantID(crossIsolationCtx(t), "tenant-a")
 	require.NoError(t, err)
-	require.True(t, errors.Is(repo.Delete(writeCtx, 1), errors.Forbidden))
+	require.True(t, errors.Is(repo.Delete(writeCtx, isoDocWithID(1), spec.All()), errors.Forbidden))
 
-	docs, err := repo.List(crossIsolationCtx(t), 0, 0)
+	docs, err := repo.List(crossIsolationCtx(t), 0, 0, spec.All())
 	require.NoError(t, err)
 	require.Equal(t, 2, len(docs))
 	require.Equal(t, "a", docs[0].Title)

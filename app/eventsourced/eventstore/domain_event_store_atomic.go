@@ -45,7 +45,7 @@ func (a *atomicDomainEventStore[ID]) AppendEventsBatch(ctx context.Context, batc
 	}
 	requests := make([]store.EventAppend[ID], 0, len(batch))
 	for _, entry := range batch {
-		events, err := a.prepareDomainEvents(entry.AggregateID, entry.Events, entry.ExpectedVersion)
+		events, err := a.prepareDomainEvents(ctx, entry.AggregateID, entry.Events, entry.ExpectedVersion)
 		if err != nil {
 			return err
 		}

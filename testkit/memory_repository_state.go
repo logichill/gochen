@@ -100,7 +100,7 @@ func entityNotFound[ID comparable](id ID) error {
 }
 
 func duplicateEntityID[ID comparable](id ID) error {
-	return errors.NewCode(errors.Conflict, "duplicate entity ID in batch").WithContext("id", fmt.Sprint(id))
+	return errors.NewCode(errors.Conflict, "duplicate entity ID in bulk").WithContext("id", fmt.Sprint(id))
 }
 
 func removeID[ID comparable](ids []ID, target ID) []ID {

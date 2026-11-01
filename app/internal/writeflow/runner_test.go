@@ -260,11 +260,11 @@ func TestRun_NoTxOutsidePreflightStillRunsWithoutPostCommit(t *testing.T) {
 	}
 }
 
-func TestValidateBatchSizeBoundaries(t *testing.T) {
-	if err := ValidateBatchSize(3, 3); err != nil {
+func TestValidateBulkSizeBoundaries(t *testing.T) {
+	if err := ValidateBulkSize(3, 3); err != nil {
 		t.Fatalf("expected boundary size to pass: %v", err)
 	}
-	if err := ValidateBatchSize(4, 3); !errors.Is(err, errors.Validation) {
+	if err := ValidateBulkSize(4, 3); !errors.Is(err, errors.Validation) {
 		t.Fatalf("expected validation error, got %v", err)
 	}
 }

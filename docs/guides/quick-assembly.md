@@ -1,23 +1,20 @@
 # Quick 装配与列名约定
 
-`gochen-runtime/quick` 提供 Repo、Application、事件溯源、REST 和 Host 的常用装配入口。它调用对应模块的正式实现，安全能力仍需明确声明。复杂配置使用 Runtime 的 Repo options、`security.Profile` 和 Host builder。
+`gochen-runtime/quick` 提供 Repo、Application、事件溯源、REST 和 Host 的常用装配入口。它调用对应模块的正式实现，安全能力仍需明确声明。复杂配置使用 Runtime 的 Repo options、`auth.IAuthorizer` 实现与 Host builder。
 
 ## 仓储与 Application
 
 | 入口 | 输入与行为 |
 | --- | --- |
 | `quick.IsolatedRepo[T, ID](orm, table, opts...)` | 注入 `WithIsolation(IsolationCols{})`，启用 L2 租户隔离 |
-| `quick.ScopedRepo[T, ID](orm, table, kind, opts...)` | 注入 `WithResourceKind`、`WithRequireScope`、`WithScope(ScopeCols{})` |
 | `quick.AuditedRepo[T, ID](orm, table, opts...)` | 注入 `WithAudited`，声明审计字段和软删除能力 |
-| `quick.App[T, ID](repository)` | 返回基础 `*crud.Application[T, ID]` |
-| `quick.ActionApp(app, checker, prefix)` | 装饰已有 Application，派生 CRUD 动作码 |
-| `quick.ActionAppFromRepo(repository, checker, prefix)` | 创建基础 Application 后启用 L1 |
-| `quick.ScopedApp(app, kind, scopeFn, opts...)` | 装饰已有 Application，装配资源解析器、范围解析器与 Authorizer |
-| `quick.ScopedAppFromRepo(repository, kind, scopeFn, opts...)` | 创建基础 Application 后启用 L3 |
+| `quick.App[T, ID](repository, options)` | 返回基础 `*crud.Application[T, ID]`；授权器由 `options.Authorizer` 提供 |
 
-上述构造函数均返回 error。`scopeFn` 的类型为 `func(T) int64`，必须返回资源实际管理范围。`ScopedRepo` 只开启 L3；需要 L2 时另外传入 `repo.WithIsolation`。`AuditedRepo` 不会创建审计 Store 或审计 Application，完整审计链路仍需 `app/audited`。
+上述构造函数均返回 error。授权通过 `crud.Options.Authorizer` 显式传入：`auth.Allow()`、`action.RBAC(checker)`、`scoped.New(checker, resolver)` 或业务自实现。`AuditedRepo` 不会创建审计 Store 或审计 Application，完整审计链路仍需 `app/audited`。
 
-Scoped 默认从 Principal 的 ActiveScopeID 解析单范围，系统主体使用全局范围；没有有效身份时拒绝。动作前缀 `order` 派生 `order:api:create/read/update/delete/list`。可通过 `WithScopedPolicy`、`WithScopedScopeResolver`、`WithScopedEvaluator`、`WithScopedActionChecker`、`WithScopedAuthorizer` 定制策略；恢复、物理删除、审计查询等额外动作须显式配置对应权限。
+权限码来自 `auth.Descriptor`，默认为 `<resource>:api:<action>`；Action 检查从 ctx 中的 Principal 读取权限集合。`scoped.New` 先校验权限码，再由 `ISpecResolver` 产出 `spec.Spec` 与服务端赋值；系统主体得到 `spec.All()`。写规约随仓储调用传入，仓储在最终 SQL 中执行 `WITH CHECK` 与 `WHERE`。
+
+所需查询、批量、审计和永久删除分别构造 Application，并分别传入同一授权器。基础 CRUD 外壳不自动获得其他能力；`audited.NewApplication` 在构造期要求 restore / deleted-query / purge 端口。REST 使用 WithQueryApplication/WithQueryableApplication/WithBatchWriter/WithAuditOperations/WithPurger 显式注入，注入本身不改变路由开关。
 
 ## 事件溯源
 
@@ -66,7 +63,7 @@ Core [db.NamingConvention](../../db/naming.go) 定义默认列名：
 
 列名按“Repo 显式 option → ORM / Database 的 NamingConvention → 内置默认值”覆盖。配置可经 `config.Provider.Load` 写入 `db.DBConfig.Naming`，由 `stdsql.New` 和 `lite.New` 传递；也可通过 `lite.WithNamingConvention` 指定 ORM 约定。
 
-命名约定只提供列名，不负责开启安全能力。必须先调用 `WithIsolation` / `WithScope` 或对应 Quick 工厂；启用后的列必须能映射到实体。自定义 `IsolationCols.Resolve` 时必须同时显式指定 `Column`，不能借用默认租户列。
+命名约定只提供列名，不负责开启安全能力。必须先调用 `WithIsolation` 或对应 Quick 工厂；启用后的列必须能映射到实体。自定义 `IsolationCols.Resolve` 时必须同时显式指定 `Column`，不能借用默认租户列。
 
 ## REST 与 Host
 

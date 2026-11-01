@@ -2,6 +2,8 @@ package query
 
 import (
 	"context"
+
+	"gochen/domain/spec"
 )
 
 // QueryRequest 表示 application / repository 主路径消费的统一查询请求。
@@ -68,11 +70,11 @@ func (q QueryOptions) Request() QueryRequest {
 // - 需要基础 CRUD 能力的调用方应与领域仓储端口显式组合。
 type IQueryableRepository[T any] interface {
 	// Query 通用查询。
-	Query(ctx context.Context, opts QueryOptions) ([]T, error)
+	Query(ctx context.Context, opts QueryOptions, s spec.Spec) ([]T, error)
 
 	// QueryOne 查询单条记录。
-	QueryOne(ctx context.Context, opts QueryOptions) (T, error)
+	QueryOne(ctx context.Context, opts QueryOptions, s spec.Spec) (T, error)
 
 	// QueryCount 查询计数。
-	QueryCount(ctx context.Context, opts QueryOptions) (int64, error)
+	QueryCount(ctx context.Context, opts QueryOptions, s spec.Spec) (int64, error)
 }

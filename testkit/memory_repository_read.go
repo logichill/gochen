@@ -2,17 +2,18 @@ package testkit
 
 import (
 	"context"
+
+	"gochen/domain/spec"
 )
 
-// Get 按 ID 返回实体的浅拷贝；不存在时返回 errors.NotFound。
-func (r *MemoryRepository[T, ID]) Get(ctx context.Context, id ID) (T, error) {
+// Get 按 ID 返回实体的浅拷贝；不存在、已软删或被规约过滤时返回 errors.NotFound。
+func (r *MemoryRepository[T, ID]) Get(ctx context.Context, id ID, s spec.Spec) (T, error) {
+	var zero T
 	if err := validateContext(ctx); err != nil {
-		var zero T
 		return zero, err
 	}
 	isolationID, isolated, err := r.readIsolationID(ctx)
 	if err != nil {
-		var zero T
 		return zero, err
 	}
 	var result T
@@ -24,14 +25,21 @@ func (r *MemoryRepository[T, ID]) Get(ctx context.Context, id ID) (T, error) {
 		if isolated && !visibleInIsolation[T, ID](entity, isolationID) {
 			return entityNotFound(id)
 		}
+		ok, matchErr := r.visibleEntity(s, entity)
+		if matchErr != nil {
+			return matchErr
+		}
+		if !ok {
+			return entityNotFound(id)
+		}
 		result = shallowClone(entity)
 		return nil
 	})
 	return result, err
 }
 
-// List 按创建顺序返回分页结果。
-func (r *MemoryRepository[T, ID]) List(ctx context.Context, offset, limit int) ([]T, error) {
+// List 按创建顺序返回满足规约的分页结果。
+func (r *MemoryRepository[T, ID]) List(ctx context.Context, offset, limit int, s spec.Spec) ([]T, error) {
 	if err := validateContext(ctx); err != nil {
 		return nil, err
 	}
@@ -43,7 +51,15 @@ func (r *MemoryRepository[T, ID]) List(ctx context.Context, offset, limit int) (
 	err = r.withReadState(ctx, func(state *memoryState[T, ID]) error {
 		visible := make([]ID, 0, len(state.order))
 		for _, id := range state.order {
-			if isolated && !visibleInIsolation[T, ID](state.entities[id], isolationID) {
+			entity := state.entities[id]
+			if isolated && !visibleInIsolation[T, ID](entity, isolationID) {
+				continue
+			}
+			ok, matchErr := r.visibleEntity(s, entity)
+			if matchErr != nil {
+				return matchErr
+			}
+			if !ok {
 				continue
 			}
 			visible = append(visible, id)
@@ -58,8 +74,8 @@ func (r *MemoryRepository[T, ID]) List(ctx context.Context, offset, limit int) (
 	return result, err
 }
 
-// Count 返回实体数量。
-func (r *MemoryRepository[T, ID]) Count(ctx context.Context) (int64, error) {
+// Count 返回满足规约的实体数量。
+func (r *MemoryRepository[T, ID]) Count(ctx context.Context, s spec.Spec) (int64, error) {
 	if err := validateContext(ctx); err != nil {
 		return 0, err
 	}
@@ -69,12 +85,15 @@ func (r *MemoryRepository[T, ID]) Count(ctx context.Context) (int64, error) {
 	}
 	var count int64
 	err = r.withReadState(ctx, func(state *memoryState[T, ID]) error {
-		if !isolated {
-			count = int64(len(state.entities))
-			return nil
-		}
 		for _, entity := range state.entities {
-			if visibleInIsolation[T, ID](entity, isolationID) {
+			if isolated && !visibleInIsolation[T, ID](entity, isolationID) {
+				continue
+			}
+			ok, matchErr := r.visibleEntity(s, entity)
+			if matchErr != nil {
+				return matchErr
+			}
+			if ok {
 				count++
 			}
 		}
@@ -83,8 +102,8 @@ func (r *MemoryRepository[T, ID]) Count(ctx context.Context) (int64, error) {
 	return count, err
 }
 
-// Exists 判断实体是否存在。
-func (r *MemoryRepository[T, ID]) Exists(ctx context.Context, id ID) (bool, error) {
+// Exists 判断实体是否存在且满足规约。
+func (r *MemoryRepository[T, ID]) Exists(ctx context.Context, id ID, s spec.Spec) (bool, error) {
 	if err := validateContext(ctx); err != nil {
 		return false, err
 	}
@@ -95,7 +114,17 @@ func (r *MemoryRepository[T, ID]) Exists(ctx context.Context, id ID) (bool, erro
 	var exists bool
 	err = r.withReadState(ctx, func(state *memoryState[T, ID]) error {
 		entity, ok := state.entities[id]
-		exists = ok && (!isolated || visibleInIsolation[T, ID](entity, isolationID))
+		if !ok {
+			return nil
+		}
+		if isolated && !visibleInIsolation[T, ID](entity, isolationID) {
+			return nil
+		}
+		ok, matchErr := r.visibleEntity(s, entity)
+		if matchErr != nil {
+			return matchErr
+		}
+		exists = ok
 		return nil
 	})
 	return exists, err

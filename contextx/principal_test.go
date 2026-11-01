@@ -8,9 +8,9 @@ import (
 )
 
 func TestUserIDContextKey(t *testing.T) {
-	ctx, err := WithUserID(context.Background(), 42)
+	ctx, err := WithUserID(context.Background(), " 42 ")
 	require.NoError(t, err)
-	require.Equal(t, int64(42), UserID(ctx))
+	require.Equal(t, "42", UserID(ctx))
 }
 
 func TestSessionVisibility(t *testing.T) {
