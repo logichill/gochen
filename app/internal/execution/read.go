@@ -3,11 +3,11 @@ package execution
 import (
 	"context"
 
-	"gochen/app/internal/depcheck"
 	"gochen/app/query"
 	"gochen/auth"
 	"gochen/domain/spec"
 	"gochen/errors"
+	"gochen/internal/depcheck"
 )
 
 // Get 读取单个实体。授权请求携带目标 ID，仓储按规约过滤。

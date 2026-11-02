@@ -51,8 +51,8 @@ type FieldChange struct {
 //
 // 设计要点：
 //   - 仅在 CRUD 仓储基础上约束实体类型为 IAuditedEntity，确保实体具备审计/软删能力；
-//   - 审计记录的写入应在仓储实现或服务层通过 IAuditStore 之类的装饰器完成，
-//     避免在抽象接口上堆砌过多特定方法；
+//   - Application 通过独立 IAuditStore 协调业务与审计写入，使用同一事务；
+//   - 查询、恢复等可选能力由仓储本体提供，组合根显式装配；
 //   - 软删/恢复等操作可以由服务层基于 IEntity + domain.ISoftDeletable 组合实现。
 type IAuditedRepository[T IAuditedEntity[ID], ID comparable] interface {
 	crud.IRepository[T, ID]

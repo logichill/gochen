@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"time"
 
-	"gochen/app/internal/depcheck"
 	"gochen/errors"
 	"gochen/eventing"
 	"gochen/eventing/bus"
+	"gochen/internal/depcheck"
 	"gochen/messaging"
 	"gochen/observe/logging"
 	"gochen/policy/retry"

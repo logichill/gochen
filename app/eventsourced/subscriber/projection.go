@@ -5,10 +5,10 @@ import (
 	"sync"
 	"time"
 
-	"gochen/app/internal/depcheck"
 	"gochen/errors"
 	"gochen/eventing"
 	"gochen/eventing/projection"
+	"gochen/internal/depcheck"
 	"gochen/observe/logging"
 )
 

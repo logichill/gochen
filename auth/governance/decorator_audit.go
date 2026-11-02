@@ -102,3 +102,5 @@ func (a *auditAuthorizer) saveAuditEntrySafely(ctx context.Context, entry AuthzL
 }
 
 func (a *auditAuthorizer) Vocabulary() auth.Vocabulary { return a.inner.Vocabulary().Copy() }
+
+func (a *auditAuthorizer) UsesAllowAuthorizer() bool { return auth.IsAllow(a.inner) }

@@ -7,7 +7,6 @@ import (
 	"reflect"
 	"strings"
 
-	"gochen/app/internal/depcheck"
 	"gochen/app/operation"
 	"gochen/auth"
 	"gochen/contextx"
@@ -15,6 +14,7 @@ import (
 	domcrud "gochen/domain/crud"
 	"gochen/domain/meta"
 	"gochen/errors"
+	"gochen/internal/depcheck"
 )
 
 // Transfer 在两阶段授权后原子迁移维度并写入两侧审计记录。

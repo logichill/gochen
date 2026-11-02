@@ -1,8 +1,8 @@
 package aggregatecheck
 
 import (
-	"gochen/app/internal/depcheck"
 	"gochen/errors"
+	"gochen/internal/depcheck"
 )
 
 func validateNotNilAggregate(value any, label, aggregateType string) error {

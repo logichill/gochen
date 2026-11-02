@@ -18,6 +18,7 @@ const (
 
 type principalKey uint8
 type correlationKey uint8
+type tenantBindingKey struct{}
 
 const (
 	keyTenantID principalKey = iota + 1
@@ -42,7 +43,12 @@ func WithTenantID(ctx context.Context, tenantID string) (context.Context, error)
 	if err != nil {
 		return nil, err
 	}
-	return context.WithValue(ctx, keyTenantID, strings.TrimSpace(tenantID)), nil
+	tenantID = strings.TrimSpace(tenantID)
+	if TenantID(ctx) != tenantID {
+		// 使用非零大小的独立标记，租户回切时也会建立新的绑定。
+		ctx = context.WithValue(ctx, tenantBindingKey{}, new(uint8))
+	}
+	return context.WithValue(ctx, keyTenantID, tenantID), nil
 }
 
 // TenantID 从上下文中提取租户标识，若未设置或上下文为空则返回空字符串。
@@ -52,6 +58,15 @@ func TenantID(ctx context.Context) string {
 	}
 	value, _ := ctx.Value(keyTenantID).(string)
 	return strings.TrimSpace(value)
+}
+
+// HasSameTenantBinding 判断两个上下文是否沿用同一次租户绑定。
+// 租户切换后再切回会产生新绑定；空上下文返回 false。
+func HasSameTenantBinding(ctx, bound context.Context) bool {
+	if ctx == nil || bound == nil {
+		return false
+	}
+	return ctx.Value(tenantBindingKey{}) == bound.Value(tenantBindingKey{})
 }
 
 // WithOperator 将操作者标识写入上下文。

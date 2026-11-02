@@ -1,8 +1,8 @@
 package eventstore
 
 import (
-	"gochen/app/internal/depcheck"
 	"gochen/errors"
+	"gochen/internal/depcheck"
 )
 
 // PublishMode 指定事件持久化后的发布责任。零值无效，调用方必须显式选择。

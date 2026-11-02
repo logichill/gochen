@@ -47,10 +47,10 @@ type ISettableID[T comparable] interface {
 // ISettableVersion 可选的版本回写接口。
 //
 // 说明：
-//   - 实现该接口表明实体把乐观锁版本作为可管理的持久化字段（而非恒为 0 的占位值），
-//     仓储据此启用版本条件更新与版本推进；
-//   - 嵌入 `domain/crud.Entity` 的实体默认获得本能力；仅以方法实现 `GetVersion()`
-//     返回常量的自定义实体不具备本能力，仓储会跳过版本保护。
+//   - 实现该接口表明实体的乐观锁版本可由仓储回写；
+//   - 嵌入 `domain/crud.Entity` 的实体默认获得本能力；
+//   - Runtime ORM 仓储默认要求该能力及版本列，普通实体可显式声明 WithoutVersioning。
+//     审计实体持续要求版本保护，具体构造规则由仓储实现声明。
 type ISettableVersion interface {
 	// SetVersion 设置实体的乐观锁版本号。
 	SetVersion(version uint64)

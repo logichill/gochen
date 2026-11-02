@@ -5,18 +5,19 @@ import (
 	"gochen/clock"
 	"gochen/errors"
 	"gochen/gen"
+	"gochen/internal/depcheck"
 )
 
 // Wrap 以治理外壳装饰 Authorizer。
 //
 // 固化调用链（外 → 内）：Metrics(Log(Snapshot(base)))。
-//   - Snapshot 最内层：先固定策略版本，后续留痕与指标才有一致的版本口径；
-//   - Log 居中：记录的是已带快照版本的最终决策；
+//   - Snapshot 最内层：先解析版本，再执行 base；实际策略版本由 base 负责绑定；
+//   - Log 居中：记录最终决策与解析器提供的版本；
 //   - Metrics 最外层：统计包含全部治理开销的真实延迟。
 //
 // 包装顺序由本函数固化，业务层不得自行拼接（§4.3）。
 func Wrap(base auth.IAuthorizer, opts ...Option) (auth.IAuthorizer, error) {
-	if base == nil {
+	if depcheck.IsNil(base) {
 		return nil, errors.NewCode(errors.InvalidInput, "base authorizer cannot be nil")
 	}
 	cfg := &config{clock: clock.NewRealClock(), idGenerator: gen.NewUUIDGenerator()}
@@ -25,15 +26,24 @@ func Wrap(base auth.IAuthorizer, opts ...Option) (auth.IAuthorizer, error) {
 			opt(cfg)
 		}
 	}
-	if cfg.clock == nil {
+	if depcheck.IsNil(cfg.clock) {
 		return nil, errors.NewCode(errors.InvalidInput, "governance clock cannot be nil")
 	}
-	if cfg.idGenerator == nil {
+	if depcheck.IsNil(cfg.idGenerator) {
 		return nil, errors.NewCode(errors.InvalidInput, "governance ID generator cannot be nil")
 	}
 	if cfg.snapshot == nil && cfg.auditStore == nil && cfg.metrics == nil {
 		return nil, errors.NewCode(errors.InvalidInput,
 			"governance requires at least one of snapshot, audit, or metrics")
+	}
+	if cfg.snapshot != nil && depcheck.IsNil(cfg.snapshot) {
+		return nil, errors.NewCode(errors.InvalidInput, "governance snapshot cannot be typed nil")
+	}
+	if cfg.auditStore != nil && depcheck.IsNil(cfg.auditStore) {
+		return nil, errors.NewCode(errors.InvalidInput, "governance audit store cannot be typed nil")
+	}
+	if cfg.metrics != nil && depcheck.IsNil(cfg.metrics) {
+		return nil, errors.NewCode(errors.InvalidInput, "governance metrics cannot be typed nil")
 	}
 
 	authorizer := base

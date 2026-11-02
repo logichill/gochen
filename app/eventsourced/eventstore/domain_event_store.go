@@ -3,7 +3,6 @@ package eventstore
 import (
 	"strings"
 
-	"gochen/app/internal/depcheck"
 	"gochen/domain/eventsourced"
 	"gochen/errors"
 	"gochen/eventing/bus"
@@ -11,6 +10,7 @@ import (
 	"gochen/eventing/registry"
 	"gochen/eventing/upcast"
 	"gochen/gen"
+	"gochen/internal/depcheck"
 	"gochen/observe/logging"
 )
 

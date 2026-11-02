@@ -4,10 +4,10 @@ import (
 	"context"
 
 	"gochen/app/eventsourced/internal/aggregatecheck"
-	"gochen/app/internal/depcheck"
 	"gochen/contextx"
 	deventsourced "gochen/domain/eventsourced"
 	"gochen/errors"
+	"gochen/internal/depcheck"
 )
 
 // atomicEventSourcedRepository 为已校验的原子领域存储提供多聚合保存。

@@ -4,12 +4,12 @@ import (
 	"context"
 	"fmt"
 
-	"gochen/app/internal/depcheck"
 	"gochen/contextx"
 	"gochen/domain"
 	"gochen/errors"
 	"gochen/eventing"
 	"gochen/eventing/store"
+	"gochen/internal/depcheck"
 )
 
 // AppendEvents 按构造时选定的发布模式追加领域事件。

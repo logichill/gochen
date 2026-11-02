@@ -4,10 +4,10 @@ import (
 	"context"
 	"slices"
 
-	"gochen/app/internal/depcheck"
 	"gochen/errors"
 	"gochen/eventing/bus"
 	"gochen/eventing/projection"
+	"gochen/internal/depcheck"
 	"gochen/messaging"
 )
 

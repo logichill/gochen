@@ -14,6 +14,14 @@ Core 通过 auth.IAuthorizer、类型化条件与 Application 编排授权；Run
 
 auth 根包提供统一的 Request、Decision、Vocabulary。普通用例在入口授权一次；Transfer 依转出和接收动作授权两次。每次授权结果通过 Spec 显式传给仓储。
 
+## 身份与权限资料
+
+根 `auth.Principal` 统一提供 SubjectID、TenantID、ScopeID 和 System。Runtime 可信 `host/authz.WithPrincipal` 同时建立根身份与附属权限资料；TenantID 取当前 `contextx.TenantID`，HomeTenantID/HomeScopeID 保存用户归属。Roles、Permissions、PermissionScopes 和 ActiveBindingID 绑定到建立资料时的主体、当前租户与当前范围。
+
+Runtime checker 与默认 ScopeResolver 读取同一个根身份。Core `AsSystem` 派生的系统标记对 RBAC、Scoped 和 Runtime checker 一致生效；SystemInfo 保存发起人与原因。重新绑定身份会清除旧 SystemInfo。主体、租户或当前范围变化后，旧权限资料失效，可信认证入口应重新建立权限。`contextx.UserID` 用于追踪，授权入口要求 Principal。
+
+主体与当前租户绑定使用派生链中的独立标记。身份或租户 A → B → A 会持续拒绝旧权限资料，Runtime 可信入口重新认证后建立新资料。同一身份重绑定和 `AsSystem` 保留绑定，原上下文保持有效；绑定标记仅用于进程内校验。
+
 ## 实体与有效契约
 
 实体以 `entity:"id"` 标记标识，以 `dim:"department"` 等开放名称标记维度，以 `managed:"true"` 标记托管字段。维度支持标量或一层标量指针。字段和维度别名解析为相同字段身份。
@@ -43,6 +51,8 @@ Vocabulary.Refs 声明授权条件引用，Vocabulary.Assignable 声明授权器
 零行写入在原授权和隔离范围内重读：不可见返回 NotFound，版本不同返回 Concurrency，保护值不同返回 Forbidden，其余返回存储错误。失败分类可能观察后续并发，调用方重试前重新读取和授权。
 
 Restore、Purge、ListDeleted 使用专用动作和端口，保持隔离和授权。批量普通命令一次授权、一个事务，任一失败整批回滚。
+
+更新时业务快照独立承担无变化判断；审计关闭时跳过审计快照与审计 diff。业务快照、保护维度、校验、版本、钩子与事务继续执行；审计开启时保留完整审计快照及序列化失败回滚。
 
 ## 两阶段迁移
 
@@ -83,6 +93,10 @@ scoped.DataScope 包含 Kind、ScopeIDs 和 TenantID，Filtered 对正数范围�
 跨隔离读取同时要求 WithCrossIsolationReads(audit) 与请求 contextx.WithCrossIsolation 的 Reason/Operator 凭据。留痕失败阻断读取，授权 Spec 持续合入查询，写操作保持 Forbidden。项目可以使用独立审计资源记录表级跨隔离读取，保存原资源、表和原因。
 
 auth/governance.Wrap 按 Metrics(Log(Snapshot(base))) 包装根 auth.IAuthorizer。快照默认失败即拒绝；审计默认尽力，WithStrictAudit 改为阻断；指标失败保持业务判定。治理事实通过根 Decision 传递。
+
+WithSnapshot 在底层判定前解析快照，成功后把解析器版本写入 Decision.SnapshotVersion，并随审计记录诊断。通用包装器尚未强制 checker/resolver 使用该版本；实际评估绑定由策略接入方建立。共享 TTL 缓存控制回源频率，同一 ctx 跨过 TTL 后可读到新版本。请求/事务内版本固定以及权限撤销新鲜度需要独立契约；ConsistencyMode 当前仅为留痕声明。
+
+内置 Allow 的启动清单标记通过治理包装传播；All 仅在全部子策略均使用 Allow 时保留该标记。Host 可据此检查放行资源，实际判定继续由 Authorize 执行。
 
 ## 验证
 

@@ -96,7 +96,7 @@ func TestStoreBackedSnapshotCachesWithinTTL(t *testing.T) {
 	require.Equal(t, "v1", got.Version)
 	require.Equal(t, 1, store.loadCount())
 
-	// 存储侧版本已更新，但 TTL 内仍返回旧版本（快照作用范围保证）。
+	// 存储侧版本已更新，但 TTL 内仍返回旧版本（共享缓存复用）。
 	store.snap = current
 	got, err = snap.ResolveSnapshot(context.Background())
 	require.NoError(t, err)

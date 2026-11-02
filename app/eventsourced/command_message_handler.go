@@ -4,9 +4,9 @@ import (
 	"context"
 	"strings"
 
-	"gochen/app/internal/depcheck"
 	deventsourced "gochen/domain/eventsourced"
 	"gochen/errors"
+	"gochen/internal/depcheck"
 	"gochen/messaging"
 	"gochen/messaging/command"
 )

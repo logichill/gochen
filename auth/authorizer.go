@@ -13,6 +13,7 @@ import (
 	"gochen/domain/meta"
 	"gochen/domain/spec"
 	"gochen/errors"
+	"gochen/internal/depcheck"
 )
 
 // IAuthorizer 是唯一的授权端口：Application 在每个用例入口调用一次
@@ -142,11 +143,17 @@ type allowAuthorizer struct{}
 // Allow 返回一律放行的授权器，规约为 spec.All()。
 func Allow() IAuthorizer { return allowAuthorizer{} }
 
-// IsAllow 报告授权器是否为 Allow() 返回的一律放行实现。
+// IsAllow 报告授权器是否使用内置 Allow 策略，治理包装保留该标记。
+// 该标记用于启动期清单；实际授权仍由 Authorize 决定。
 func IsAllow(a IAuthorizer) bool {
-	_, ok := a.(allowAuthorizer)
-	return ok
+	if depcheck.IsNil(a) {
+		return false
+	}
+	provider, ok := a.(interface{ UsesAllowAuthorizer() bool })
+	return ok && provider.UsesAllowAuthorizer()
 }
+
+func (allowAuthorizer) UsesAllowAuthorizer() bool { return true }
 
 func (allowAuthorizer) Authorize(context.Context, Request) (Decision, error) {
 	return Decision{Allowed: true, Spec: spec.All()}, nil
@@ -167,7 +174,7 @@ func All(authorizers ...IAuthorizer) (IAuthorizer, error) {
 	}
 	out := &allAuthorizer{authorizers: append([]IAuthorizer(nil), authorizers...)}
 	for _, a := range out.authorizers {
-		if a == nil {
+		if depcheck.IsNil(a) {
 			return nil, errors.NewCode(errors.InvalidInput, "auth.All authorizer cannot be nil")
 		}
 		out.vocabulary = mergeVocabulary(out.vocabulary, a.Vocabulary())
@@ -216,6 +223,15 @@ func (a *allAuthorizer) Authorize(ctx context.Context, req Request) (Decision, e
 }
 
 func (a *allAuthorizer) Vocabulary() Vocabulary { return a.vocabulary.Copy() }
+
+func (a *allAuthorizer) UsesAllowAuthorizer() bool {
+	for _, inner := range a.authorizers {
+		if !IsAllow(inner) {
+			return false
+		}
+	}
+	return true
+}
 
 func mergeVocabulary(a, b Vocabulary) Vocabulary {
 	a.Refs = appendUniqueRefs(a.Refs, b.Refs...)

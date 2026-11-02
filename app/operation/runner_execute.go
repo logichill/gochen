@@ -4,9 +4,9 @@ import (
 	"context"
 	"strings"
 
-	"gochen/app/internal/depcheck"
 	"gochen/contextx"
 	"gochen/errors"
+	"gochen/internal/depcheck"
 )
 
 // Execute 统一包装写入口的 operation envelope。

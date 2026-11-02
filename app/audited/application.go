@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	appcrud "gochen/app/crud"
-	"gochen/app/internal/depcheck"
 	"gochen/app/internal/execution"
 	"gochen/app/query"
 	"gochen/auth"
@@ -17,6 +16,7 @@ import (
 	domcrud "gochen/domain/crud"
 	"gochen/domain/spec"
 	"gochen/errors"
+	"gochen/internal/depcheck"
 )
 
 // Repository 是 audited 应用要求的仓储组合。

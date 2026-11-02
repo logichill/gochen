@@ -3,11 +3,11 @@ package eventstore
 import (
 	"context"
 
-	"gochen/app/internal/depcheck"
 	deventsourced "gochen/domain/eventsourced"
 	"gochen/errors"
 	"gochen/eventing"
 	"gochen/eventing/store"
+	"gochen/internal/depcheck"
 	"gochen/observe/logging"
 )
 

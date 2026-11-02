@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"gochen/contextx"
 	"gochen/errors"
 )
 
@@ -22,9 +23,10 @@ type SystemInfo struct {
 }
 
 type principalKey struct{}
+type principalBindingKey struct{}
 type systemKey struct{}
 
-// WithPrincipal 把主体写入 ctx。
+// WithPrincipal 把主体写入 ctx，并清除前一次身份的系统执行记录。
 func WithPrincipal(ctx context.Context, principal Principal) (context.Context, error) {
 	if ctx == nil {
 		return nil, errors.NewCode(errors.InvalidInput, "context cannot be nil")
@@ -34,7 +36,15 @@ func WithPrincipal(ctx context.Context, principal Principal) (context.Context, e
 	if principal.SubjectID == "" && !principal.System {
 		return nil, errors.NewCode(errors.Unauthorized, "principal subject is required")
 	}
-	return context.WithValue(ctx, principalKey{}, principal), nil
+	current, ok := PrincipalFromContext(ctx)
+	if !ok || ctx.Value(principalBindingKey{}) == nil || current.SubjectID != principal.SubjectID ||
+		current.TenantID != principal.TenantID || current.ScopeID != principal.ScopeID {
+		// 标记属于当前派生链；身份回切也会建立新绑定，原 context 保持不变。
+		ctx = context.WithValue(ctx, principalBindingKey{}, new(uint8))
+	}
+	ctx = context.WithValue(ctx, principalKey{}, principal)
+	// 用非 SystemInfo 值遮蔽父 context 的旧执行记录。
+	return context.WithValue(ctx, systemKey{}, struct{}{}), nil
 }
 
 // PrincipalFromContext 读取 ctx 中的主体。
@@ -44,6 +54,18 @@ func PrincipalFromContext(ctx context.Context) (Principal, bool) {
 	}
 	principal, ok := ctx.Value(principalKey{}).(Principal)
 	return principal, ok
+}
+
+// HasSamePrincipalBinding 判断两个上下文是否沿用同一次主体与当前租户绑定。
+// 主体、租户或范围回切会产生新绑定；AsSystem 保留现有绑定。
+// 缺少主体绑定或上下文为空时返回 false。
+func HasSamePrincipalBinding(ctx, bound context.Context) bool {
+	if ctx == nil || bound == nil {
+		return false
+	}
+	binding := ctx.Value(principalBindingKey{})
+	return binding != nil && binding == bound.Value(principalBindingKey{}) &&
+		contextx.HasSameTenantBinding(ctx, bound)
 }
 
 // RequirePrincipal 读取 ctx 中的主体，缺失时返回 Unauthorized。

@@ -3,10 +3,10 @@ package eventstore
 import (
 	"context"
 
-	"gochen/app/internal/depcheck"
 	deventsourced "gochen/domain/eventsourced"
 	"gochen/errors"
 	"gochen/eventing/store"
+	"gochen/internal/depcheck"
 )
 
 // atomicDomainEventStore 仅对纯持久化且支持原子追加的存储暴露批量能力。

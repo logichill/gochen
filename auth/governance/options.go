@@ -21,7 +21,8 @@ type config struct {
 	lenientSnapshot bool
 }
 
-// WithSnapshot 启用策略快照一致性。
+// WithSnapshot 启用策略快照解析及版本留痕。
+// 解析版本写入 Decision.SnapshotVersion；实际评估对该版本的绑定由策略实现负责。
 //
 // 失败策略：默认 **fail-closed**——快照获取失败直接拒绝请求。
 // 可用 WithLenientSnapshot 覆盖为宽松模式。
@@ -51,7 +52,7 @@ func WithStrictAudit() Option {
 
 // WithLenientSnapshot 把快照解析失败改为不阻塞授权。
 //
-// 谨慎使用：这会让判定退回到无快照保证的实时评估。
+// 解析失败时继续执行底层策略，此次决策缺少解析器提供的版本。
 func WithLenientSnapshot() Option {
 	return func(c *config) { c.lenientSnapshot = true }
 }

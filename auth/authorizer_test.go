@@ -92,6 +92,27 @@ func TestAllRequiresAuthorizer(t *testing.T) {
 	if _, err := auth.All(nil); err == nil {
 		t.Fatal("expected error for nil authorizer")
 	}
+	var authorizer *stubAuthorizer
+	if _, err := auth.All(authorizer); err == nil {
+		t.Fatal("expected error for typed nil authorizer")
+	}
+}
+
+func TestAllAllowIdentification(t *testing.T) {
+	combined, err := auth.All(auth.Allow(), auth.Allow())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !auth.IsAllow(combined) {
+		t.Fatal("All of built-in Allow policies must retain the startup marker")
+	}
+	mixed, err := auth.All(auth.Allow(), stubAuthorizer{decision: auth.Decision{Allowed: false}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if auth.IsAllow(mixed) {
+		t.Fatal("All with a restricting policy must not be classified as Allow")
+	}
 }
 
 func TestDescriptor(t *testing.T) {

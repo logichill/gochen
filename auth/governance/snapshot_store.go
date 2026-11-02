@@ -41,8 +41,8 @@ type snapshotResultDiagnostics interface {
 
 // storeBackedSnapshot 从存储读取策略快照，并在 TTL 内复用同一版本。
 //
-// 复用是为了保证"快照作用范围"：同一请求/事务内的多次判定必须基于同一策略版本，
-// 否则判定依据会在中途漂移。
+// TTL 控制共享缓存的回源频率；同一 ctx 跨过 TTL 后也会重新加载。
+// 请求/事务内的版本固定和实际评估绑定由接入方建立。
 type storeBackedSnapshot struct {
 	store IPolicySnapshotStore
 	key   string

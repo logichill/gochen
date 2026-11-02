@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"gochen/auth"
+	"gochen/auth/action"
 	"gochen/domain/spec"
 
 	"gochen/auth/governance"
@@ -110,6 +111,50 @@ func TestSnapshotVersionPropagatesToDecision(t *testing.T) {
 	decision, err := wrapped.Authorize(context.Background(), auth.Request{Resource: "order", Action: "read", Permission: "order:api:read", IDs: []string{"1"}})
 	require.NoError(t, err)
 	require.Equal(t, "v42", decision.SnapshotVersion)
+}
+
+func TestSnapshotLabelDoesNotBindPolicyEvaluationOrRequest(t *testing.T) {
+	ctx := context.Background()
+	clock := &manualClock{now: time.Unix(0, 0)}
+	snapshotStore := &gatedSnapshotStore{snap: &governance.PolicySnapshot{Key: "k", Version: "v1"}}
+	snapshot, err := governance.NewStoreBackedSnapshot(snapshotStore, "k", time.Minute,
+		governance.WithSnapshotClock(clock))
+	require.NoError(t, err)
+	granted := true
+	base, err := action.RBAC(action.ActionCheckerFunc(func(context.Context, string) error {
+		if !granted {
+			return errors.NewCode(errors.Forbidden, "permission revoked")
+		}
+		return nil
+	}))
+	require.NoError(t, err)
+	audit := &recordingAudit{}
+	wrapped, err := governance.Wrap(base, governance.WithSnapshot(snapshot), governance.WithAudit(audit))
+	require.NoError(t, err)
+	request := auth.Request{Resource: "order", Action: "read", Permission: "order:api:read"}
+	decision, err := wrapped.Authorize(ctx, request)
+	require.NoError(t, err)
+	require.True(t, decision.Allowed)
+	require.Equal(t, "v1", decision.SnapshotVersion)
+
+	// 权限变更立刻影响 checker；版本标签仍来自 TTL 缓存。
+	granted = false
+	snapshotStore.snap = &governance.PolicySnapshot{Key: "k", Version: "v2"}
+	decision, err = wrapped.Authorize(ctx, request)
+	require.NoError(t, err)
+	require.False(t, decision.Allowed)
+	require.Equal(t, "v1", decision.SnapshotVersion)
+	require.Equal(t, "v1", audit.entries[1].SnapshotVersion)
+	require.Equal(t, "deny", audit.entries[1].Effect)
+
+	// 同一 ctx 跨过 TTL 后获得新标签，通用包装器没有请求级冻结。
+	clock.advance(time.Minute)
+	decision, err = wrapped.Authorize(ctx, request)
+	require.NoError(t, err)
+	require.False(t, decision.Allowed)
+	require.Equal(t, "v2", decision.SnapshotVersion)
+	require.Equal(t, "v2", audit.entries[2].SnapshotVersion)
+	require.Equal(t, 2, snapshotStore.loadCount())
 }
 
 // --- 审计：默认 fail-open，可切严格 ---
@@ -251,6 +296,61 @@ func TestGovernanceChainOrderSnapshotInsideAudit(t *testing.T) {
 // Require 入口同样经过治理链（不能只有 Authorize 被治理）。
 
 func (s stubAuthorizer) Vocabulary() auth.Vocabulary { return auth.Vocabulary{} }
+
+func TestGovernancePreservesAllowPolicyIdentification(t *testing.T) {
+	metrics := governance.AuthzMetricsFunc(func(context.Context, string, string, time.Duration) {})
+	for _, tc := range []struct {
+		name string
+		base auth.IAuthorizer
+		want bool
+	}{
+		{name: "allow", base: auth.Allow(), want: true},
+		{name: "custom policy", base: allowBase(), want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			wrapped, err := governance.Wrap(tc.base,
+				governance.WithSnapshot(governance.PolicySnapshotFunc(func(context.Context) (governance.PolicySnapshot, error) {
+					return governance.PolicySnapshot{Key: "policy", Version: "v1"}, nil
+				})),
+				governance.WithAudit(&recordingAudit{}),
+				governance.WithMetrics(metrics),
+			)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, auth.IsAllow(wrapped))
+			nested, err := governance.Wrap(wrapped, governance.WithMetrics(metrics))
+			require.NoError(t, err)
+			require.Equal(t, tc.want, auth.IsAllow(nested))
+			decision, err := nested.Authorize(context.Background(), auth.Request{Permission: "order:api:read"})
+			require.NoError(t, err)
+			require.True(t, decision.Allowed)
+		})
+	}
+}
+
+func TestGovernanceRejectsTypedNilDependencies(t *testing.T) {
+	var base *stubAuthorizer
+	var snapshot governance.PolicySnapshotFunc
+	var audit *recordingAudit
+	var metrics governance.AuthzMetricsFunc
+	var c *manualClock
+	validMetrics := governance.WithMetrics(governance.AuthzMetricsFunc(func(context.Context, string, string, time.Duration) {}))
+	for _, tc := range []struct {
+		name string
+		base auth.IAuthorizer
+		opts []governance.Option
+	}{
+		{name: "base", base: base, opts: []governance.Option{validMetrics}},
+		{name: "snapshot", base: auth.Allow(), opts: []governance.Option{governance.WithSnapshot(snapshot)}},
+		{name: "audit", base: auth.Allow(), opts: []governance.Option{governance.WithAudit(audit)}},
+		{name: "metrics", base: auth.Allow(), opts: []governance.Option{governance.WithMetrics(metrics)}},
+		{name: "clock", base: auth.Allow(), opts: []governance.Option{validMetrics, governance.WithClock(c)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := governance.Wrap(tc.base, tc.opts...)
+			require.True(t, errors.Is(err, errors.InvalidInput))
+		})
+	}
+}
 func TestGovernanceLogsRequestWithoutObjectState(t *testing.T) {
 	store := &recordingAudit{}
 	wrapped, err := governance.Wrap(allowBase(), governance.WithAudit(store))

@@ -4,9 +4,9 @@ import (
 	"strings"
 
 	"gochen/app/eventsourced/internal/aggregatecheck"
-	"gochen/app/internal/depcheck"
 	deventsourced "gochen/domain/eventsourced"
 	"gochen/errors"
+	"gochen/internal/depcheck"
 )
 
 // RepositoryOptions 定义事件溯源仓储装配选项。

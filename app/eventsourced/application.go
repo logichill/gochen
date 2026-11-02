@@ -6,7 +6,6 @@ import (
 
 	"gochen/app"
 	"gochen/app/eventsourced/eventstore"
-	"gochen/app/internal/depcheck"
 	"gochen/app/internal/execution"
 	"gochen/auth"
 	"gochen/contextx"
@@ -14,6 +13,7 @@ import (
 	deventsourced "gochen/domain/eventsourced"
 	"gochen/domain/meta"
 	"gochen/errors"
+	"gochen/internal/depcheck"
 	"gochen/validate"
 )
 

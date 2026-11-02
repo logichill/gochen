@@ -7,6 +7,7 @@ import (
 	"gochen/domain/meta"
 	"gochen/domain/spec"
 	"gochen/errors"
+	"gochen/internal/depcheck"
 )
 
 // ISpecResolver 是数据权限的扩展点：根据请求产出规约与服务端赋值。
@@ -33,10 +34,10 @@ type FullAuthorizer struct {
 
 // New 创建完整授权器。
 func New(checker action.IActionChecker, resolver ISpecResolver) (*FullAuthorizer, error) {
-	if checker == nil {
+	if depcheck.IsNil(checker) {
 		return nil, errors.NewCode(errors.InvalidInput, "action checker cannot be nil")
 	}
-	if resolver == nil {
+	if depcheck.IsNil(resolver) {
 		return nil, errors.NewCode(errors.InvalidInput, "spec resolver cannot be nil")
 	}
 	return &FullAuthorizer{

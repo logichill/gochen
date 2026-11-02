@@ -7,7 +7,7 @@ import (
 	"gochen/errors"
 )
 
-// --- Snapshot 层：固定策略版本 ---
+// --- Snapshot 层：解析并记录策略版本 ---
 
 type snapshotAuthorizer struct {
 	inner auth.IAuthorizer
@@ -18,7 +18,7 @@ func (a *snapshotAuthorizer) Authorize(ctx context.Context, req auth.Request) (a
 	snapshot, err := a.cfg.snapshot.ResolveSnapshot(ctx)
 	if err != nil {
 		if !a.cfg.lenientSnapshot {
-			// Fail-Closed：拿不到策略快照说明无法保证判定依据的一致性。
+			// 默认要求快照解析成功，失败时阻断底层判定。
 			return auth.Decision{Reason: "snapshot_unavailable"}, errors.Wrap(err, errors.Forbidden,
 				"policy snapshot is unavailable; denying request")
 		}
@@ -40,3 +40,5 @@ func (a *snapshotAuthorizer) Authorize(ctx context.Context, req auth.Request) (a
 }
 
 func (a *snapshotAuthorizer) Vocabulary() auth.Vocabulary { return a.inner.Vocabulary().Copy() }
+
+func (a *snapshotAuthorizer) UsesAllowAuthorizer() bool { return auth.IsAllow(a.inner) }

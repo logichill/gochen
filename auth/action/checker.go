@@ -8,7 +8,8 @@ import (
 
 // IActionChecker 判断当前主体能否执行指定动作。
 //
-// 实现方负责从 ctx 解析主体（由 Transport 的 AuthN 中间件写入 contextx），
+// 实现方负责从 ctx 解析根 auth.Principal 及绑定到该身份的权限资料，
+// 由 Transport 的可信 AuthN 入口建立；contextx.UserID 用于通用追踪。
 // 本接口不传递主体参数，以保证 HTTP / CommandBus / Worker / CLI 全入口签名一致。
 //
 // 错误契约：

@@ -58,9 +58,9 @@ func recordSnapshotCapture(ctx context.Context, snapshot PolicySnapshot) {
 	}
 }
 
-// IPolicySnapshot 解析当前授权判定应使用的策略快照。
+// IPolicySnapshot 解析治理留痕使用的策略快照。
 //
-// 快照作用范围由创建者在请求/事务/批处理级别显式固定。
+// 策略实现负责消费相同版本；请求/事务/批处理内的固定范围由接入方建立。
 type IPolicySnapshot interface {
 	ResolveSnapshot(ctx context.Context) (PolicySnapshot, error)
 }

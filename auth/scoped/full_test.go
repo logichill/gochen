@@ -30,6 +30,18 @@ func TestNewRequiresDependencies(t *testing.T) {
 	if _, err := scoped.New(allowChecker{}, nil); err == nil {
 		t.Fatal("expected nil resolver error")
 	}
+	var checker *allowChecker
+	if _, err := scoped.New(checker, resolver); !errors.Is(err, errors.InvalidInput) {
+		t.Fatalf("New(typed nil checker) = %v", err)
+	}
+	var pointerResolver *scoped.SpecResolverFunc
+	if _, err := scoped.New(allowChecker{}, pointerResolver); !errors.Is(err, errors.InvalidInput) {
+		t.Fatalf("New(typed nil resolver) = %v", err)
+	}
+	var nilFunction scoped.SpecResolverFunc
+	if _, err := scoped.New(allowChecker{}, nilFunction); !errors.Is(err, errors.InvalidInput) {
+		t.Fatalf("New(nil resolver function) = %v", err)
+	}
 }
 
 func TestFullAuthorizer(t *testing.T) {

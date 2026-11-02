@@ -43,9 +43,9 @@ Gochen 通过接口和组合根组织领域建模、应用编排与基础设施�
 
 ## 授权与上下文
 
-身份认证在传输边界完成，tenant / operator / user / session / trace / request 通过 `contextx` 传播。Application 层是 HTTP、Worker、CLI 共同调用的授权边界，HTTP Action 中间件只负责提前拒绝。
+身份认证在传输边界完成，授权主体、当前范围与系统标记统一读取根 `auth.Principal`；Runtime 权限资料绑定到该身份及当前租户。tenant / operator / user / session / trace / request 通过 `contextx` 传播。Application 层是 HTTP、Worker、CLI 共同调用的授权边界，HTTP Action 中间件只负责提前拒绝。
 
-Application 通过 `auth.IAuthorizer` 在每个用例入口完成一次判定，返回的 `spec.Spec` 随仓储调用执行：仓储在最终写操作中原子合并隔离、规约与版本条件，写入前做 `WITH CHECK`。治理能力装饰 `scoped.IAuthorizer`，负责策略快照、决策审计与指标。具体契约见[分层授权](layered-authz.md)。
+Application 通过 `auth.IAuthorizer` 在每个用例入口完成一次判定，返回的 `spec.Spec` 随仓储调用执行：仓储在最终写操作中原子合并隔离、规约与版本条件，写入前做 `WITH CHECK`。治理能力装饰根 `auth.IAuthorizer`，负责策略版本留痕、决策审计与指标；实际评估绑定由策略接入方保证。具体契约见[分层授权](layered-authz.md)。
 
 ## 事件与消息链路
 
@@ -97,7 +97,7 @@ Application 通过 `auth.IAuthorizer` 在每个用例入口完成一次判定，
 
 ## 可选适配与提交结果
 
-事件溯源核心模板位于 `app/eventsourced`；默认存储/快照/历史适配位于 `app/eventsourced/eventstore`，订阅/投影辅助位于 `app/eventsourced/subscriber`。核心模板不反向依赖这些默认适配，组合根按需装配。
+事件溯源核心模板位于 `app/eventsourced`；默认存储/快照/历史适配位于 `app/eventsourced/eventstore`，订阅/投影辅助位于 `app/eventsourced/subscriber`。架构目标是由组合根按需装配；当前核心模板仍引用 eventstore 的历史查询接口与类型，依赖方向整改保留为独立批次（D04）。
 
 Operation SSE 位于 Runtime `http/operation`；监控端点策略及公开响应整形位于 Runtime `eventing/monitoring`。Core 监控包保留指标、健康与快照模型。方言接口和值类型仍在 Core `db/dialect`，标准方言与 SQL 词法实现分别位于 Runtime `db/dialect` 和 `db/sqlscan`。Outbox 表名与 SQL 映射由 Runtime SQL 仓储负责，Core DTO 不携带 GORM 标签。
 

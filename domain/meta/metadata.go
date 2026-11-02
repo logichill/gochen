@@ -42,7 +42,8 @@ func Describe[T any]() (*Metadata, error) {
 	return DescribeType(reflect.TypeOf(zero))
 }
 
-// DescribeValue 返回实体值对应的字段元数据。entity 必须是非空指针。
+// DescribeValue 返回实体类型的字段元数据。entity 必须携带指向结构体的指针类型；
+// 仅扫描类型，允许 typed nil 指针样本。
 func DescribeValue(entity any) (*Metadata, error) {
 	if entity == nil {
 		return nil, errors.NewCode(errors.InvalidInput, "entity cannot be nil")

@@ -31,6 +31,12 @@ func TenantID(ctx context.Context) string {
 	return field.TenantID(ctx)
 }
 
+// HasSameTenantBinding 判断两个上下文是否沿用同一次租户绑定。
+// 租户切换后再切回会产生新绑定；空上下文返回 false。
+func HasSameTenantBinding(ctx, bound context.Context) bool {
+	return field.HasSameTenantBinding(ctx, bound)
+}
+
 // WithOperator 返回携带 operator 的 context。
 func WithOperator(ctx context.Context, operator string) (context.Context, error) {
 	return field.WithOperator(ctx, operator)

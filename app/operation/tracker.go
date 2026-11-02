@@ -3,8 +3,8 @@ package operation
 import (
 	"context"
 
-	"gochen/app/internal/depcheck"
 	"gochen/errors"
+	"gochen/internal/depcheck"
 )
 
 // ISettlementChecker 只负责回答“该 tracked operation 是否已经对外收敛可见”。

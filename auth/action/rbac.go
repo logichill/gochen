@@ -6,6 +6,7 @@ import (
 	"gochen/auth"
 	"gochen/domain/spec"
 	"gochen/errors"
+	"gochen/internal/depcheck"
 )
 
 type rbacAuthorizer struct {
@@ -14,7 +15,7 @@ type rbacAuthorizer struct {
 
 // RBAC 返回只按权限码判定的授权器：规约为 spec.All()，无赋值与词汇。
 func RBAC(checker IActionChecker) (auth.IAuthorizer, error) {
-	if checker == nil {
+	if depcheck.IsNil(checker) {
 		return nil, errors.NewCode(errors.InvalidInput, "action checker cannot be nil")
 	}
 	return &rbacAuthorizer{checker: checker}, nil

@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 
-	"gochen/app/internal/depcheck"
 	"gochen/app/operation"
 	"gochen/auth"
 	domaudited "gochen/domain/audited"
 	"gochen/domain/spec"
 	"gochen/errors"
+	"gochen/internal/depcheck"
 )
 
 // Create 创建单个实体：授权 → 事务{ Before → 赋值 → 校验 → Create → After → 审计 } → PostCommit。
@@ -226,9 +226,12 @@ func (c *Core[T, ID]) updateLoaded(
 	if err != nil {
 		return entity, domaudited.AuditRecord{}, false, err
 	}
-	beforeSnapshot, err := c.snapshot(before)
-	if err != nil {
-		return entity, domaudited.AuditRecord{}, false, err
+	var beforeSnapshot json.RawMessage
+	if !depcheck.IsNil(c.audit) {
+		beforeSnapshot, err = c.snapshot(before)
+		if err != nil {
+			return entity, domaudited.AuditRecord{}, false, err
+		}
 	}
 	if fn != nil {
 		if err := fn(txCtx, entity); err != nil {
@@ -263,13 +266,16 @@ func (c *Core[T, ID]) updateLoaded(
 	if err := c.repo.Update(txCtx, entity, spec); err != nil {
 		return entity, domaudited.AuditRecord{}, false, err
 	}
-	afterSnapshot, err := c.snapshot(entity)
-	if err != nil {
-		return entity, domaudited.AuditRecord{}, false, err
-	}
-	changes, err := c.diffSnapshots(beforeSnapshot, afterSnapshot)
-	if err != nil {
-		return entity, domaudited.AuditRecord{}, false, err
+	var changes json.RawMessage
+	if !depcheck.IsNil(c.audit) {
+		afterSnapshot, err := c.snapshot(entity)
+		if err != nil {
+			return entity, domaudited.AuditRecord{}, false, err
+		}
+		changes, err = c.diffSnapshots(beforeSnapshot, afterSnapshot)
+		if err != nil {
+			return entity, domaudited.AuditRecord{}, false, err
+		}
 	}
 	if err := c.invokeAfter(txCtx, stage, entity); err != nil {
 		return entity, domaudited.AuditRecord{}, false, err

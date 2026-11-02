@@ -51,3 +51,21 @@ func TestAsSystem(t *testing.T) {
 		t.Fatal("AsSystem must not mutate the original principal")
 	}
 }
+
+func TestRebindingPrincipalClearsPreviousSystemInfo(t *testing.T) {
+	ctx, err := auth.WithPrincipal(context.Background(), auth.Principal{SubjectID: "alice"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	systemCtx := auth.AsSystem(ctx, "old execution")
+	rebound, err := auth.WithPrincipal(systemCtx, auth.Principal{SubjectID: "bob"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info, ok := auth.SystemInfoFromContext(rebound); ok {
+		t.Fatalf("old system metadata survived identity rebinding: %+v", info)
+	}
+	if info, ok := auth.SystemInfoFromContext(systemCtx); !ok || info.Initiator != "alice" {
+		t.Fatalf("original system context changed: %+v, %v", info, ok)
+	}
+}

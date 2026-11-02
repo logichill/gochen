@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 
-	"gochen/app/internal/depcheck"
 	"gochen/app/operation"
 	"gochen/auth"
 	"gochen/contextx"
@@ -15,6 +14,7 @@ import (
 	"gochen/domain/meta"
 	"gochen/domain/spec"
 	"gochen/errors"
+	"gochen/internal/depcheck"
 )
 
 // ExecOption 配置一次命令执行的审计元数据。

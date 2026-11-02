@@ -6,12 +6,12 @@ package crud
 import (
 	"strings"
 
-	"gochen/app/internal/depcheck"
 	"gochen/app/internal/execution"
 	"gochen/auth"
 	"gochen/domain"
 	domaudited "gochen/domain/audited"
 	"gochen/errors"
+	"gochen/internal/depcheck"
 )
 
 // Application 编排通用 CRUD 用例。

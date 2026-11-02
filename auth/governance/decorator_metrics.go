@@ -28,3 +28,5 @@ func (a *metricsAuthorizer) record(ctx context.Context, action string, decision 
 }
 
 func (a *metricsAuthorizer) Vocabulary() auth.Vocabulary { return a.inner.Vocabulary().Copy() }
+
+func (a *metricsAuthorizer) UsesAllowAuthorizer() bool { return auth.IsAllow(a.inner) }

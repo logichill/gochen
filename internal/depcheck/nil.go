@@ -1,4 +1,4 @@
-// Package depcheck 校验应用层接口依赖的动态值。
+// Package depcheck 校验构造入口接口依赖的动态值。
 package depcheck
 
 import "reflect"

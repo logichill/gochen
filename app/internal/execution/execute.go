@@ -3,12 +3,12 @@ package execution
 import (
 	"context"
 
-	"gochen/app/internal/depcheck"
 	"gochen/app/operation"
 	"gochen/auth"
 	"gochen/contextx"
 	domaudited "gochen/domain/audited"
 	"gochen/errors"
+	"gochen/internal/depcheck"
 )
 
 // Execute 修改已有实体：授权 → 事务{ Get → 快照 → fn → Before → 校验 → 无变更跳过 → Update → After → 审计 } → PostCommit。

@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"gochen/app"
-	"gochen/app/internal/depcheck"
 	"gochen/app/query"
 	"gochen/auth"
 	"gochen/contextx"
@@ -25,6 +24,7 @@ import (
 	domcrud "gochen/domain/crud"
 	"gochen/domain/meta"
 	"gochen/errors"
+	"gochen/internal/depcheck"
 	"gochen/validate"
 )
 

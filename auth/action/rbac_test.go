@@ -70,4 +70,12 @@ func TestRBACRequiresChecker(t *testing.T) {
 	if _, err := action.RBAC(nil); err == nil {
 		t.Fatal("expected nil checker error")
 	}
+	var checker *fakeChecker
+	if _, err := action.RBAC(checker); !errors.Is(err, errors.InvalidInput) {
+		t.Fatalf("RBAC(typed nil) = %v, want InvalidInput", err)
+	}
+	var function action.ActionCheckerFunc
+	if _, err := action.RBAC(function); !errors.Is(err, errors.InvalidInput) {
+		t.Fatalf("RBAC(nil function) = %v, want InvalidInput", err)
+	}
 }
