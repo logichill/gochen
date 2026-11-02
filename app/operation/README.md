@@ -58,6 +58,7 @@ HTTP handler 可组合 `gochen-runtime/http/operation` 的 `PrepareStreamHeaders
 ## 应用层接入
 
 - 普通 CRUD 或自定义写入口直接使用 `Runner.Execute(ctx, spec, handler)` 包装。
+- 外部归属迁移使用 `Runner.ExecuteTransfer(ctx, spec, expectedVersion, handler)`：配置 tracked 模式、非空白幂等键、Resource.Type / ID、支持结果存储与并发预占的 Store，并透传调用方版本；版本 0 有效。入口使用 Principal.SubjectID（无 Principal 时使用 contextx.Operator）作为必填主体，将租户、主体、操作类型、资源类型和实体 ID 绑定到幂等键，保留输入 Spec 原值。
 - `app/eventsourced.Application` 已内建授权、匹配、命令后校验与并发重试；需要 Operation 信封时由传输层用 `Runner.Execute` 包装 `Execute` / `ExecuteNew`。
 - 多步骤补偿和状态机推进使用 [process](../../process/README.md)。
 

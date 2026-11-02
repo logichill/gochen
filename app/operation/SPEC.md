@@ -37,11 +37,13 @@ URL 路径只是示意，实际地址由接入方提供。
 
 ## 执行与状态
 
-唯一包装入口为 `IRunner.Execute(ctx, spec, Handler) (*Result, error)`。`NewRunner` 和 `DefaultRunner` 返回实现该接口的 `*Runner`。
+统一包装接口为 `IRunner.Execute(ctx, spec, Handler) (*Result, error)`。`NewRunner` 和 `DefaultRunner` 返回实现该接口的 `*Runner`。
 
 1. 校验非 nil 且未取消的 ctx、非空 Type、有效 Mode 和非 nil handler。
 2. tracked 生成非空 ID，并写入 handler 的派生 context；inline 不生成 ID。
 3. 在当前调用栈执行 handler，合并结果；tracked 在配置 Store 时保存信封。
+
+外部迁移入口使用 `Runner.ExecuteTransfer(ctx, spec, expectedVersion, handler)`，复用上述执行流程。入口要求 tracked 模式、非空白且通过 Spec.Validate 的幂等键、Resource.Type / ID、调用方版本及 handler；Store 同时实现 `IIdempotencyStore` 与 `IIdempotencyReservationStore`。主体使用 Principal.SubjectID，未绑定 Principal 时使用 contextx.Operator；缺失主体返回 InvalidInput。入口将租户、主体、操作类型、资源类型、实体 ID 和原始键编码后计算 SHA-256，统一用于结果查询与并发预占，输入 Spec 保持原值。版本 0 合法，缺失版本或最大 uint64 版本返回 InvalidInput。校验通过后将调用方版本原样传入 handler；相同作用域中的有效幂等键命中时返回首次结果及其 OperationID。
 
 `Operation.ID/Type/Mode` 由 Runner 设置。inline 成功固定为 settled；tracked 默认 accepted，也接受 handler 返回的有效非 failed 状态。handler 返回普通 error 时生成 failed 信封；返回 contextx.AfterCommitError 时生成 degraded 终态，保留错误，表示主操作已完成但后续阶段失败，不应重试整个业务。业务回调成功后结果保存失败，返回原结果与 AfterCommitError，并保留幂等预占；调用方应依据返回的 operation ID 核对业务并补存结果，不能通过释放预占重跑主操作。调用方必须同时检查结果和 error。
 
