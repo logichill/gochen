@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"gochen/app/internal/depcheck"
+	"gochen/app/operation"
 	"gochen/auth"
 	"gochen/contextx"
 	domaudited "gochen/domain/audited"
@@ -18,6 +19,7 @@ func (c *Core[T, ID]) Execute(
 	fn func(ctx context.Context, e T) error,
 	opts ...ExecOption,
 ) (T, error) {
+	ctx = operation.EnsureOperationID(ctx)
 	var zero T
 	if err := checkContext(ctx); err != nil {
 		return zero, err
@@ -29,7 +31,7 @@ func (c *Core[T, ID]) Execute(
 	if err != nil {
 		return zero, err
 	}
-	if err := ValidateWriteSpec(spec, false); err != nil {
+	if err := c.execution.ValidateWriteSpec(spec, false); err != nil {
 		return zero, err
 	}
 	if depcheck.IsNil(c.tx) {
@@ -68,6 +70,7 @@ func (c *Core[T, ID]) ExecuteNew(
 	fn func(ctx context.Context) (T, error),
 	opts ...ExecOption,
 ) (T, error) {
+	ctx = operation.EnsureOperationID(ctx)
 	var zero T
 	if err := checkContext(ctx); err != nil {
 		return zero, err
@@ -79,7 +82,7 @@ func (c *Core[T, ID]) ExecuteNew(
 	if err != nil {
 		return zero, err
 	}
-	if err := ValidateWriteSpec(spec, true); err != nil {
+	if err := c.execution.ValidateWriteSpec(spec, true); err != nil {
 		return zero, err
 	}
 	if depcheck.IsNil(c.tx) {
@@ -122,6 +125,7 @@ func (c *Core[T, ID]) ExecuteBulk(
 	fn func(ctx context.Context, e T) error,
 	opts ...ExecOption,
 ) ([]T, error) {
+	ctx = operation.EnsureOperationID(ctx)
 	if err := checkContext(ctx); err != nil {
 		return nil, err
 	}
@@ -138,7 +142,7 @@ func (c *Core[T, ID]) ExecuteBulk(
 	if err != nil {
 		return nil, err
 	}
-	if err := ValidateWriteSpec(spec, false); err != nil {
+	if err := c.execution.ValidateWriteSpec(spec, false); err != nil {
 		return nil, err
 	}
 	if depcheck.IsNil(c.tx) {
@@ -180,6 +184,7 @@ func (c *Core[T, ID]) ExecuteNewBulk(
 	fn func(ctx context.Context) ([]T, error),
 	opts ...ExecOption,
 ) ([]T, error) {
+	ctx = operation.EnsureOperationID(ctx)
 	if err := checkContext(ctx); err != nil {
 		return nil, err
 	}
@@ -190,7 +195,7 @@ func (c *Core[T, ID]) ExecuteNewBulk(
 	if err != nil {
 		return nil, err
 	}
-	if err := ValidateWriteSpec(spec, true); err != nil {
+	if err := c.execution.ValidateWriteSpec(spec, true); err != nil {
 		return nil, err
 	}
 	if depcheck.IsNil(c.tx) {
@@ -236,6 +241,7 @@ func (c *Core[T, ID]) ExecuteNewBulk(
 
 // Restore 恢复已软删实体：授权 → 事务{ GetWithDeleted → 领域恢复 → Before → 校验 → Restore → After → 审计 }。
 func (c *Core[T, ID]) Restore(ctx context.Context, id ID, opts ...ExecOption) (T, error) {
+	ctx = operation.EnsureOperationID(ctx)
 	var zero T
 	if err := checkContext(ctx); err != nil {
 		return zero, err
@@ -247,7 +253,7 @@ func (c *Core[T, ID]) Restore(ctx context.Context, id ID, opts ...ExecOption) (T
 	if err != nil {
 		return zero, err
 	}
-	if err := ValidateWriteSpec(spec, false); err != nil {
+	if err := c.execution.ValidateWriteSpec(spec, false); err != nil {
 		return zero, err
 	}
 	act, err := c.auditActor(ctx, opts)
@@ -291,7 +297,11 @@ func (c *Core[T, ID]) Restore(ctx context.Context, id ID, opts ...ExecOption) (T
 		if depcheck.IsNil(c.audit) {
 			return nil
 		}
-		return c.saveAudit(txCtx, c.record(txCtx, act, ActionRestore, entity, nil))
+		record, err := c.record(txCtx, act, ActionRestore, entity, nil)
+		if err != nil {
+			return err
+		}
+		return c.saveAudit(txCtx, record)
 	})
 	if err != nil && !contextx.IsAfterCommitError(err) {
 		return zero, err
@@ -301,6 +311,7 @@ func (c *Core[T, ID]) Restore(ctx context.Context, id ID, opts ...ExecOption) (T
 
 // Purge 永久删除实体（含已软删记录）：授权 → 事务{ GetWithDeleted → Purge → 审计 }。
 func (c *Core[T, ID]) Purge(ctx context.Context, id ID, opts ...ExecOption) error {
+	ctx = operation.EnsureOperationID(ctx)
 	if err := checkContext(ctx); err != nil {
 		return err
 	}
@@ -311,7 +322,7 @@ func (c *Core[T, ID]) Purge(ctx context.Context, id ID, opts ...ExecOption) erro
 	if err != nil {
 		return err
 	}
-	if err := ValidateWriteSpec(spec, false); err != nil {
+	if err := c.execution.ValidateWriteSpec(spec, false); err != nil {
 		return err
 	}
 	act, err := c.auditActor(ctx, opts)
@@ -339,6 +350,10 @@ func (c *Core[T, ID]) Purge(ctx context.Context, id ID, opts ...ExecOption) erro
 		if depcheck.IsNil(c.audit) {
 			return nil
 		}
-		return c.saveAudit(txCtx, c.record(txCtx, act, ActionPurge, entity, nil))
+		record, err := c.record(txCtx, act, ActionPurge, entity, nil)
+		if err != nil {
+			return err
+		}
+		return c.saveAudit(txCtx, record)
 	})
 }

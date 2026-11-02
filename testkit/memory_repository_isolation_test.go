@@ -2,14 +2,14 @@ package testkit_test
 
 import (
 	"context"
-	"testing"
-
+	"gochen/auth"
 	"gochen/contextx"
 	"gochen/domain/crud"
 	"gochen/domain/spec"
 	"gochen/errors"
 	"gochen/testkit"
 	"gochen/testkit/require"
+	"testing"
 )
 
 // L2 空间隔离行为特征测试。
@@ -20,7 +20,7 @@ import (
 // 一致性由测试而非接口强制。
 
 type isoDoc struct {
-	crud.TenantEntity[int64]
+	auth.TenantEntity[int64]
 	Title string `json:"title"`
 }
 
@@ -35,13 +35,19 @@ func tenantCtx(t *testing.T, tenantID string) context.Context {
 
 func newIsolatedRepo(t *testing.T) *testkit.MemoryRepository[*isoDoc, int64] {
 	t.Helper()
-	return testkit.NewMemoryRepository[*isoDoc, int64](
+	repository, repositoryErr := testkit.NewMemoryRepository[*isoDoc, int64](
 		testkit.NewInt64Sequence(1),
 		testkit.WithMemoryIsolation[*isoDoc, int64](),
 	)
+	if repositoryErr !=
+
+		// 1) 写路径：Create 必须标记归属。
+		nil {
+		t.Fatal(repositoryErr)
+	}
+	return repository
 }
 
-// 1) 写路径：Create 必须标记归属。
 func TestIsolation_CreateStampsOwnership(t *testing.T) {
 	repo := newIsolatedRepo(t)
 	doc := &isoDoc{Title: "a"}
@@ -110,13 +116,13 @@ func TestIsolation_UpdateCannotRewriteOwnership(t *testing.T) {
 
 	doc.Title = "a2"
 	doc.SetTenantID("tenant-b") // 试图把归属改走
-	require.NoError(t, repo.Update(ctxA, doc, spec.All()))
-	require.Equal(t, "tenant-a", doc.GetTenantID())
+	require.ErrorIs(t, repo.Update(ctxA, doc, spec.All()), errors.Forbidden)
+	require.Equal(t, "tenant-b", doc.GetTenantID())
 
 	// 仍留在 tenant-a 可见范围内
 	got, err := repo.Get(ctxA, doc.GetID(), spec.All())
 	require.NoError(t, err)
-	require.Equal(t, "a2", got.Title)
+	require.Equal(t, "a", got.Title)
 }
 
 // 5) Fail-Closed：启用隔离但 ctx 无租户 → 一律拒绝，绝不退化为"看全部"。
@@ -179,7 +185,10 @@ func TestIsolation_CreateAllFailureKeepsPrepareStamp(t *testing.T) {
 
 // 7) 未启用隔离时行为不变（L0/L1 不背负 L2 心智）。
 func TestIsolation_DisabledKeepsPlainBehaviour(t *testing.T) {
-	repo := testkit.NewMemoryRepository[*isoDoc, int64](testkit.NewInt64Sequence(1))
+	repo, repositoryErr := testkit.NewMemoryRepository[*isoDoc, int64](testkit.NewInt64Sequence(1))
+	if repositoryErr != nil {
+		t.Fatal(repositoryErr)
+	}
 	ctx := context.Background()
 
 	doc := &isoDoc{Title: "a"}
@@ -198,13 +207,11 @@ type isoPlainDoc struct {
 }
 
 func TestIsolation_RequiresTenantAwareEntity(t *testing.T) {
-	defer func() {
-		require.NotNil(t, recover(), "非 tenant-aware 实体启用隔离必须 fail-fast")
-	}()
-	_ = testkit.NewMemoryRepository[*isoPlainDoc, int64](
+	_, err := testkit.NewMemoryRepository[*isoPlainDoc, int64](
 		testkit.NewInt64Sequence(1),
 		testkit.WithMemoryIsolation[*isoPlainDoc, int64](),
 	)
+	require.ErrorIs(t, err, errors.InvalidInput)
 }
 
 // 9) 隔离键来源可换：与 SQL 侧 IsolationCols.Resolve 同构。
@@ -227,13 +234,19 @@ func memOrgResolver(ctx context.Context) (string, error) {
 
 func newOrgIsolatedRepo(t *testing.T) *testkit.MemoryRepository[*isoDoc, int64] {
 	t.Helper()
-	return testkit.NewMemoryRepository[*isoDoc, int64](
+	repository, repositoryErr := testkit.NewMemoryRepository[*isoDoc, int64](
 		testkit.NewInt64Sequence(1),
 		testkit.WithMemoryIsolationResolver[*isoDoc, int64](memOrgResolver),
 	)
+	if repositoryErr !=
+
+		// 归属来自自定义来源，而不是 contextx.TenantID——ctx 里那个不同的租户不得污染归属。
+		nil {
+		t.Fatal(repositoryErr)
+	}
+	return repository
 }
 
-// 归属来自自定义来源，而不是 contextx.TenantID——ctx 里那个不同的租户不得污染归属。
 func TestIsolation_CustomResolveDrivesOwnership(t *testing.T) {
 	repo := newOrgIsolatedRepo(t)
 	ctx := memOrgCtx(t, "tenant-a", "org-7")
@@ -264,12 +277,15 @@ func TestIsolation_CustomResolveMissingKeyFailsClosed(t *testing.T) {
 // 解析器自身报错必须原样上抛，不得被当成"无隔离"而放行。
 func TestIsolation_ResolverErrorIsNotSwallowed(t *testing.T) {
 	sentinel := errors.NewCode(errors.ServiceUnavailable, "shard directory is down")
-	repo := testkit.NewMemoryRepository[*isoDoc, int64](
+	repo, repositoryErr := testkit.NewMemoryRepository[*isoDoc, int64](
 		testkit.NewInt64Sequence(1),
 		testkit.WithMemoryIsolationResolver[*isoDoc, int64](
 			func(context.Context) (string, error) { return "", sentinel },
 		),
 	)
+	if repositoryErr != nil {
+		t.Fatal(repositoryErr)
+	}
 
 	err := repo.Create(context.Background(), &isoDoc{Title: "x"}, spec.All())
 	require.True(t, errors.Is(err, errors.ServiceUnavailable))

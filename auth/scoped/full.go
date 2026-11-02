@@ -2,9 +2,9 @@ package scoped
 
 import (
 	"context"
-
 	"gochen/auth"
 	"gochen/auth/action"
+	"gochen/domain/meta"
 	"gochen/domain/spec"
 	"gochen/errors"
 )
@@ -42,7 +42,7 @@ func New(checker action.IActionChecker, resolver ISpecResolver) (*FullAuthorizer
 	return &FullAuthorizer{
 		checker:    checker,
 		resolver:   resolver,
-		vocabulary: resolver.Vocabulary(),
+		vocabulary: resolver.Vocabulary().Copy(),
 	}, nil
 }
 
@@ -67,37 +67,28 @@ func (a *FullAuthorizer) Authorize(ctx context.Context, req auth.Request) (auth.
 	if spec.Err() != nil {
 		return auth.Decision{}, errors.Wrap(spec.Err(), errors.Internal, "resolver returned invalid spec")
 	}
-	if isWriteAction(req.Action) && spec.HasNamed() {
-		return auth.Decision{}, errors.NewCode(errors.InvalidInput, "write path spec cannot contain named conditions").
+	if spec.HasNamed() {
+		return auth.Decision{}, errors.NewCode(errors.Internal, "authorization spec cannot contain named conditions").
 			WithContext("action", req.Action)
 	}
 	for _, assignment := range assignments {
 		if err := assignment.Validate(); err != nil {
-			return auth.Decision{}, err
+			return auth.Decision{}, errors.Wrap(err, errors.Internal, "resolver returned an invalid assignment")
 		}
 	}
 	return auth.Decision{Allowed: true, Spec: spec, Assign: assignments}, nil
 }
 
-func (a *FullAuthorizer) Vocabulary() auth.Vocabulary { return a.vocabulary }
+func (a *FullAuthorizer) Vocabulary() auth.Vocabulary { return a.vocabulary.Copy() }
 
 // ScopeIn 返回主体范围集合内的正谓词。
-func ScopeIn(scopeIDs ...int64) spec.Spec {
-	return spec.In(spec.RoleScope, int64sToAny(scopeIDs)...)
+func ScopeIn(dimension meta.Dimension, scopeIDs ...int64) spec.Spec {
+	return spec.In(meta.ByDimension(dimension), int64sToAny(scopeIDs)...)
 }
 
 // OwnerIs 返回归属主体为 owner 的正谓词。
-func OwnerIs(owner string) spec.Spec {
-	return spec.Eq(spec.RoleOwner, owner)
-}
-
-func isWriteAction(action string) bool {
-	switch action {
-	case "create", "update", "delete", "restore", "purge":
-		return true
-	default:
-		return false
-	}
+func OwnerIs(dimension meta.Dimension, owner string) spec.Spec {
+	return spec.Eq(meta.ByDimension(dimension), owner)
 }
 
 func int64sToAny(values []int64) []any {

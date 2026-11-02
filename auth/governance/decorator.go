@@ -1,9 +1,7 @@
 package governance
 
 import (
-	"context"
-
-	"gochen/auth/scoped"
+	"gochen/auth"
 	"gochen/clock"
 	"gochen/errors"
 	"gochen/gen"
@@ -17,7 +15,7 @@ import (
 //   - Metrics 最外层：统计包含全部治理开销的真实延迟。
 //
 // 包装顺序由本函数固化，业务层不得自行拼接（§4.3）。
-func Wrap(base scoped.IAuthorizer, opts ...Option) (scoped.IAuthorizer, error) {
+func Wrap(base auth.IAuthorizer, opts ...Option) (auth.IAuthorizer, error) {
 	if base == nil {
 		return nil, errors.NewCode(errors.InvalidInput, "base authorizer cannot be nil")
 	}
@@ -51,17 +49,10 @@ func Wrap(base scoped.IAuthorizer, opts ...Option) (scoped.IAuthorizer, error) {
 	return authorizer, nil
 }
 
-// requireVia 让各层 Require 复用自身 Authorize，保证治理逻辑对两个入口都生效。
-// 无具体目标（动作级鉴权）时按 IsActionAllowed 判定，避免空资源清单误杀动作级授权。
-func requireVia(ctx context.Context, authorizer scoped.IAuthorizer, action string, targets ...any) error {
-	decision, err := authorizer.Authorize(ctx, action, targets...)
-	if err != nil {
-		return err
+// decisionEffect 将统一判定转换为日志和指标使用的事实值。
+func decisionEffect(d auth.Decision) string {
+	if d.Allowed {
+		return "allow"
 	}
-	if !decision.AllowedFor(len(targets)) {
-		return errors.NewCode(errors.Forbidden, "authorization denied").
-			WithContext("action", action).
-			WithContext("reason", decision.ReasonCode)
-	}
-	return nil
+	return "deny"
 }

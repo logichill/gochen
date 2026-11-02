@@ -8,6 +8,7 @@ import (
 	"gochen/auth"
 	"gochen/contextx"
 	domaudited "gochen/domain/audited"
+	"gochen/domain/meta"
 	"gochen/domain/spec"
 	"gochen/errors"
 	"gochen/testkit"
@@ -25,14 +26,44 @@ type auditDoc struct {
 	domaudited.AuditedEntity[int64]
 	Name   string `json:"name"`
 	State  string `json:"state"`
-	Tenant string `json:"tenant,omitempty" role:"tenant"`
-	Scope  int64  `json:"scope,omitempty" role:"scope"`
-	Owner  string `json:"owner,omitempty" role:"owner"`
+	Tenant string `json:"tenant,omitempty" dim:"tenant"`
+	Scope  int64  `json:"scope,omitempty" dim:"scope"`
+	Owner  string `json:"owner,omitempty" dim:"owner"`
 	Extra  any    `json:"extra,omitempty"`
 }
 
+func auditSnapshot(t *testing.T, tenant string, scope int64, owner string) domaudited.DimensionSnapshot {
+	t.Helper()
+	metadata, err := meta.Describe[*auditDoc]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := domaudited.NewDimensionSnapshot(metadata, map[meta.Dimension]any{"tenant": tenant, "scope": scope, "owner": owner})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return snapshot
+}
+
+func auditTenant(record domaudited.AuditRecord) string {
+	value, _ := record.Dimensions.Value("tenant")
+	return value.(string)
+}
+func auditScope(record domaudited.AuditRecord) int64 {
+	value, _ := record.Dimensions.Value("scope")
+	return value.(int64)
+}
+func auditOwner(record domaudited.AuditRecord) string {
+	value, _ := record.Dimensions.Value("owner")
+	return value.(string)
+}
+
 func newAuditRepo() *testkit.AuditedMemoryRepository[*auditDoc, int64] {
-	return testkit.NewAuditedMemoryRepository[*auditDoc, int64](testkit.NewInt64Sequence(1))
+	repository, repositoryErr := testkit.NewAuditedMemoryRepository[*auditDoc, int64](testkit.NewInt64Sequence(1))
+	if repositoryErr != nil {
+		panic(repositoryErr)
+	}
+	return repository
 }
 
 func newAuditedApplication(

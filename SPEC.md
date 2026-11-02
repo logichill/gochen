@@ -107,3 +107,16 @@
 5. **模块边界**：Core 禁止依赖 `gochen-runtime` 或 `gochen-contrib`；SQL、配置加载、具体 net/http server 与 Host/DI 运行时装配属于 Runtime。
 6. **内存能力属于 Core**：不引入物理驱动且用于无外部环境测试的内存实现（如 cache、MemoryEventStore、testkit）可以留在 Core。
 7. **发布边界**：开发态可用 `go.work` 与本地 replace；发布态必须使用真实模块版本，并在无 workspace、无本地 replace 的外部消费者中验证。
+
+## 5. 领域维度与条件写入
+
+- 实体以 `entity:"id"` 声明唯一标识，以 `dim:"..."` 声明开放维度，以 `managed:"true"` 声明托管字段。维度支持标量或一层标量指针，名称与绑定在构造期验证。
+- Eq / In / IsNull 接收 `meta.Ref`。ID / 普通字段 / 维度引用统一由元数据解析，SQL 列映射归 Runtime，类型转换与 NULL 语义由内存及 SQL 共用。
+- 资源显式声明隔离、mutable、assignable、transferable；全部维度默认受普通更新保护。仓储生成只读 ExecutionDescriptor，Application 据此验证授权词汇。
+- 授权 Vocabulary 使用 Refs / Assignable；授权条件采用类型化 Ref。Named 用于仓储业务读查询。mutable 和隔离字段保持独立于授权条件。
+- 普通更新在输入或命令产出后、Before 前后检查保护前值；最终条件写入同时约束隔离、有效态、授权、版本与保护值，SET 排除保护字段。
+- Transfer 在两阶段授权前通过仓储 CheckTransferEntry 检查上下文事务及仓储绑定会话。两阶段授权发生在事务外，目标意图冻结，权威变更来自接收 Decision.Assign。仓储在活动同源事务中执行版本写入、实际后像回读及全部维度和 Check 校验。
+- AuditRecord 保存完整 DimensionSnapshot 和 OperationID；迁移两侧记录共享编号，按各自快照过滤。Projector、After 与 PostCommit 各自消费独立展示副本，普通写入及迁移共用此隔离规则。新增历史维度通过显式迁移补齐键集。
+- 外部迁移入口必须提供幂等键与原调用方版本，REST 和命令入口共用 Runner.ExecuteTransfer。项目保证目标引用及状态约束，所有合法归属变更同步推进版本。
+
+具体行为、错误语义与接入方式见[分层授权](docs/architecture/layered-authz.md)。

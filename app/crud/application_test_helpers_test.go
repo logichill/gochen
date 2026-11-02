@@ -4,11 +4,13 @@ import (
 	"context"
 	"testing"
 
+	"gochen/app"
 	"gochen/app/query"
 	"gochen/auth"
 	"gochen/contextx"
 	domaudited "gochen/domain/audited"
 	domaincrud "gochen/domain/crud"
+	"gochen/domain/meta"
 	"gochen/errors"
 	"gochen/testkit"
 	"gochen/validate"
@@ -16,7 +18,7 @@ import (
 
 type testEntity struct {
 	domaincrud.Entity[int64]
-	Owner  string `json:"owner" role:"owner"`
+	Owner  string `json:"owner" dim:"owner"`
 	Name   string `json:"name"`
 	Active bool   `json:"active"`
 }
@@ -101,7 +103,11 @@ func domaincrudEntity(id int64) domaincrud.Entity[int64] {
 }
 
 func newTestRepo() *testkit.MemoryRepository[*testEntity, int64] {
-	return testkit.NewMemoryRepository[*testEntity, int64](testkit.NewInt64Sequence(1))
+	repository, repositoryErr := testkit.NewMemoryRepository[*testEntity, int64](testkit.NewInt64Sequence(1), testkit.WithMemoryResourceContract[*testEntity, int64](app.ResourceContract{Assignable: []meta.Dimension{"owner"}}))
+	if repositoryErr != nil {
+		panic(repositoryErr)
+	}
+	return repository
 }
 
 func newTestApplication(t *testing.T, options Options[*testEntity, int64]) (*Application[*testEntity, int64], *testkit.MemoryRepository[*testEntity, int64]) {

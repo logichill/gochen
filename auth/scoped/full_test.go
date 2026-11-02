@@ -2,12 +2,12 @@ package scoped_test
 
 import (
 	"context"
-	"testing"
-
 	"gochen/auth"
 	"gochen/auth/scoped"
+	"gochen/domain/meta"
 	"gochen/domain/spec"
 	"gochen/errors"
+	"testing"
 )
 
 type allowChecker struct{}
@@ -34,7 +34,7 @@ func TestNewRequiresDependencies(t *testing.T) {
 
 func TestFullAuthorizer(t *testing.T) {
 	resolver := scoped.SpecResolverFunc(func(_ context.Context, req auth.Request) (spec.Spec, []auth.Assignment, error) {
-		return scoped.ScopeIn(1, 2), []auth.Assignment{{Role: spec.RoleScope, Value: 1}}, nil
+		return scoped.ScopeIn("scope", 1, 2), []auth.Assignment{{Dimension: "scope", Value: 1}}, nil
 	})
 	authorizer, err := scoped.New(allowChecker{}, resolver)
 	if err != nil {
@@ -44,10 +44,10 @@ func TestFullAuthorizer(t *testing.T) {
 	if err != nil || !decision.Allowed {
 		t.Fatalf("decision = %+v, %v", decision, err)
 	}
-	if got := decision.Spec.Canonical(); got != "in(@scope,1,2)" {
+	if got := decision.Spec.Canonical(); got != "in(dim:scope,1,2)" {
 		t.Fatalf("spec = %s", got)
 	}
-	if len(decision.Assign) != 1 || decision.Assign[0].Role != spec.RoleScope {
+	if len(decision.Assign) != 1 || decision.Assign[0].Dimension != "scope" {
 		t.Fatalf("assign = %+v", decision.Assign)
 	}
 
@@ -61,7 +61,7 @@ func TestFullAuthorizer(t *testing.T) {
 	}
 }
 
-func TestFullAuthorizerRejectsNamedOnWrite(t *testing.T) {
+func TestFullAuthorizerRejectsNamed(t *testing.T) {
 	resolver := scoped.SpecResolverFunc(func(context.Context, auth.Request) (spec.Spec, []auth.Assignment, error) {
 		return spec.Named("visibleTo", "u1"), nil, nil
 	})
@@ -72,15 +72,14 @@ func TestFullAuthorizerRejectsNamedOnWrite(t *testing.T) {
 	if _, err := authorizer.Authorize(context.Background(), auth.Request{Action: "update", Permission: "erp.order:api:update"}); err == nil {
 		t.Fatal("expected named-on-write error")
 	}
-	decision, err := authorizer.Authorize(context.Background(), auth.Request{Action: "list", Permission: "erp.order:api:list"})
-	if err != nil || !decision.Allowed {
-		t.Fatalf("read with named = %+v, %v", decision, err)
+	if _, err := authorizer.Authorize(context.Background(), auth.Request{Action: "list", Permission: "erp.order:api:list"}); !errors.Is(err, errors.Internal) {
+		t.Fatalf("named authorization = %v", err)
 	}
 }
 
 func TestFullAuthorizerSystemBypass(t *testing.T) {
 	resolver := scoped.SpecResolverFunc(func(context.Context, auth.Request) (spec.Spec, []auth.Assignment, error) {
-		return spec.Eq("Never", "x"), nil, nil
+		return spec.Eq(meta.ByField("Never"), "x"), nil, nil
 	})
 	authorizer, err := scoped.New(denyChecker{}, resolver)
 	if err != nil {
@@ -93,13 +92,13 @@ func TestFullAuthorizerSystemBypass(t *testing.T) {
 }
 
 func TestSpecHelpers(t *testing.T) {
-	if got := scoped.ScopeIn(1, 2).Canonical(); got != "in(@scope,1,2)" {
+	if got := scoped.ScopeIn("scope", 1, 2).Canonical(); got != "in(dim:scope,1,2)" {
 		t.Fatalf("ScopeIn = %s", got)
 	}
-	if got := scoped.OwnerIs("u1").Canonical(); got != `eq(@owner,"u1")` {
+	if got := scoped.OwnerIs("owner", "u1").Canonical(); got != `eq(dim:owner,"u1")` {
 		t.Fatalf("OwnerIs = %s", got)
 	}
-	if !scoped.ScopeIn().IsNone() {
-		t.Fatal("ScopeIn() with no scope must match nothing")
+	if !scoped.ScopeIn("scope").IsNone() {
+		t.Fatal("ScopeIn with no scope must match nothing")
 	}
 }

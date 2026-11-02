@@ -15,23 +15,22 @@ import (
 
 // AuditRecord 审计记录（D11）。动作是开放集合，取代封闭的操作枚举。
 //
-// TenantID / ScopeID / OwnerID 是写入时的资源边界，带角色标签，供
-// AuditTrail 直接按审计记录自身过滤，不依赖实体是否仍然存在。
+// Dimensions 保存写入时的完整维度事实，OperationID 关联同一次逻辑操作。
+// AuditTrail 通过记录自身的快照解释条件，支持实体物理删除后的历史查询。
 type AuditRecord struct {
-	ID            int64           `json:"id"`
-	ResourceKind  string          `json:"resource_kind,omitempty"`
-	EntityID      string          `json:"entity_id" role:"id"`
-	Action        string          `json:"action"`
-	Operator      string          `json:"operator"`
-	Initiator     string          `json:"initiator,omitempty"`
-	Reason        string          `json:"reason,omitempty"`
-	CorrelationID string          `json:"correlation_id,omitempty"`
-	TenantID      string          `json:"tenant_id,omitempty" role:"tenant"`
-	ScopeID       int64           `json:"scope_id,omitempty" role:"scope"`
-	OwnerID       string          `json:"owner_id,omitempty" role:"owner"`
-	Timestamp     time.Time       `json:"timestamp"`
-	Changes       json.RawMessage `json:"changes,omitempty"` // 变更前后，经 Projector
-	Metadata      json.RawMessage `json:"metadata,omitempty"`
+	ID            int64             `json:"id"`
+	ResourceKind  string            `json:"resource_kind,omitempty"`
+	EntityID      string            `json:"entity_id" entity:"id"`
+	Action        string            `json:"action"`
+	Operator      string            `json:"operator"`
+	Initiator     string            `json:"initiator,omitempty"`
+	Reason        string            `json:"reason,omitempty"`
+	CorrelationID string            `json:"correlation_id,omitempty"`
+	OperationID   string            `json:"operation_id"`
+	Dimensions    DimensionSnapshot `json:"dimensions"`
+	Timestamp     time.Time         `json:"timestamp"`
+	Changes       json.RawMessage   `json:"changes,omitempty"` // 变更前后，经 Projector
+	Metadata      json.RawMessage   `json:"metadata,omitempty"`
 }
 
 // FieldChange 表示单个字段的变更。
@@ -80,8 +79,7 @@ type IAuditStore interface {
 
 // IAuditQueryStore 是审计轨迹的读取端口（D11）。
 //
-// 读取按规约过滤审计记录自身的边界列（@id / @scope / @owner），
-// 不依赖业务实体是否仍然存在；entityID 为空返回 errors.InvalidInput，
+// 读取按资源配置将规约作用于实体标识和维度快照；entityID 为空返回 errors.InvalidInput，
 // 无记录返回空 slice + nil。
 type IAuditQueryStore interface {
 	ListAuditRecords(ctx context.Context, entityID string, offset, limit int, s spec.Spec) ([]AuditRecord, error)

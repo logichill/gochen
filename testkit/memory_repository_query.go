@@ -35,7 +35,7 @@ func (r *MemoryRepository[T, ID]) Query(ctx context.Context, opts query.QueryOpt
 		matched := make([]T, 0, len(state.order))
 		for _, id := range state.order {
 			entity := state.entities[id]
-			if isolated && !visibleInIsolation[T, ID](entity, isolationID) {
+			if isolated && !r.visibleInIsolation(entity, isolationID) {
 				continue
 			}
 			visible, matchErr := r.visibleEntity(s, entity)
@@ -50,7 +50,7 @@ func (r *MemoryRepository[T, ID]) Query(ctx context.Context, opts query.QueryOpt
 				return matchErr
 			}
 			if ok {
-				matched = append(matched, shallowClone(entity))
+				matched = append(matched, cloneEntityState(entity))
 			}
 		}
 		if sortErr := memorySortEntities(matched, opts.Sorts); sortErr != nil {
@@ -89,7 +89,7 @@ func (r *MemoryRepository[T, ID]) QueryOne(ctx context.Context, opts query.Query
 		matched := make([]T, 0, 1)
 		for _, id := range state.order {
 			entity := state.entities[id]
-			if isolated && !visibleInIsolation[T, ID](entity, isolationID) {
+			if isolated && !r.visibleInIsolation(entity, isolationID) {
 				continue
 			}
 			visible, matchErr := r.visibleEntity(s, entity)
@@ -104,7 +104,7 @@ func (r *MemoryRepository[T, ID]) QueryOne(ctx context.Context, opts query.Query
 				return matchErr
 			}
 			if ok {
-				matched = append(matched, shallowClone(entity))
+				matched = append(matched, cloneEntityState(entity))
 				if len(opts.Sorts) == 0 {
 					break
 				}
@@ -146,7 +146,7 @@ func (r *MemoryRepository[T, ID]) QueryCount(ctx context.Context, opts query.Que
 	err = r.withReadState(ctx, func(state *memoryState[T, ID]) error {
 		for _, id := range state.order {
 			entity := state.entities[id]
-			if isolated && !visibleInIsolation[T, ID](entity, isolationID) {
+			if isolated && !r.visibleInIsolation(entity, isolationID) {
 				continue
 			}
 			visible, matchErr := r.visibleEntity(s, entity)

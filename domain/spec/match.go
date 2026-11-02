@@ -29,6 +29,11 @@ type Interpreter struct {
 	named map[string]NamedMatcher
 }
 
+// IValueSource 提供规约所需的字段描述与当前标量值；NULL 使用 nil。
+type IValueSource interface {
+	Read(ref meta.Ref) (meta.Field, any, error)
+}
+
 // NewInterpreter 创建内存解释器。
 func NewInterpreter(opts ...InterpreterOption) *Interpreter {
 	i := &Interpreter{named: make(map[string]NamedMatcher)}
@@ -43,6 +48,19 @@ func NewInterpreter(opts ...InterpreterOption) *Interpreter {
 // Match 判断实体是否满足规约。非法规约、未知字段与类型转换失败都返回错误，
 // 不当作不匹配。
 func (i *Interpreter) Match(s Spec, entity any) (bool, error) {
+	md, err := meta.DescribeValue(entity)
+	if err != nil {
+		return false, errors.Wrap(err, errors.Internal, "entity metadata unavailable")
+	}
+	return i.match(s, md.Source(entity), entity)
+}
+
+// MatchSource 使用实体或历史快照来源解释同一条件代数。
+func (i *Interpreter) MatchSource(s Spec, source IValueSource) (bool, error) {
+	return i.match(s, source, nil)
+}
+
+func (i *Interpreter) match(s Spec, source IValueSource, entity any) (bool, error) {
 	if s.err != nil {
 		return false, errors.Wrap(s.err, errors.Internal, "invalid spec")
 	}
@@ -52,28 +70,29 @@ func (i *Interpreter) Match(s Spec, entity any) (bool, error) {
 	case specAll:
 		return true, nil
 	case specAnd:
+		matched := true
 		for _, child := range s.children {
-			ok, err := i.Match(child, entity)
-			if err != nil || !ok {
-				return ok, err
-			}
-		}
-		return true, nil
-	case specOr:
-		for _, child := range s.children {
-			ok, err := i.Match(child, entity)
+			ok, err := i.match(child, source, entity)
 			if err != nil {
 				return false, err
 			}
-			if ok {
-				return true, nil
-			}
+			matched = matched && ok
 		}
-		return false, nil
+		return matched, nil
+	case specOr:
+		matched := false
+		for _, child := range s.children {
+			ok, err := i.match(child, source, entity)
+			if err != nil {
+				return false, err
+			}
+			matched = matched || ok
+		}
+		return matched, nil
 	case specNamed:
 		return i.matchNamed(s, entity)
 	case specEq, specIn, specIsNull:
-		return i.matchField(s, entity)
+		return i.matchField(s, source)
 	default:
 		return false, errors.NewCode(errors.Internal, "unknown spec kind")
 	}
@@ -93,79 +112,39 @@ func (i *Interpreter) matchNamed(s Spec, entity any) (bool, error) {
 	return ok, nil
 }
 
-func (i *Interpreter) matchField(s Spec, entity any) (bool, error) {
-	md, err := meta.DescribeValue(entity)
+func (i *Interpreter) matchField(s Spec, source IValueSource) (bool, error) {
+	field, value, err := source.Read(s.field)
 	if err != nil {
-		return false, errors.Wrap(err, errors.Internal, "entity metadata unavailable")
+		return false, errors.Wrap(err, errors.Internal, "field source read failed")
 	}
-	field, err := resolveField(md, s.field)
-	if err != nil {
-		return false, err
-	}
-
 	if s.kind == specIsNull {
-		null, err := field.IsNull(entity)
-		if err != nil {
-			return false, errors.Wrap(err, errors.Internal, "field read failed")
-		}
-		return null, nil
+		return value == nil, nil
 	}
-
-	current, ok := field.Value(entity)
-	if !ok {
-		return false, errors.NewCode(errors.Internal, "field cannot be read").
-			WithContext("field", field.Name)
-	}
-	if isNullValue(current) {
-		return false, nil
-	}
-
 	if s.kind == specEq {
-		return matchEq(field, current, s.value)
+		return matchEq(field, value, s.value)
 	}
+	matched := false
 	for _, raw := range s.values {
-		ok, err := matchEq(field, current, raw)
+		ok, err := matchEq(field, value, raw)
 		if err != nil {
 			return false, err
 		}
-		if ok {
-			return true, nil
-		}
+		matched = matched || ok
 	}
-	return false, nil
+	return matched, nil
 }
 
-func matchEq(field meta.Field, current reflect.Value, raw any) (bool, error) {
+func matchEq(field meta.Field, current any, raw any) (bool, error) {
 	converted, err := field.Convert(raw)
 	if err != nil {
 		return false, errors.Wrap(err, errors.Internal, "spec value conversion failed").
 			WithContext("field", field.Name)
 	}
-	return reflect.DeepEqual(current.Interface(), converted.Interface()), nil
-}
-
-func resolveField(md *meta.Metadata, name string) (meta.Field, error) {
-	if strings.HasPrefix(name, "@") {
-		field, ok := md.RoleField(meta.Role(name))
-		if !ok {
-			return meta.Field{}, errors.NewCode(errors.Internal, "role is not mapped to a field").
-				WithContext("role", name)
-		}
-		return field, nil
+	if current == nil {
+		return false, nil
 	}
-	field, ok := md.Field(name)
-	if !ok {
-		return meta.Field{}, errors.NewCode(errors.Internal, "unknown spec field").
-			WithContext("field", name)
+	for converted.Kind() == reflect.Ptr {
+		converted = converted.Elem()
 	}
-	return field, nil
-}
-
-func isNullValue(v reflect.Value) bool {
-	switch v.Kind() {
-	case reflect.Ptr, reflect.Interface, reflect.Map, reflect.Slice, reflect.Func:
-		return v.IsNil()
-	default:
-		return false
-	}
+	return reflect.DeepEqual(current, converted.Interface()), nil
 }

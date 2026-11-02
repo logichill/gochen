@@ -1,102 +1,91 @@
-# 分层授权
+# 分层授权与领域维度
 
-Gochen 将动作权限、业务隔离、数据范围和决策治理分别建模。Core 提供授权端口、规约代数与 Application 编排，Runtime 提供默认判定器和 SQL 规约执行。
+Core 通过 auth.IAuthorizer、类型化条件与 Application 编排授权；Runtime 将有效资源契约落实为隔离和条件 SQL，testkit 实现相同的内存语义。
 
 ## 能力与落点
 
-| 层级 | 解决的问题 | 当前入口 |
-| --- | --- | --- |
-| L0 Plain | 基础用例编排 | `app/crud`、`app/audited`、`app/eventsourced` |
-| L1 Action | 能否执行某个动作 | `auth/action`（`action.RBAC`） |
-| L2 Isolated | 数据属于哪个业务隔离空间 | `contextx.TenantID`、`domain/crud.ITenantEntity`、Runtime Repo 的 `WithIsolation` |
-| L3 Scoped | 能操作哪些范围内的哪些资源 | `auth/scoped`（`scoped.New`）、`auth.IAuthorizer`、Runtime Repo 写规约 |
-| L4 Governed | 策略快照、决策审计与指标 | `auth/governance`、Runtime SQL store |
+| 能力 | 当前入口 |
+| --- | --- |
+| 用例编排 | app/crud、app/audited、app/eventsourced |
+| 动作权限 | auth/action.RBAC |
+| 数据隔离 | contextx.TenantID、显式资源隔离绑定 |
+| 数据范围 | auth/scoped.New、项目 IAuthorizer / ISpecResolver |
+| 决策治理 | auth/governance、Runtime SQL store |
 
-各能力按包隔离。`auth` 根包只提供唯一授权端口 `IAuthorizer` 与共享值对象；CRUD Application 在构造期接收 `auth.IAuthorizer`，在每个用例入口调用一次 `Authorize` 并把决策中的 `spec.Spec` 交给仓储执行。
+auth 根包提供统一的 Request、Decision、Vocabulary。普通用例在入口授权一次；Transfer 依转出和接收动作授权两次。每次授权结果通过 Spec 显式传给仓储。
 
-## 隔离、范围与主体
+## 实体与有效契约
 
-Tenant 表达业务隔离，Scope 表达授权覆盖范围，资源的 `managed_scope_id` 表达管理归属。Scope ID 为 `int64`，隔离标识为 `string`，两者不能相互替代。
+实体以 `entity:"id"` 标记标识，以 `dim:"department"` 等开放名称标记维度，以 `managed:"true"` 标记托管字段。维度支持标量或一层标量指针。字段和维度别名解析为相同字段身份。
 
-多身份业务应显式确定当前工作身份，再解析其可见范围。角色绑定、Scope 树、身份激活流程与可见集合的持久化由下游身份系统维护，Core 不提供这些业务表。上级范围对子树的可见性应由 resolver 返回完整集合，不能用 `managed_scope_id = active_scope_id` 代替。
+`app.ResourceContract` 显式配置 Isolation、Mutable、Assignable、Transferable。全部维度默认受普通更新保护；Mutable 声明可编辑的业务分类。Runtime 的 WithResourceContract 与 testkit 的 WithMemoryResourceContract 生成相同只读 ExecutionDescriptor，Application 在构造期读取并交叉验证。
 
-`auth/scoped.DataScope` 包含 `Kind`、`ScopeIDs` 和 `TenantID`：
+隔离由 WithIsolation 显式开启，默认键来自 contextx.TenantID；普通字段也可作为隔离字段。auth.TenantEntity 提供可选租户便利类型。资源名通过 WithResourceKind 绑定，列名解析由 Runtime 承担，约定见 [Quick 装配](../guides/quick-assembly.md#列名约定)。
 
-| 状态 | 构造函数 | 语义 |
-| --- | --- | --- |
-| `ScopeDenyAll` | `DenyAll()`，也是零值 | 拒绝读写 |
-| `ScopeFiltered` | `Filtered(ids...)` | 限定于有效范围 ID 集合 |
-| `ScopeGlobal` | `Global()` | 显式全局范围，仍受独立的 L2 隔离约束 |
+同一实体类型可以有不同资源契约。多个入口写入重叠数据集时，组合根共享授权维度保护基线，管理入口通过 Transfer 改变归属。
 
-范围归一化会去重、排序并去除非正数 ID；Filtered 的有效集合为空时转为 DenyAll。范围组合取交集，两个非空 TenantID 冲突时拒绝。Global 只能在受控的服务上下文中设置，不能从普通请求参数直接接受。
+## 条件与授权词汇
 
-## 请求与写入链路
+`meta.ID()`、`meta.ByField(name)`、`meta.ByDimension(dimension)` 构造 Ref，Eq、In、IsNull 接收 Ref。Spec 提供 All、And、Or 等组合；零值匹配零条记录。NULL 在 Eq/In 中为假，在 IsNull 中为真。
 
-```text
-Transport 身份认证 → contextx / Principal
-                           ↓
-      Action → Scoped → Application → Repository
-                       ↓                       ↓
-                  Authorizer            原子执行写规约
-                       ↓
-              Decision.Spec（spec.Spec）
-```
+Vocabulary.Refs 声明授权条件引用，Vocabulary.Assignable 声明授权器可能输出的赋值维度。Application 构造检查绑定、mutable 冲突、隔离冲突和执行能力；Decision 到达时再次验证实际引用和赋值。
 
-1. Transport 根据已验证的身份建立上下文。公网请求不能直接把客户端 header 当作租户身份；可信网关头解析须显式配置 resolver。
-2. Application（如 `app/crud.Application`）在每个用例入口调用一次 `auth.IAuthorizer.Authorize`，授权请求携带资源、动作与目标 ID。
-3. 判定器返回 `auth.Decision`：allow 时为行级 `spec.Spec`，可选附带服务端赋值（`RoleScope` / `RoleOwner`）。deny 直接短路，用例不触达仓储。
-4. Repository 把写规约合并进最终 SQL 的 `WHERE`（写入前另做 `WITH CHECK`）。规约缺失、非法或含 `Named` 条件时拒绝，不能以“先查后判断”替代原子写入。
+授权条件全部使用 Ref。Named 用于仓储业务读查询，其 SQL 或内存回调由业务显式登记。关系权限可以由授权器展开为 In/Eq，受配置的 IN 上限约束。
 
-有已知目标的读写由规约同时约束“查得到”和“改得动”；列表等无目标判定返回的规约只用于过滤结果集。不得伪造目标来满足校验，也不得在 Application 层先查后过滤。
+配置错误返回 InvalidInput，授权实现产生非法条件或越过词汇返回 Internal，合法策略拒绝返回 Forbidden。不可见实体返回 NotFound，判定故障保留原错误码。
 
-Update 的授权输入来自仓储中的真实资源边界，不能信任客户端提交的 scope / tenant。`GetWithDeleted`、`Restore`、`Purge`、`ListDeleted` 均接收规约，软删记录的访问同样受规约约束。批量操作逐项匹配授权，任何越界项都应导致整批拒绝。普通更新不得悄然转移资源的隔离或管理归属。
+## 普通写入
 
-## 仓储装配
+创建执行 Before、权威赋值、领域及应用校验、仓储隔离盖戳和 WITH CHECK。已有冲突维度值返回 Forbidden；业务合法零值由项目规则定义。创建条件保持独立于尚未生成的标识。
 
-隔离能力在构造期显式声明：
+普通更新捕获独立保护前值，在输入或命令产出后、Before 之前以及 Before 之后检查。SQL SET 排除保护字段，WHERE 同时包含标识、隔离、有效态、授权条件、版本和保护前值；NULL 使用 IS NULL。输入改变保护字段返回 Forbidden。
 
-- `WithIsolation(IsolationCols{...})`：启用隔离；默认值来源为 `contextx.TenantID`。
-- `WithResourceKind(kind)`：声明仓储对应的授权资源种类。
-- `WithCrossIsolationReads(audit)`：声明该仓储可被请求期凭据临时开闸读取。
-- `WithAudited()` / `WithoutVersioning()` / `WithMaxPageSize(n)`：审计、乐观锁与分页上限。
+零行写入在原授权和隔离范围内重读：不可见返回 NotFound，版本不同返回 Concurrency，保护值不同返回 Forbidden，其余返回存储错误。失败分类可能观察后续并发，调用方重试前重新读取和授权。
 
-字段名或实体 tag 不会自动开启隔离保护。默认租户隔离要求实体实现 `ITenantEntity`；SQL 仓储通过列映射写入归属。自定义 `IsolationCols.Resolve` 必须同时显式指定 `Column`。列名覆盖顺序见 [Quick 装配](../guides/quick-assembly.md#列名约定)。
+Restore、Purge、ListDeleted 使用专用动作和端口，保持隔离和授权。批量普通命令一次授权、一个事务，任一失败整批回滚。
 
-写规约由调用方（Application 或显式授权的服务）传入每个读写方法；仓储不维护隐式常驻约束，也不从 ctx 猜测写边界。`Create` / `Update` 在写入前用内存解释器校验规约（`WITH CHECK`），`Update` 以 `WHERE id ∧ spec ∧ version` 原子执行；访问控制列不进入 `SET`。
+## 两阶段迁移
 
-## 默认判定器
+迁移动作声明 KindTransfer、ReceiveAction 和 Dimensions，构造期要求仓储提供 ITransferRepository 及对应能力。Application.Transfer 接收调用方 expectedVersion 与 Targets；已有事务中的调用返回 FailedPrecondition。
 
-`gochen-runtime/host/authz` 提供 `NewActionChecker` 和 `NewEvaluator`，从显式注入的 Principal 判定动作与资源：
+1. 事务外复制并冻结意图，确定 OperationID。
+2. 转出授权返回 Using，接收授权返回 Check 和权威 Assign，两次使用相同意图。
+3. 事务内按标识、隔离、有效态和 Using 读取来源，核对版本。
+4. 仓储从前像克隆候选，只应用获准维度和更新托管字段，校验领域状态与 Check。
+5. 条件 UPDATE 推进版本，然后同事务按标识和隔离回读实际行。
+6. 比较全部维度及实际版本，重新求值 Check；存储漂移返回 Internal 并回滚。
+7. 同事务写入两侧审计，执行 After 与提交后的 PostCommit。
 
-- 动作权限使用三段式码，如 `order:api:update`，支持按段通配。格式错误返回 `InvalidInput`。
-- 无具体目标时判断动作；有目标时逐项核对隔离和管理范围。
-- 数据范围优先取已绑定的 DataScope；系统主体可使用全局范围，否则从 `ActiveScopeID` 得到单范围。缺少有效范围时拒绝。
-- 子树可见性通过 `WithEvaluatorDataScope(resolver)` 注入。Create 的目标范围必须由资源解析器明确给出；`ManagedScopeID=0` 的普通资源拒绝访问。
-- `GlobalScope` 资源仅对全局可见主体开放。
+目标存在性和接收权限由项目授权器验证。目标删除、停用竞争由项目外键或事务内持久化约束保障，所有合法归属变更同步推进版本。
 
-业务可替换 `IEvaluator` 接入其他策略系统，保持 Application 与仓储链路不变。权限目录由组合根创建 `authz.Registry`，通过 Host 的 CatalogRegistrar 注入；模块用 `authz.Catalog` 声明权限。
+REST 用 rest.Transfer 显式注册 POST。请求必须提供 Idempotency-Key、expected_version 和 targets，版本 0 合法。REST 与命令入口共用 Runner.ExecuteTransfer；tracked Runner 要求幂等存储和并发预占。重试返回首次操作编号和结果，degraded 状态保持在响应及信封中。
 
-## 跨隔离读取
+## 历史审计
 
-Runtime Repo 的跨隔离读取同时要求构造期 `WithCrossIsolationReads(audit)` 和请求期 `contextx.WithCrossIsolation` 凭据，凭据必须包含 Reason 与 Operator。
+AuditRecord.Dimensions 保存写入时全部维度，OperationID 关联逻辑操作。AuditTrail 经独立 audit_read 授权，使用实体标识和受保护维度过滤历史；Purge 后仍可查询。mutable 值可以保留为历史事实，授权词汇的构造约束保持一致。
 
-- 缺少任一条件时保持普通隔离语义。
-- 开启后只放行读取，写操作返回 `Forbidden`。
-- 留痕失败即拒绝读取；写规约仍照常合并进查询条件。
-- 要求写规约但无法保留有效边界时拒绝。
+迁移写 transfer_out / transfer_in，分别保存前像和实际后像快照，共享 OperationID。两侧 Changes 可以披露 Projector 允许的维度 Old→New；Projector 和迁移钩子收到独立展示副本。配对及重复迁移按操作、资源、实体和动作约束。
 
-不要为同一张表另建无隔离仓储绕过这一入口。需要跨隔离写入时，按每个目标隔离键派生 context，并执行正常授权。
+Runtime 的 AuditResource 配置有效契约、全部维度物理列及隔离列，AuditStore 构造检查实际表。完整 JSON 与类型化列同时保存，读取检查缺键、类型和一致性。普通字段隔离由写入上下文保存权威归属。跨多个 INSERT 的批量审计要求活动同源事务。
 
-## 决策治理
+新增维度通过显式历史迁移补齐旧快照。目标字段为 NULL 和快照缺键分别处理；缺失事实明确失败。ES AuditTrail 按当前聚合状态授权，普通 ES 命令在回放及重试后重新捕获保护前值。
 
-`auth/governance.Wrap` 按 `Metrics(Log(Snapshot(base)))` 装饰 `scoped.IAuthorizer`。至少配置快照、审计或指标中的一项；显式传 nil clock / ID generator 会在构造期失败。
+## 推荐范围解析与权限目录
 
-- 快照获取默认失败即拒绝，可通过 `WithLenientSnapshot` 显式放宽。
-- 审计写入默认不阻塞授权，`WithStrictAudit` 可改为阻塞；可靠重试由 store 或外部队列负责。
-- 指标失败不影响授权。审计交付前统一脱敏，可用资源脱敏器定制。
+Runtime host/authz 提供 NewActionChecker 和 NewScopeResolver(dimension, resolver)。ScopeResolver 将 DataScope 绑定到项目维度；默认读取已绑定范围或 Principal.ActiveScopeID，缺少范围输出 None。
 
-## 验证入口
+scoped.DataScope 包含 Kind、ScopeIDs 和 TenantID，Filtered 对正数范围去重排序，Global 持续受独立隔离约束，DenyAll 为零值。层级可见集合由项目 IDataScopeResolver 展开。创建及迁移赋值由项目 resolver 明确输出。
 
-Core 契约测试位于 `auth/`、`app/crud/`、`testkit/`；SQL 写规约与隔离测试位于 `gochen-runtime` 仓库 `db/orm/repo/`。内存仓储的版本与规约处理不能代表 SQL 列过滤的全部语义，接入 SQL 仓储时须验证真实查询条件。
+组合根通过 Registry/Catalog 登记权限目录，按资源构造授权器。Principal 来自已验证的认证链，客户端身份输入由可信入口解析。
 
-可运行示例位于 `gochen-runtime` 仓库 `examples/security/layering` 和 `examples/quick`。
+## 跨隔离读取与治理
+
+跨隔离读取同时要求 WithCrossIsolationReads(audit) 与请求 contextx.WithCrossIsolation 的 Reason/Operator 凭据。留痕失败阻断读取，授权 Spec 持续合入查询，写操作保持 Forbidden。项目可以使用独立审计资源记录表级跨隔离读取，保存原资源、表和原因。
+
+auth/governance.Wrap 按 Metrics(Log(Snapshot(base))) 包装根 auth.IAuthorizer。快照默认失败即拒绝；审计默认尽力，WithStrictAudit 改为阻断；指标失败保持业务判定。治理事实通过根 Decision 传递。
+
+## 验证
+
+Core 的 auth、app 与 testkit 和 Runtime db/orm/repo 执行行为测试。共享仓储矩阵位于 gochen/testkit/contracttest/dimensions.go，SQL 专项覆盖版本交错、目标状态约束、回读漂移及审计回滚。示例位于 Runtime examples/security/layering 与 examples/quick。
+
+各仓库独立 build、vet、test，Core 使用 GOWORK=off，Runtime 运行 examples-smoke。完整设计见工作区根 core-design.md 与 ADR-0001。

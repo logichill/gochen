@@ -2,14 +2,14 @@ package auth_test
 
 import (
 	"context"
-	"testing"
-
 	"gochen/auth"
 	"gochen/auth/action"
 	"gochen/auth/scoped"
+	"gochen/domain/meta"
 	"gochen/domain/spec"
 	"gochen/errors"
 	"gochen/testkit/require"
+	"testing"
 )
 
 type contractChecker struct {
@@ -45,14 +45,14 @@ func (r contractResolver) ResolveSpec(context.Context, auth.Request) (spec.Spec,
 }
 
 func (r contractResolver) Vocabulary() auth.Vocabulary {
-	return auth.Vocabulary{Roles: []spec.Role{spec.RoleOwner}, Fields: []string{"Owner"}}
+	return auth.Vocabulary{Refs: []meta.Ref{meta.ByDimension("owner"), meta.ByField("Owner")}}
 }
 
 func contractAuthorizers(t *testing.T) map[string]auth.IAuthorizer {
 	t.Helper()
 	rbac, err := action.RBAC(contractChecker{})
 	require.NoError(t, err)
-	full, err := scoped.New(contractChecker{}, contractResolver{spec: spec.Eq(spec.RoleOwner, "u1")})
+	full, err := scoped.New(contractChecker{}, contractResolver{spec: spec.Eq(meta.ByDimension("owner"), "u1")})
 	require.NoError(t, err)
 	deniedRBAC, err := action.RBAC(contractChecker{denied: true})
 	require.NoError(t, err)
@@ -74,7 +74,7 @@ func TestAuthorizerContractDecisionShape(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, decision.Allowed)
 	require.True(t, decision.Spec.IsAll())
-	require.True(t, len(allow.Vocabulary().Roles) == 0)
+	require.True(t, len(allow.Vocabulary().Refs) == 0)
 
 	rbac := auths["rbac"]
 	decision, err = rbac.Authorize(ctx, req)
@@ -97,8 +97,8 @@ func TestAuthorizerContractScopedProducesSpec(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.True(t, decision.Allowed)
-	require.Equal(t, spec.Eq(spec.RoleOwner, "u1").Canonical(), decision.Spec.Canonical())
-	require.Equal(t, []spec.Role{spec.RoleOwner}, full.Vocabulary().Roles)
+	require.Equal(t, spec.Eq(meta.ByDimension("owner"), "u1").Canonical(), decision.Spec.Canonical())
+	require.Equal(t, []meta.Ref{meta.ByDimension("owner"), meta.ByField("Owner")}, full.Vocabulary().Refs)
 }
 
 func TestAuthorizerContractSystemIdentityBypassesPolicy(t *testing.T) {

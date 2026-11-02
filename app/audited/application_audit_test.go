@@ -3,12 +3,14 @@ package audited
 import (
 	"context"
 	"encoding/json"
+	"gochen/domain/meta"
 	"strings"
 	"testing"
 
 	appcrud "gochen/app/crud"
 	"gochen/auth"
 	"gochen/contextx"
+
 	domaudited "gochen/domain/audited"
 	"gochen/domain/spec"
 	"gochen/errors"
@@ -91,8 +93,8 @@ func TestAuditBoundaryFromEntity(t *testing.T) {
 
 	records := auditRecords(t, repo, ctx, doc.GetID())
 	record := records[0]
-	if record.TenantID != "tenant-a" || record.ScopeID != 42 || record.OwnerID != "owner-a" {
-		t.Fatalf("boundary = %s/%d/%s", record.TenantID, record.ScopeID, record.OwnerID)
+	if auditTenant(record) != "tenant-a" || auditScope(record) != 42 || auditOwner(record) != "owner-a" {
+		t.Fatalf("boundary = %s/%d/%s", auditTenant(record), auditScope(record), auditOwner(record))
 	}
 }
 
@@ -193,8 +195,8 @@ func TestAuditTrailRejectsNonBoundarySpec(t *testing.T) {
 	app, _ := newAuditedApplication(t, Options[*auditDoc, int64]{
 		Options: appcrud.Options[*auditDoc, int64]{
 			Authorizer: staticAuthorizer{
-				spec:  spec.Eq("Name", "x"),
-				vocab: auth.Vocabulary{Fields: []string{"Name"}},
+				spec:  spec.Eq(meta.ByField("Name"), "x"),
+				vocab: auth.Vocabulary{Refs: []meta.Ref{meta.ByField("Name")}},
 			},
 		},
 	})
@@ -209,8 +211,8 @@ func TestAuditTrailFiltersByBoundarySpec(t *testing.T) {
 		return Options[*auditDoc, int64]{
 			Options: appcrud.Options[*auditDoc, int64]{
 				Authorizer: staticAuthorizer{
-					spec:  spec.Eq(spec.RoleOwner, owner),
-					vocab: auth.Vocabulary{Roles: []spec.Role{spec.RoleOwner}},
+					spec:  spec.Eq(meta.ByDimension("owner"), owner),
+					vocab: auth.Vocabulary{Refs: []meta.Ref{meta.ByDimension("owner")}},
 				},
 			},
 		}

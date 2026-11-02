@@ -2,11 +2,12 @@ package crud
 
 import (
 	"context"
-	"testing"
-
 	"gochen/app/internal/execution"
 	"gochen/app/query"
 	"gochen/auth"
+	"gochen/domain/meta"
+	"testing"
+
 	domaincrud "gochen/domain/crud"
 	"gochen/domain/spec"
 	"gochen/errors"
@@ -123,7 +124,7 @@ func TestQueryCountUsesFiltersAndOneAuthorization(t *testing.T) {
 		}
 	}
 	authorizer := newCountingAuthorizer()
-	authorizer.inner = fixedAuthorizer{decision: auth.Decision{Allowed: true, Spec: spec.Eq(spec.RoleOwner, "alice")}, vocabulary: auth.Vocabulary{Roles: []spec.Role{spec.RoleOwner}}}
+	authorizer.inner = fixedAuthorizer{decision: auth.Decision{Allowed: true, Spec: spec.Eq(meta.ByDimension("owner"), "alice")}, vocabulary: auth.Vocabulary{Refs: []meta.Ref{meta.ByDimension("owner")}}}
 	app, _ := newTestApplicationWithRepo(t, repo, Options[*testEntity, int64]{Authorizer: authorizer})
 	count, err := app.QueryCount(t.Context(), query.QueryOptions{Offset: 100, Limit: 1, Fields: []string{"unknown"}, Sorts: []query.Sort{{Field: "unknown"}}, Filters: eqFilter("name", "match")})
 	if err != nil || count != 2 {
@@ -139,10 +140,13 @@ func TestQueryCountUsesFiltersAndOneAuthorization(t *testing.T) {
 }
 
 func TestApplicationPropagatesAuthorizerSpec(t *testing.T) {
-	repo := testkit.NewMemoryRepository[*testEntity, int64](testkit.NewInt64Sequence(100))
+	repo, repositoryErr := testkit.NewMemoryRepository[*testEntity, int64](testkit.NewInt64Sequence(100))
+	if repositoryErr != nil {
+		t.Fatal(repositoryErr)
+	}
 	ownerSpec := fixedAuthorizer{
-		decision:   auth.Decision{Allowed: true, Spec: spec.Eq(spec.RoleOwner, "alice")},
-		vocabulary: auth.Vocabulary{Roles: []spec.Role{spec.RoleOwner}},
+		decision:   auth.Decision{Allowed: true, Spec: spec.Eq(meta.ByDimension("owner"), "alice")},
+		vocabulary: auth.Vocabulary{Refs: []meta.Ref{meta.ByDimension("owner")}},
 	}
 	app, _ := newTestApplicationWithRepo(t, repo, Options[*testEntity, int64]{
 		Authorizer: ownerSpec,
@@ -199,9 +203,9 @@ func TestCreateAppliesServerAssignments(t *testing.T) {
 		decision: auth.Decision{
 			Allowed: true,
 			Spec:    spec.All(),
-			Assign:  []auth.Assignment{{Role: spec.RoleOwner, Value: "mike"}},
+			Assign:  []auth.Assignment{{Dimension: "owner", Value: "mike"}},
 		},
-		vocabulary: auth.Vocabulary{Roles: []spec.Role{spec.RoleOwner}},
+		vocabulary: auth.Vocabulary{Refs: []meta.Ref{meta.ByDimension("owner")}, Assignable: []meta.Dimension{"owner"}},
 	}
 	app, _ := newTestApplicationWithRepo(t, repo, Options[*testEntity, int64]{Authorizer: assigning})
 	ctx := context.Background()
@@ -226,15 +230,20 @@ func TestCreateAppliesServerAssignments(t *testing.T) {
 
 func TestNewApplicationRejectsUnknownNamedCondition(t *testing.T) {
 	authorizer := fixedAuthorizer{
-		decision:   auth.Decision{Allowed: true, Spec: spec.All()},
-		vocabulary: auth.Vocabulary{Named: []string{"mine"}},
+		decision:   auth.Decision{Allowed: true, Spec: spec.Named("active")},
+		vocabulary: auth.Vocabulary{},
 	}
 	repo := newTestRepo()
-	if _, err := NewApplication[*testEntity, int64](repo, Options[*testEntity, int64]{
+	app, err := NewApplication[*testEntity, int64](repo, Options[*testEntity, int64]{
 		Resource:   "doc",
 		Authorizer: authorizer,
-	}); !errors.Is(err, errors.InvalidInput) {
-		t.Fatalf("NewApplication() error = %v, want InvalidInput", err)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = app.Get(context.Background(), 1)
+	if !errors.Is(err, errors.Internal) {
+		t.Fatalf("Get() error = %v, want Internal", err)
 	}
 }
 
@@ -307,7 +316,10 @@ func TestAuditTrailRequiresAuditStore(t *testing.T) {
 }
 
 func TestApplicationWithAuditStoreWritesTrail(t *testing.T) {
-	repo := testkit.NewAuditedMemoryRepository[*auditEntity, int64](testkit.NewInt64Sequence(1))
+	repo, repositoryErr := testkit.NewAuditedMemoryRepository[*auditEntity, int64](testkit.NewInt64Sequence(1))
+	if repositoryErr != nil {
+		t.Fatal(repositoryErr)
+	}
 	app, err := NewApplication[*auditEntity, int64](repo, Options[*auditEntity, int64]{
 		Resource:   "doc",
 		Authorizer: auth.Allow(),

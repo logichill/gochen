@@ -14,7 +14,21 @@ import (
 //   - 目标 bool：接受 bool 与可解析的 string；
 //   - 目标指针：先转换元素类型，再取地址。
 func convertTo(t reflect.Type, v any, field string) (reflect.Value, error) {
+	if v != nil {
+		src := reflect.ValueOf(v)
+		for src.Kind() == reflect.Ptr || src.Kind() == reflect.Interface {
+			if src.IsNil() {
+				v = nil
+				break
+			}
+			src = src.Elem()
+			v = src.Interface()
+		}
+	}
 	if v == nil {
+		if t.Kind() == reflect.Ptr {
+			return reflect.Zero(t), nil
+		}
 		return reflect.Value{}, conversionError(field, t, v, "value cannot be nil")
 	}
 	if t.Kind() == reflect.Ptr {

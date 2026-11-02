@@ -68,8 +68,8 @@ func TestPurgeWritesAuditWithReasonAndBoundary(t *testing.T) {
 	if record.Changes != nil {
 		t.Fatalf("purge changes = %s, want nil", string(record.Changes))
 	}
-	if record.TenantID != "tenant-a" || record.ScopeID != 42 || record.OwnerID != "owner-a" {
-		t.Fatalf("purge boundary = %s/%d/%s", record.TenantID, record.ScopeID, record.OwnerID)
+	if auditTenant(record) != "tenant-a" || auditScope(record) != 42 || auditOwner(record) != "owner-a" {
+		t.Fatalf("purge boundary = %s/%d/%s", auditTenant(record), auditScope(record), auditOwner(record))
 	}
 	if trail, err := app.AuditTrail(ctx, doc.GetID(), 0, 10); err != nil || len(trail) != 3 {
 		t.Fatalf("AuditTrail() = %d, %v", len(trail), err)

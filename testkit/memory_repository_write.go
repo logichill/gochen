@@ -14,7 +14,7 @@ func (r *MemoryRepository[T, ID]) Create(ctx context.Context, entity T, s spec.S
 	if err := validateMemoryCall(ctx, entity); err != nil {
 		return err
 	}
-	if err := requireWriteSpec(s, true); err != nil {
+	if err := r.execution.ValidateWriteSpec(s, true); err != nil {
 		return err
 	}
 	if err := r.guardCrossIsolationWrite(ctx); err != nil {
@@ -29,7 +29,7 @@ func (r *MemoryRepository[T, ID]) Create(ctx context.Context, entity T, s spec.S
 		return err
 	}
 	if isolated {
-		if err := stampIsolation[T, ID](entity, isolationID); err != nil {
+		if err := r.stampIsolation(entity, isolationID); err != nil {
 			return err
 		}
 	}
@@ -47,7 +47,7 @@ func (r *MemoryRepository[T, ID]) Update(ctx context.Context, entity T, s spec.S
 	if err := validateMemoryCall(ctx, entity); err != nil {
 		return err
 	}
-	if err := requireWriteSpec(s, false); err != nil {
+	if err := r.execution.ValidateWriteSpec(s, false); err != nil {
 		return err
 	}
 	if err := r.guardCrossIsolationWrite(ctx); err != nil {
@@ -65,12 +65,8 @@ func (r *MemoryRepository[T, ID]) Update(ctx context.Context, entity T, s spec.S
 			return entityNotFound(id)
 		}
 		if isolated {
-			if !visibleInIsolation[T, ID](existing, isolationID) {
+			if !r.visibleInIsolation(existing, isolationID) {
 				return entityNotFound(id)
-			}
-			// 归属不可被更新篡改。
-			if err := stampIsolation[T, ID](entity, isolationID); err != nil {
-				return err
 			}
 		}
 		if softDeleted(existing) {
@@ -86,13 +82,20 @@ func (r *MemoryRepository[T, ID]) Update(ctx context.Context, entity T, s spec.S
 		if versioned[T, ID](entity) && existing.GetVersion() != expectedVersion {
 			return concurrencyError(id, expectedVersion)
 		}
+		protected, err := r.execution.CaptureProtected(existing)
+		if err != nil {
+			return err
+		}
+		if err := r.execution.CheckProtected(protected, entity); err != nil {
+			return err
+		}
 		if err := r.checkWriteSpec(s, entity); err != nil {
 			return err
 		}
 		if setter, ok := any(entity).(domain.ISettableVersion); ok {
 			setter.SetVersion(expectedVersion + 1)
 		}
-		state.entities[id] = shallowClone(entity)
+		state.entities[id] = cloneEntityState(entity)
 		return nil
 	})
 	if err != nil {
@@ -117,7 +120,7 @@ func (r *MemoryRepository[T, ID]) delete(ctx context.Context, entity T, s spec.S
 	if err := validateMemoryCall(ctx, entity); err != nil {
 		return err
 	}
-	if err := requireWriteSpec(s, false); err != nil {
+	if err := r.execution.ValidateWriteSpec(s, false); err != nil {
 		return err
 	}
 	if err := r.guardCrossIsolationWrite(ctx); err != nil {
@@ -134,7 +137,7 @@ func (r *MemoryRepository[T, ID]) delete(ctx context.Context, entity T, s spec.S
 		if !ok {
 			return entityNotFound(id)
 		}
-		if isolated && !visibleInIsolation[T, ID](existing, isolationID) {
+		if isolated && !r.visibleInIsolation(existing, isolationID) {
 			return entityNotFound(id)
 		}
 		if !includeDeleted && softDeleted(existing) {
@@ -172,7 +175,7 @@ func (r *MemoryRepository[T, ID]) GetWithDeleted(ctx context.Context, id ID, s s
 		if !ok {
 			return entityNotFound(id)
 		}
-		if isolated && !visibleInIsolation[T, ID](entity, isolationID) {
+		if isolated && !r.visibleInIsolation(entity, isolationID) {
 			return entityNotFound(id)
 		}
 		visible, matchErr := r.matchSpec(s, entity)
@@ -182,18 +185,19 @@ func (r *MemoryRepository[T, ID]) GetWithDeleted(ctx context.Context, id ID, s s
 		if !visible {
 			return entityNotFound(id)
 		}
-		result = shallowClone(entity)
+		result = cloneEntityState(entity)
 		return nil
 	})
 	return result, err
 }
 
-// Restore 恢复已软删实体；目标可见但未处于删除态时返回 errors.Conflict。
+// Restore 恢复已软删实体；目标可见但未处于删除态时返回 errors.Conflict，
+// 恢复后的状态不满足规约时返回 errors.Forbidden。
 func (r *MemoryRepository[T, ID]) Restore(ctx context.Context, entity T, s spec.Spec) error {
 	if err := validateMemoryCall(ctx, entity); err != nil {
 		return err
 	}
-	if err := requireWriteSpec(s, false); err != nil {
+	if err := r.execution.ValidateWriteSpec(s, false); err != nil {
 		return err
 	}
 	if err := r.guardCrossIsolationWrite(ctx); err != nil {
@@ -209,7 +213,7 @@ func (r *MemoryRepository[T, ID]) Restore(ctx context.Context, entity T, s spec.
 		if !ok {
 			return entityNotFound(id)
 		}
-		if isolated && !visibleInIsolation[T, ID](existing, isolationID) {
+		if isolated && !r.visibleInIsolation(existing, isolationID) {
 			return entityNotFound(id)
 		}
 		visible, matchErr := r.matchSpec(s, existing)
@@ -223,10 +227,23 @@ func (r *MemoryRepository[T, ID]) Restore(ctx context.Context, entity T, s spec.
 			return errors.NewCode(errors.Conflict, "entity is not deleted").
 				WithContext("id", fmt.Sprint(id))
 		}
+		if existing.GetVersion() != entity.GetVersion() {
+			return concurrencyError(id, entity.GetVersion())
+		}
+		protected, err := r.execution.CaptureProtected(existing)
+		if err != nil {
+			return err
+		}
+		if err := r.execution.CheckProtected(protected, entity); err != nil {
+			return err
+		}
+		if err := r.checkWriteSpec(s, entity); err != nil {
+			return err
+		}
 		if setter, ok := any(entity).(domain.ISettableVersion); ok {
 			setter.SetVersion(entity.GetVersion() + 1)
 		}
-		state.entities[id] = shallowClone(entity)
+		state.entities[id] = cloneEntityState(entity)
 		return nil
 	})
 }
@@ -245,7 +262,7 @@ func (r *MemoryRepository[T, ID]) ListDeleted(ctx context.Context, offset, limit
 		visible := make([]ID, 0, len(state.order))
 		for _, id := range state.order {
 			entity := state.entities[id]
-			if isolated && !visibleInIsolation[T, ID](entity, isolationID) {
+			if isolated && !r.visibleInIsolation(entity, isolationID) {
 				continue
 			}
 			if !softDeleted(entity) {
@@ -262,7 +279,7 @@ func (r *MemoryRepository[T, ID]) ListDeleted(ctx context.Context, offset, limit
 		start, end := pageBounds(len(visible), offset, limit)
 		result = make([]T, 0, end-start)
 		for _, id := range visible[start:end] {
-			result = append(result, shallowClone(state.entities[id]))
+			result = append(result, cloneEntityState(state.entities[id]))
 		}
 		return nil
 	})
@@ -328,7 +345,7 @@ func (r *MemoryRepository[T, ID]) createInState(state *memoryState[T, ID], entit
 	if _, exists := state.entities[id]; exists {
 		return errors.NewCode(errors.Conflict, "entity already exists").WithContext("id", fmt.Sprint(id))
 	}
-	state.entities[id] = shallowClone(entity)
+	state.entities[id] = cloneEntityState(entity)
 	state.order = append(state.order, id)
 	return nil
 }

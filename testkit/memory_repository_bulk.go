@@ -12,7 +12,7 @@ func (r *MemoryRepository[T, ID]) CreateBulk(ctx context.Context, entities []T, 
 	if err := validateContext(ctx); err != nil {
 		return err
 	}
-	if err := requireWriteSpec(s, true); err != nil {
+	if err := r.execution.ValidateWriteSpec(s, true); err != nil {
 		return err
 	}
 	if err := r.guardCrossIsolationWrite(ctx); err != nil {
@@ -37,7 +37,7 @@ func (r *MemoryRepository[T, ID]) CreateBulk(ctx context.Context, entities []T, 
 	}
 	if isolated {
 		for _, entity := range entities {
-			if err := stampIsolation[T, ID](entity, isolationID); err != nil {
+			if err := r.stampIsolation(entity, isolationID); err != nil {
 				return err
 			}
 		}
@@ -50,7 +50,7 @@ func (r *MemoryRepository[T, ID]) CreateBulk(ctx context.Context, entities []T, 
 	return r.withWriteState(ctx, func(state *memoryState[T, ID]) error {
 		candidate := cloneMemoryState(*state)
 		for _, entity := range entities {
-			if err := r.createInState(&candidate, shallowClone(entity)); err != nil {
+			if err := r.createInState(&candidate, cloneEntityState(entity)); err != nil {
 				return err
 			}
 		}
@@ -64,7 +64,7 @@ func (r *MemoryRepository[T, ID]) UpdateBulk(ctx context.Context, entities []T, 
 	if err := validateContext(ctx); err != nil {
 		return err
 	}
-	if err := requireWriteSpec(s, false); err != nil {
+	if err := r.execution.ValidateWriteSpec(s, false); err != nil {
 		return err
 	}
 	if err := r.guardCrossIsolationWrite(ctx); err != nil {
@@ -98,7 +98,7 @@ func (r *MemoryRepository[T, ID]) UpdateBulk(ctx context.Context, entities []T, 
 			if !ok {
 				return entityNotFound(id)
 			}
-			if isolated && !visibleInIsolation[T, ID](existing, isolationID) {
+			if isolated && !r.visibleInIsolation(existing, isolationID) {
 				return entityNotFound(id)
 			}
 			if softDeleted(existing) {
@@ -114,12 +114,19 @@ func (r *MemoryRepository[T, ID]) UpdateBulk(ctx context.Context, entities []T, 
 			if versioned[T, ID](entity) && existing.GetVersion() != expectedVersions[id] {
 				return concurrencyError(id, expectedVersions[id])
 			}
+			protected, err := r.execution.CaptureProtected(existing)
+			if err != nil {
+				return err
+			}
+			if err := r.execution.CheckProtected(protected, entity); err != nil {
+				return err
+			}
 		}
 		candidate := cloneMemoryState(*state)
 		for _, entity := range entities {
 			id := entity.GetID()
 			if isolated {
-				if err := stampIsolation[T, ID](entity, isolationID); err != nil {
+				if err := r.stampIsolation(entity, isolationID); err != nil {
 					return err
 				}
 			}
@@ -129,7 +136,7 @@ func (r *MemoryRepository[T, ID]) UpdateBulk(ctx context.Context, entities []T, 
 			if setter, ok := any(entity).(domain.ISettableVersion); ok {
 				setter.SetVersion(expectedVersions[id] + 1)
 			}
-			candidate.entities[id] = shallowClone(entity)
+			candidate.entities[id] = cloneEntityState(entity)
 		}
 		*state = candidate
 		return nil
@@ -149,7 +156,7 @@ func (r *MemoryRepository[T, ID]) DeleteBulk(ctx context.Context, entities []T, 
 	if err := validateContext(ctx); err != nil {
 		return err
 	}
-	if err := requireWriteSpec(s, false); err != nil {
+	if err := r.execution.ValidateWriteSpec(s, false); err != nil {
 		return err
 	}
 	if err := r.guardCrossIsolationWrite(ctx); err != nil {
@@ -183,7 +190,7 @@ func (r *MemoryRepository[T, ID]) DeleteBulk(ctx context.Context, entities []T, 
 			if !ok {
 				return entityNotFound(id)
 			}
-			if isolated && !visibleInIsolation[T, ID](existing, isolationID) {
+			if isolated && !r.visibleInIsolation(existing, isolationID) {
 				return entityNotFound(id)
 			}
 			if softDeleted(existing) {

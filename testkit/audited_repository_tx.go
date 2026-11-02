@@ -14,7 +14,7 @@ type auditedTransaction[T audited.IAuditedEntity[ID], ID comparable] struct {
 	mu                sync.Mutex
 	repository        *AuditedMemoryRepository[T, ID]
 	entityTransaction *memoryTransaction[T, ID]
-	audits            map[string][]audited.AuditRecord
+	audits            map[string][]memoryAuditRecord
 	nextAuditID       int64
 	baseAuditRevision uint64
 	closed            bool

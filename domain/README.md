@@ -6,7 +6,8 @@
 
 | 子包 | 内容 | 场景 |
 | --- | --- | --- |
-| `domain/crud` | `Entity`、`TenantEntity`、仓储与批量 / 清洗接口 | 一般管理数据 |
+| `domain/crud` | `Entity`、条件仓储、迁移与批量 / 清洗接口 | 一般管理数据 |
+| `domain/meta` / `domain/spec` | 开放维度、类型化引用、转换和条件解释器 | 实体与历史快照共用的条件 |
 | `domain/audited` | 审计字段、软删除、恢复和审计存储端口 | 需要审计轨迹的管理数据 |
 | `domain/eventsourced` | 聚合基类、metadata、领域事件存储与仓储端口 | 通过事件流重建业务状态 |
 
@@ -19,7 +20,9 @@
 
 仓储错误通过 `gochen/errors` 表达；基础仓储的 Delete 可采用幂等或严格未命中语义，具体实现须明确。领域查询优先使用有业务含义的方法；`app/query` 是适配器查询协议，不属于领域层依赖。
 
-`TenantEntity` 只声明租户字段与访问方法，不负责开启隔离。隔离在 Runtime Repo 构造期声明，详见[分层授权](../docs/architecture/layered-authz.md)。
+实体以 `entity:"id"` 标记标识，以 `dim:"..."` 声明项目维度，以 `managed:"true"` 声明托管字段。`meta.Ref` 通过 ID、ByField、ByDimension 构造，字段和维度别名统一解析。维度支持标量及一层标量指针。
+
+`auth.TenantEntity` 提供租户便利类型，隔离在 Runtime Repo 构造期显式声明。全部维度默认受普通更新保护，mutable / assignable / transferable 由资源契约配置；独立迁移通过 `ITransferRepository` 执行，详见[分层授权](../docs/architecture/layered-authz.md)。
 
 ## 审计与软删除
 
@@ -28,6 +31,8 @@
 `IAuditStore` 定义审计记录存取。包含已删读取与已删除列表分别由 `IRestoreRepository`、`IDeletedQueryRepository` 表达。事务、operator 注入和审计持久化由 [app/audited](../app/README.md#审计型-crud)及具体仓储负责。
 
 ## 事件溯源
+
+`AuditRecord.Dimensions` 保存全部维度的不可变标量快照，`OperationID` 关联一次逻辑操作。审计读取通过同一解释器对历史事实求值，缺键明确失败，实体物理删除后仍可查询。迁移两侧各保存自己的前后像快照。
 
 `IDomainEvent` 只要求稳定的 `EventType()`。`EventSourcedAggregate` 管理版本与未提交事件，`ApplyAndRecord` 应用并记录事件，仓储以 `GetExpectedVersion()` 作为保存基线。
 

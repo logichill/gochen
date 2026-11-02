@@ -14,7 +14,10 @@ import (
 // 嵌套内层回滚为 no-op，内层写入随外层提交固化（生产 SQL 嵌套事务同样
 // 不撤销已执行写入）；外层与其后提交照常生效。
 func TestNestedMemoryTxInnerRollbackKeepsInnerWritesRuntimeParity(t *testing.T) {
-	r := NewMemoryRepository[*stringMemoryEntity, string](nil)
+	r, repositoryErr := NewMemoryRepository[*stringMemoryEntity, string](nil)
+	if repositoryErr != nil {
+		t.Fatal(repositoryErr)
+	}
 	if err := r.Create(context.Background(), &stringMemoryEntity{ID: "a", Name: "outer"}, spec.All()); err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +54,10 @@ func TestNestedMemoryTxInnerRollbackKeepsInnerWritesRuntimeParity(t *testing.T) 
 
 // 外层自身回滚不受 aborted 标记影响（回归保护）。
 func TestMemoryTxOuterRollbackStillWorks(t *testing.T) {
-	r := NewMemoryRepository[*stringMemoryEntity, string](nil)
+	r, repositoryErr := NewMemoryRepository[*stringMemoryEntity, string](nil)
+	if repositoryErr != nil {
+		t.Fatal(repositoryErr)
+	}
 	if err := r.Create(context.Background(), &stringMemoryEntity{ID: "a"}, spec.All()); err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +79,10 @@ func TestMemoryTxOuterRollbackStillWorks(t *testing.T) {
 
 // 无嵌套场景的提交不受影响（回归保护）。
 func TestMemoryTxPlainCommitStillWorks(t *testing.T) {
-	r := NewMemoryRepository[*stringMemoryEntity, string](nil)
+	r, repositoryErr := NewMemoryRepository[*stringMemoryEntity, string](nil)
+	if repositoryErr != nil {
+		t.Fatal(repositoryErr)
+	}
 	if err := r.WithinTx(context.Background(), func(ctx context.Context) error {
 		return r.Create(ctx, &stringMemoryEntity{ID: "x"}, spec.All())
 	}); err != nil {
@@ -87,7 +96,10 @@ func TestMemoryTxPlainCommitStillWorks(t *testing.T) {
 // P1-014 回归：嵌套内层回滚后，内层注册的 after-commit 回调不得执行，
 // 外层回调仍随外层提交正常执行（保存点语义）。
 func TestNestedRollbackPreventsAfterCommitCallbacks(t *testing.T) {
-	r := NewMemoryRepository[*stringMemoryEntity, string](nil)
+	r, repositoryErr := NewMemoryRepository[*stringMemoryEntity, string](nil)
+	if repositoryErr != nil {
+		t.Fatal(repositoryErr)
+	}
 	outerRan := false
 	innerRan := false
 	err := r.WithinTx(context.Background(), func(outerCtx context.Context) error {
@@ -126,7 +138,10 @@ var errRollback = errors.NewCode(errors.FailedPrecondition, "rollback requested"
 
 // 多层嵌套（P2#17 特征测试）：任意内层回滚均为 no-op，全部写入随最外层提交固化。
 func TestNestedMemoryTxMultiLevelInnerRollbackNoOpRuntimeParity(t *testing.T) {
-	r := NewMemoryRepository[*stringMemoryEntity, string](nil)
+	r, repositoryErr := NewMemoryRepository[*stringMemoryEntity, string](nil)
+	if repositoryErr != nil {
+		t.Fatal(repositoryErr)
+	}
 	err := r.WithinTx(context.Background(), func(l1 context.Context) error {
 		if err := r.Create(l1, &stringMemoryEntity{ID: "l1", Name: "level1"}, spec.All()); err != nil {
 			return err
@@ -159,7 +174,10 @@ func TestNestedMemoryTxMultiLevelInnerRollbackNoOpRuntimeParity(t *testing.T) {
 
 // 内层提交时其写入并入外层，外层回滚后一并丢弃。
 func TestNestedMemoryTxInnerCommitMergesIntoOuter(t *testing.T) {
-	r := NewMemoryRepository[*stringMemoryEntity, string](nil)
+	r, repositoryErr := NewMemoryRepository[*stringMemoryEntity, string](nil)
+	if repositoryErr != nil {
+		t.Fatal(repositoryErr)
+	}
 	err := r.WithinTx(context.Background(), func(outer context.Context) error {
 		innerErr := r.WithinTx(outer, func(inner context.Context) error {
 			return r.Create(inner, &stringMemoryEntity{ID: "merged", Name: "inner"}, spec.All())
@@ -179,7 +197,10 @@ func TestNestedMemoryTxInnerCommitMergesIntoOuter(t *testing.T) {
 
 // 同一嵌套作用域的重复 Commit 必须幂等，不得误释放外层保存点。
 func TestNestedMemoryTxRepeatedCommitKeepsOuterSavepoint(t *testing.T) {
-	r := NewMemoryRepository[*stringMemoryEntity, string](nil)
+	r, repositoryErr := NewMemoryRepository[*stringMemoryEntity, string](nil)
+	if repositoryErr != nil {
+		t.Fatal(repositoryErr)
+	}
 	err := r.WithinTx(context.Background(), func(outerCtx context.Context) error {
 		l1, err := r.BeginTx(outerCtx)
 		if err != nil {
@@ -215,7 +236,10 @@ func TestNestedMemoryTxRepeatedCommitKeepsOuterSavepoint(t *testing.T) {
 
 // 同一嵌套作用域的重复 Rollback 必须幂等（no-op），写入随外层提交固化。
 func TestNestedMemoryTxRepeatedRollbackIsIdempotent(t *testing.T) {
-	r := NewMemoryRepository[*stringMemoryEntity, string](nil)
+	r, repositoryErr := NewMemoryRepository[*stringMemoryEntity, string](nil)
+	if repositoryErr != nil {
+		t.Fatal(repositoryErr)
+	}
 	err := r.WithinTx(context.Background(), func(outerCtx context.Context) error {
 		l1, err := r.BeginTx(outerCtx)
 		if err != nil {
@@ -240,7 +264,10 @@ func TestNestedMemoryTxRepeatedRollbackIsIdempotent(t *testing.T) {
 // 审计仓储：嵌套作用域重复 Commit 幂等（no-op），内层回滚同样 no-op，
 // 实体与审计记录随外层提交固化（与生产 SQL 嵌套语义一致）。
 func TestAuditedNestedTxRepeatedCommitIsIdempotentNoOp(t *testing.T) {
-	r := NewAuditedMemoryRepository[*auditedMemoryEntity, int64](NewInt64Sequence(1))
+	r, repositoryErr := NewAuditedMemoryRepository[*auditedMemoryEntity, int64](NewInt64Sequence(1))
+	if repositoryErr != nil {
+		t.Fatal(repositoryErr)
+	}
 	ctx := context.Background()
 
 	err := r.WithinTx(ctx, func(outer context.Context) error {
@@ -251,7 +278,7 @@ func TestAuditedNestedTxRepeatedCommitIsIdempotentNoOp(t *testing.T) {
 		if _, err := r.SaveAuditRecord(l1.Context(), audited.AuditRecord{
 			EntityID: "1",
 			Action:   "create",
-			Operator: "l1",
+			Operator: "l1", OperationID: "test-operation", ResourceKind: "doc",
 		}); err != nil {
 			return err
 		}
@@ -262,7 +289,7 @@ func TestAuditedNestedTxRepeatedCommitIsIdempotentNoOp(t *testing.T) {
 		if _, err := r.SaveAuditRecord(l2.Context(), audited.AuditRecord{
 			EntityID: "1",
 			Action:   "update",
-			Operator: "l2",
+			Operator: "l2", OperationID: "test-operation", ResourceKind: "doc",
 		}); err != nil {
 			return err
 		}
@@ -289,14 +316,17 @@ func TestAuditedNestedTxRepeatedCommitIsIdempotentNoOp(t *testing.T) {
 
 // P2#17 特征测试：审计仓储嵌套内层回滚为 no-op，内层审计记录随外层提交固化。
 func TestAuditedNestedTxInnerRollbackKeepsInnerAuditRuntimeParity(t *testing.T) {
-	r := NewAuditedMemoryRepository[*auditedMemoryEntity, int64](NewInt64Sequence(1))
+	r, repositoryErr := NewAuditedMemoryRepository[*auditedMemoryEntity, int64](NewInt64Sequence(1))
+	if repositoryErr != nil {
+		t.Fatal(repositoryErr)
+	}
 	ctx := context.Background()
 
 	err := r.WithinTx(ctx, func(outer context.Context) error {
 		if _, err := r.SaveAuditRecord(outer, audited.AuditRecord{
 			EntityID: "1",
 			Action:   "create",
-			Operator: "outer",
+			Operator: "outer", OperationID: "test-operation", ResourceKind: "doc",
 		}); err != nil {
 			return err
 		}
@@ -304,7 +334,7 @@ func TestAuditedNestedTxInnerRollbackKeepsInnerAuditRuntimeParity(t *testing.T) 
 			if _, err := r.SaveAuditRecord(inner, audited.AuditRecord{
 				EntityID: "1",
 				Action:   "delete",
-				Operator: "inner",
+				Operator: "inner", OperationID: "test-operation", ResourceKind: "doc",
 			}); err != nil {
 				return err
 			}
@@ -335,8 +365,14 @@ var errInnerResource = errors.NewCode(errors.FailedPrecondition, "inner resource
 // WithinTx）内时，其提交不得封存宿主共享的 after-commit 回调批次——宿主在
 // 资源事务提交后仍可注册回调，且全部回调随宿主提交正常执行。
 func TestChainNestedResourceTxCommitDoesNotSealHostCallbacks(t *testing.T) {
-	host := NewMemoryRepository[*stringMemoryEntity, string](nil)
-	inner := NewMemoryRepository[*stringMemoryEntity, string](nil)
+	host, repositoryErr := NewMemoryRepository[*stringMemoryEntity, string](nil)
+	if repositoryErr != nil {
+		t.Fatal(repositoryErr)
+	}
+	inner, repositoryErr := NewMemoryRepository[*stringMemoryEntity, string](nil)
+	if repositoryErr != nil {
+		t.Fatal(repositoryErr)
+	}
 	ctx := context.Background()
 
 	hostCbRan, innerCbRan, hostLateCbRan := false, false, false
@@ -380,8 +416,14 @@ func TestChainNestedResourceTxCommitDoesNotSealHostCallbacks(t *testing.T) {
 // 回调随宿主提交正常执行，仅内层新增回调被撤销；宿主在内层失败后仍可继续
 // 注册回调并提交。
 func TestChainNestedResourceTxRollbackKeepsHostCallbacks(t *testing.T) {
-	host := NewMemoryRepository[*stringMemoryEntity, string](nil)
-	inner := NewMemoryRepository[*stringMemoryEntity, string](nil)
+	host, repositoryErr := NewMemoryRepository[*stringMemoryEntity, string](nil)
+	if repositoryErr != nil {
+		t.Fatal(repositoryErr)
+	}
+	inner, repositoryErr := NewMemoryRepository[*stringMemoryEntity, string](nil)
+	if repositoryErr != nil {
+		t.Fatal(repositoryErr)
+	}
 	ctx := context.Background()
 
 	hostCbRan, innerCbRan, hostLateCbRan := false, false, false
@@ -429,8 +471,14 @@ func TestChainNestedResourceTxRollbackKeepsHostCallbacks(t *testing.T) {
 
 // P2#16 回归：审计仓储事务作为链路内独立资源事务时同样不得触碰宿主回调状态。
 func TestAuditedChainNestedResourceTxKeepsHostCallbacks(t *testing.T) {
-	host := NewMemoryRepository[*stringMemoryEntity, string](nil)
-	inner := NewAuditedMemoryRepository[*auditedMemoryEntity, int64](NewInt64Sequence(1))
+	host, repositoryErr := NewMemoryRepository[*stringMemoryEntity, string](nil)
+	if repositoryErr != nil {
+		t.Fatal(repositoryErr)
+	}
+	inner, repositoryErr := NewAuditedMemoryRepository[*auditedMemoryEntity, int64](NewInt64Sequence(1))
+	if repositoryErr != nil {
+		t.Fatal(repositoryErr)
+	}
 	ctx := context.Background()
 
 	hostCbRan, innerCbRan := false, false
@@ -451,7 +499,7 @@ func TestAuditedChainNestedResourceTxKeepsHostCallbacks(t *testing.T) {
 			if _, err := inner.SaveAuditRecord(innerCtx, audited.AuditRecord{
 				EntityID: "1",
 				Action:   "create",
-				Operator: "inner",
+				Operator: "inner", OperationID: "test-operation", ResourceKind: "doc",
 			}); err != nil {
 				return err
 			}

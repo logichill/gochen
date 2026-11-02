@@ -8,9 +8,11 @@ import (
 	"strings"
 
 	"gochen/app/internal/depcheck"
+	"gochen/app/operation"
 	"gochen/auth"
 	"gochen/contextx"
 	domaudited "gochen/domain/audited"
+	"gochen/domain/meta"
 	"gochen/domain/spec"
 	"gochen/errors"
 )
@@ -94,7 +96,11 @@ func (c *Core[T, ID]) project(entity T) (any, error) {
 	if c.projector == nil {
 		return entity, nil
 	}
-	return c.projector(entity)
+	view, err := meta.Clone(entity)
+	if err != nil {
+		return nil, err
+	}
+	return c.projector(view)
 }
 
 // snapshot 在指定时刻生成审计快照；调用方必须在实体被修改前立即调用。
@@ -106,8 +112,11 @@ func (c *Core[T, ID]) snapshot(entity T) (json.RawMessage, error) {
 	return marshalJSON(target, "marshal audit snapshot")
 }
 
-func (c *Core[T, ID]) record(ctx context.Context, act Actor, action string, entity T, changes json.RawMessage) domaudited.AuditRecord {
-	tenant, scope, owner := c.boundary(ctx, entity)
+func (c *Core[T, ID]) record(ctx context.Context, act Actor, action string, entity T, changes json.RawMessage) (domaudited.AuditRecord, error) {
+	dimensions, err := domaudited.CaptureDimensions(c.metadata, entity)
+	if err != nil {
+		return domaudited.AuditRecord{}, err
+	}
 	return domaudited.AuditRecord{
 		ResourceKind:  c.resource,
 		EntityID:      FormatID(entity.GetID()),
@@ -116,12 +125,11 @@ func (c *Core[T, ID]) record(ctx context.Context, act Actor, action string, enti
 		Initiator:     act.Initiator,
 		Reason:        act.Reason,
 		CorrelationID: act.CorrelationID,
-		TenantID:      tenant,
-		ScopeID:       scope,
-		OwnerID:       owner,
+		OperationID:   operation.OperationIDFromContext(ctx),
+		Dimensions:    dimensions,
 		Timestamp:     nowUTC(),
 		Changes:       changes,
-	}
+	}, nil
 }
 
 func (c *Core[T, ID]) saveAudit(ctx context.Context, record domaudited.AuditRecord) error {
@@ -207,7 +215,7 @@ func (c *Core[T, ID]) ignoredAuditFields() map[string]struct{} {
 	fields := c.metadata.Fields()
 	out := make(map[string]struct{}, len(fields))
 	for _, field := range fields {
-		if field.Role == "" && !field.Managed {
+		if !field.Identity && !field.Managed {
 			continue
 		}
 		out[normalizeFieldName(field.Name)] = struct{}{}
@@ -235,7 +243,7 @@ func unmarshalSnapshot(data json.RawMessage) (map[string]any, error) {
 	return out, nil
 }
 
-// AuditTrail 返回实体的审计轨迹；规约只允许引用 @id / @scope / @owner。
+// AuditTrail 按资源、实体标识和写入时维度快照返回审计轨迹。
 func (c *Core[T, ID]) AuditTrail(ctx context.Context, id ID, offset, limit int) ([]domaudited.AuditRecord, error) {
 	if err := checkContext(ctx); err != nil {
 		return nil, err
@@ -247,28 +255,30 @@ func (c *Core[T, ID]) AuditTrail(ctx context.Context, id ID, offset, limit int) 
 	if err != nil {
 		return nil, err
 	}
-	if err := ValidateAuditSpec(s); err != nil {
+	if err := ValidateAuditSpec(s, c.metadata); err != nil {
 		return nil, err
 	}
-	s = spec.And(s, spec.Eq(spec.RoleID, FormatID(id)))
+	s = spec.And(s, spec.Eq(meta.ID(), FormatID(id)))
 	offset, limit = c.normalizePage(offset, limit)
 	return c.audits.ListAuditRecords(domaudited.WithAuditResourceKind(ctx, c.resource), FormatID(id), offset, limit, s)
 }
 
-// ValidateAuditSpec 校验审计轨迹规约只引用实体边界角色。
-func ValidateAuditSpec(s spec.Spec) error {
+// ValidateAuditSpec 校验审计规约引用实体标识或维度字段。
+func ValidateAuditSpec(s spec.Spec, metadata *meta.Metadata) error {
 	if err := s.Err(); err != nil {
 		return errors.Wrap(err, errors.Internal, "authorizer returned an invalid audit spec")
 	}
 	if s.HasNamed() {
 		return errors.NewCode(errors.Internal, "audit spec must not contain named conditions")
 	}
-	for _, field := range s.Fields() {
-		switch field {
-		case string(spec.RoleID), string(spec.RoleScope), string(spec.RoleOwner):
-		default:
+	for _, ref := range s.Refs() {
+		field, err := metadata.Resolve(ref)
+		if err != nil {
+			return err
+		}
+		if !field.Identity && field.Dimension == "" {
 			return errors.NewCode(errors.Internal, "audit spec references a disallowed field").
-				WithContext("field", field)
+				WithContext("reference", ref.String())
 		}
 	}
 	return nil

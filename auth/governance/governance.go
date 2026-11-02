@@ -1,7 +1,7 @@
 // Package governance 提供 L4 企业治理外壳：策略快照一致性、决策审计留痕与监控。
 //
 // 设计要点：
-//   - 治理能力实现为 **Authorizer Decorator**（包装 scoped.IAuthorizer），
+//   - 治理能力实现为 **Authorizer Decorator**（包装 auth.IAuthorizer），
 //     而不是包装 Application——不使用时完全不参与编译；
 //   - 固化调用链 Metrics(Log(Snapshot(base)))，包装顺序由本包决定，
 //     不允许业务层自行拼接（§4.3 风险控制）。

@@ -2,18 +2,18 @@ package testkit_test
 
 import (
 	"context"
-	"testing"
-
+	"gochen/auth"
 	"gochen/contextx"
 	"gochen/domain/crud"
 	"gochen/domain/spec"
 	"gochen/errors"
 	"gochen/testkit"
 	"gochen/testkit/require"
+	"testing"
 )
 
 func isoDocWithID(id int64) *isoDoc {
-	return &isoDoc{TenantEntity: crud.TenantEntity[int64]{Entity: crud.Entity[int64]{ID: id}}}
+	return &isoDoc{TenantEntity: auth.TenantEntity[int64]{Entity: crud.Entity[int64]{ID: id}}}
 }
 
 // L2 跨隔离只读阀门的内存侧行为特征测试。
@@ -37,11 +37,15 @@ func (a *recordingCrossIsolationAudit) RecordCrossIsolationRead(_ context.Contex
 
 func newCrossIsolationRepo(t *testing.T, audit testkit.ICrossIsolationAudit) *testkit.MemoryRepository[*isoDoc, int64] {
 	t.Helper()
-	return testkit.NewMemoryRepository[*isoDoc, int64](
+	repository, repositoryErr := testkit.NewMemoryRepository[*isoDoc, int64](
 		testkit.NewInt64Sequence(1),
 		testkit.WithMemoryIsolation[*isoDoc, int64](),
 		testkit.WithMemoryCrossIsolationReads[*isoDoc, int64](audit),
 	)
+	if repositoryErr != nil {
+		t.Fatal(repositoryErr)
+	}
+	return repository
 }
 
 func crossIsolationCtx(t *testing.T) context.Context {
@@ -161,19 +165,17 @@ func TestMemoryCrossIsolation_WritesAreAlwaysRefused(t *testing.T) {
 //  6. 构造期 fail-fast：没有留痕出口、或没有隔离可放的声明一律 panic
 //     （测试替身的 fail-fast 等价于生产侧构造期报错）。
 func TestMemoryCrossIsolation_DeclarationIsValidatedAtConstruction(t *testing.T) {
-	requirePanic(t, func() {
-		testkit.NewMemoryRepository[*isoDoc, int64](
-			testkit.NewInt64Sequence(1),
-			testkit.WithMemoryIsolation[*isoDoc, int64](),
-			testkit.WithMemoryCrossIsolationReads[*isoDoc, int64](nil),
-		)
-	})
-	requirePanic(t, func() {
-		testkit.NewMemoryRepository[*isoDoc, int64](
-			testkit.NewInt64Sequence(1),
-			testkit.WithMemoryCrossIsolationReads[*isoDoc, int64](&recordingCrossIsolationAudit{}),
-		)
-	})
+	_, err := testkit.NewMemoryRepository[*isoDoc, int64](
+		testkit.NewInt64Sequence(1),
+		testkit.WithMemoryIsolation[*isoDoc, int64](),
+		testkit.WithMemoryCrossIsolationReads[*isoDoc, int64](nil),
+	)
+	require.ErrorIs(t, err, errors.InvalidInput)
+	_, err = testkit.NewMemoryRepository[*isoDoc, int64](
+		testkit.NewInt64Sequence(1),
+		testkit.WithMemoryCrossIsolationReads[*isoDoc, int64](&recordingCrossIsolationAudit{}),
+	)
+	require.ErrorIs(t, err, errors.InvalidInput)
 }
 
 func requirePanic(t *testing.T, fn func()) {

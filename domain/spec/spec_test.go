@@ -1,15 +1,17 @@
 package spec
 
 import (
+	"gochen/domain/meta"
+	"reflect"
 	"strings"
 	"testing"
 )
 
 type specEntity struct {
-	ID       int64   `role:"id"`
-	TenantID string  `role:"tenant"`
-	ScopeID  int64   `role:"scope"`
-	OwnerID  *string `role:"owner"`
+	ID       int64   `entity:"id"`
+	TenantID string  `dim:"tenant"`
+	ScopeID  int64   `dim:"scope"`
+	OwnerID  *string `dim:"owner"`
 	Name     string
 	Age      int64
 	Flag     bool
@@ -31,37 +33,37 @@ func TestSpecZeroAndIdentities(t *testing.T) {
 	if !Or().IsNone() {
 		t.Fatal("Or() must equal zero")
 	}
-	if got := And(All(), Eq("Name", "a")).Canonical(); got != `eq(Name,"a")` {
+	if got := And(All(), Eq(meta.ByField("Name"), "a")).Canonical(); got != `eq(field:Name,"a")` {
 		t.Fatalf("And(All, s) = %s", got)
 	}
-	if got := Or(zero, Eq("Name", "a")).Canonical(); got != `eq(Name,"a")` {
+	if got := Or(zero, Eq(meta.ByField("Name"), "a")).Canonical(); got != `eq(field:Name,"a")` {
 		t.Fatalf("Or(zero, s) = %s", got)
 	}
-	if !And(zero, Eq("Name", "a")).IsNone() {
+	if !And(zero, Eq(meta.ByField("Name"), "a")).IsNone() {
 		t.Fatal("And(zero, s) must be zero")
 	}
-	if !Or(All(), Eq("Name", "a")).IsAll() {
+	if !Or(All(), Eq(meta.ByField("Name"), "a")).IsAll() {
 		t.Fatal("Or(All, s) must be All")
 	}
 }
 
 func TestSpecCanonical(t *testing.T) {
-	if got := In("Name", "b", "a", "b").Canonical(); got != `in(Name,"b","a")` {
+	if got := In(meta.ByField("Name"), "b", "a", "b").Canonical(); got != `in(field:Name,"b","a")` {
 		t.Fatalf("In canonical = %s", got)
 	}
-	if got := In("Name", "a").Canonical(); got != `eq(Name,"a")` {
+	if got := In(meta.ByField("Name"), "a").Canonical(); got != `eq(field:Name,"a")` {
 		t.Fatalf("single In should rewrite to Eq, got %s", got)
 	}
-	if got := IsNull(RoleOwner).Canonical(); got != `isnull(@owner)` {
+	if got := IsNull(meta.ByDimension("owner")).Canonical(); got != `isnull(dim:owner)` {
 		t.Fatalf("IsNull canonical = %s", got)
 	}
-	if got := And(Eq("b", 2), And(Eq("a", 1), All())).Canonical(); got != "and(eq(a,1),eq(b,2))" {
+	if got := And(Eq(meta.ByField("b"), 2), And(Eq(meta.ByField("a"), 1), All())).Canonical(); got != "and(eq(field:a,1),eq(field:b,2))" {
 		t.Fatalf("And canonical = %s", got)
 	}
-	if got := Or(Eq("b", 2), Or(Eq("a", 1), All())).Canonical(); got != "all" {
+	if got := Or(Eq(meta.ByField("b"), 2), Or(Eq(meta.ByField("a"), 1), All())).Canonical(); got != "all" {
 		t.Fatalf("Or with All should be All, got %s", got)
 	}
-	if got := Or(Eq("b", 2), Eq("a", 1)).Canonical(); got != "or(eq(a,1),eq(b,2))" {
+	if got := Or(Eq(meta.ByField("b"), 2), Eq(meta.ByField("a"), 1)).Canonical(); got != "or(eq(field:a,1),eq(field:b,2))" {
 		t.Fatalf("Or canonical = %s", got)
 	}
 	if got := Named("active_only", "arg1", 42).Canonical(); got != `named(active_only,"arg1",42)` {
@@ -71,17 +73,17 @@ func TestSpecCanonical(t *testing.T) {
 
 func TestSpecInspection(t *testing.T) {
 	s := And(
-		Eq(RoleScope, 10),
+		Eq(meta.ByDimension("scope"), 10),
 		Or(
-			Eq(RoleOwner, "alice"),
-			In("Name", "bob", "carol"),
+			Eq(meta.ByDimension("owner"), "alice"),
+			In(meta.ByField("Name"), "bob", "carol"),
 		),
 		Named("custom_guard", 1),
 	)
-	if !s.ReferencesRole(RoleScope) || !s.ReferencesRole(RoleOwner) {
+	if !s.References(meta.ByDimension("scope")) || !s.References(meta.ByDimension("owner")) {
 		t.Fatal("references role missing")
 	}
-	if s.ReferencesRole(RoleTenant) {
+	if s.References(meta.ByDimension("tenant")) {
 		t.Fatal("tenant role should not be referenced")
 	}
 	if !s.HasNamed() {
@@ -91,33 +93,33 @@ func TestSpecInspection(t *testing.T) {
 	if len(names) != 1 || names[0] != "custom_guard" {
 		t.Fatalf("unexpected named names: %v", names)
 	}
-	fields := s.Fields()
-	want := []string{"@owner", "@scope", "Name"}
-	if strings.Join(fields, ",") != strings.Join(want, ",") {
+	fields := s.Refs()
+	want := []meta.Ref{meta.ByDimension("owner"), meta.ByDimension("scope"), meta.ByField("Name")}
+	if !reflect.DeepEqual(fields, want) {
 		t.Fatalf("fields = %v, want %v", fields, want)
 	}
 }
 
 func TestSpecValidation(t *testing.T) {
-	if s := Eq("", 1); s.Err() == nil {
+	if s := Eq(meta.ByField(""), 1); s.Err() == nil {
 		t.Fatal("empty field should fail")
 	}
-	if s := Eq(RoleTenant, "t1"); s.Err() == nil {
-		t.Fatal("tenant role in spec must be rejected")
+	if s := Eq(meta.ByDimension("tenant"), "t1"); s.Err() != nil {
+		t.Fatal("dimension semantics belong to the execution contract")
 	}
-	if s := Eq("@unknown", "x"); s.Err() == nil {
+	if s := Eq(meta.ByField("@unknown"), "x"); s.Err() == nil {
 		t.Fatal("unknown role should fail")
 	}
-	if s := Eq("Name", nil); s.Err() == nil {
+	if s := Eq(meta.ByField("Name"), nil); s.Err() == nil {
 		t.Fatal("nil value in Eq must fail")
 	}
-	if s := In("Name", "a", nil); s.Err() == nil {
+	if s := In(meta.ByField("Name"), "a", nil); s.Err() == nil {
 		t.Fatal("nil in In must fail")
 	}
 	if s := Named(""); s.Err() == nil {
 		t.Fatal("empty named condition must fail")
 	}
-	if s := And(Eq("Name", "a"), Eq(RoleTenant, "t1")); s.Err() == nil {
+	if s := And(Eq(meta.ByField("Name"), "a"), Eq(meta.ByDimension(" Tenant"), "t1")); s.Err() == nil {
 		t.Fatal("composite with invalid child must fail")
 	}
 }
@@ -142,18 +144,18 @@ func TestInterpreterMatch(t *testing.T) {
 	}{
 		{"all", All(), true},
 		{"none", Spec{}, false},
-		{"eq name hit", Eq("Name", "alice"), true},
-		{"eq name miss", Eq("Name", "bob"), false},
-		{"role scope hit", Eq(RoleScope, 42), true},
-		{"role scope type coercion", Eq(RoleScope, "42"), true},
-		{"role owner hit", Eq(RoleOwner, "user-99"), true},
-		{"in name hit", In("Name", "carol", "alice"), true},
-		{"in name miss", In("Name", "carol", "dave"), false},
-		{"is null false on ptr", IsNull(RoleOwner), false},
-		{"and hit", And(Eq("Name", "alice"), Eq(RoleScope, 42)), true},
-		{"and miss", And(Eq("Name", "alice"), Eq(RoleScope, 1)), false},
-		{"or hit", Or(Eq("Name", "nobody"), Eq(RoleScope, 42)), true},
-		{"or miss", Or(Eq("Name", "nobody"), Eq(RoleScope, 1)), false},
+		{"eq name hit", Eq(meta.ByField("Name"), "alice"), true},
+		{"eq name miss", Eq(meta.ByField("Name"), "bob"), false},
+		{"role scope hit", Eq(meta.ByDimension("scope"), 42), true},
+		{"role scope type coercion", Eq(meta.ByDimension("scope"), "42"), true},
+		{"role owner hit", Eq(meta.ByDimension("owner"), "user-99"), true},
+		{"in name hit", In(meta.ByField("Name"), "carol", "alice"), true},
+		{"in name miss", In(meta.ByField("Name"), "carol", "dave"), false},
+		{"is null false on ptr", IsNull(meta.ByDimension("owner")), false},
+		{"and hit", And(Eq(meta.ByField("Name"), "alice"), Eq(meta.ByDimension("scope"), 42)), true},
+		{"and miss", And(Eq(meta.ByField("Name"), "alice"), Eq(meta.ByDimension("scope"), 1)), false},
+		{"or hit", Or(Eq(meta.ByField("Name"), "nobody"), Eq(meta.ByDimension("scope"), 42)), true},
+		{"or miss", Or(Eq(meta.ByField("Name"), "nobody"), Eq(meta.ByDimension("scope"), 1)), false},
 	}
 
 	for _, tc := range cases {
@@ -183,7 +185,7 @@ func TestInterpreterNullAndNamed(t *testing.T) {
 		return strings.HasPrefix(ent.Name, prefix), nil
 	}))
 
-	ok, err := i.Match(IsNull(RoleOwner), e)
+	ok, err := i.Match(IsNull(meta.ByDimension("owner")), e)
 	if err != nil || !ok {
 		t.Fatalf("IsNull(RoleOwner) = %v, %v", ok, err)
 	}
@@ -206,12 +208,12 @@ func TestInterpreterNullAndNamed(t *testing.T) {
 }
 
 func TestViewKindAndFields(t *testing.T) {
-	s := In("Name", "a", "b")
+	s := In(meta.ByField("Name"), "a", "b")
 	if s.Kind() != KindIn {
 		t.Fatalf("expected KindIn, got %v", s.Kind())
 	}
-	if s.Field() != "Name" {
-		t.Fatalf("expected Name, got %s", s.Field())
+	if s.Ref() != meta.ByField("Name") {
+		t.Fatalf("expected Name, got %s", s.Ref())
 	}
 	if len(s.Values()) != 2 {
 		t.Fatalf("expected 2 values, got %d", len(s.Values()))

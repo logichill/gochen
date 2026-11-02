@@ -6,15 +6,15 @@ import (
 )
 
 type MetaBase struct {
-	ID      int64  `role:"id" managed:"true"`
+	ID      int64  `entity:"id" managed:"true"`
 	Version uint64 `managed:"true"`
 }
 
 type MetaEntity struct {
 	MetaBase
-	TenantID string  `role:"tenant"`
-	ScopeID  int64   `role:"scope"`
-	OwnerID  *string `role:"owner"`
+	TenantID string  `dim:"tenant"`
+	ScopeID  int64   `dim:"scope"`
+	OwnerID  *string `dim:"owner"`
 	Name     string
 	Enabled  bool
 	Small    int8
@@ -29,7 +29,7 @@ func TestDescribe(t *testing.T) {
 		t.Fatalf("Type().Name() = %q, want %q", got, want)
 	}
 
-	id, ok := m.RoleField(RoleID)
+	id, ok := m.IDField()
 	if !ok {
 		t.Fatal("RoleID field not found")
 	}
@@ -40,7 +40,7 @@ func TestDescribe(t *testing.T) {
 		t.Fatal("ID should be managed")
 	}
 
-	owner, ok := m.RoleField(RoleOwner)
+	owner, ok := m.DimensionField("owner")
 	if !ok {
 		t.Fatal("RoleOwner field not found")
 	}
@@ -62,19 +62,19 @@ func TestDescribeRejectsNonPointer(t *testing.T) {
 	}
 }
 
-func TestDescribeRejectsDuplicateRole(t *testing.T) {
+func TestDescribeRejectsDuplicateDimension(t *testing.T) {
 	type Dup struct {
-		A int64 `role:"scope"`
-		B int64 `role:"scope"`
+		A int64 `dim:"scope"`
+		B int64 `dim:"scope"`
 	}
 	if _, err := Describe[*Dup](); err == nil {
 		t.Fatal("expected error for duplicate role")
 	}
 }
 
-func TestDescribeRejectsUnknownRole(t *testing.T) {
+func TestDescribeRejectsInvalidDimension(t *testing.T) {
 	type Bad struct {
-		A int64 `role:"nope"`
+		A int64 `dim:" Bad"`
 	}
 	if _, err := Describe[*Bad](); err == nil {
 		t.Fatal("expected error for unknown role")
@@ -96,7 +96,7 @@ func TestFieldValueAndNull(t *testing.T) {
 		t.Fatalf("DescribeValue: %v", err)
 	}
 
-	ownerField, _ := m.RoleField(RoleOwner)
+	ownerField, _ := m.DimensionField("owner")
 	isNull, err := ownerField.IsNull(e)
 	if err != nil || isNull {
 		t.Fatalf("IsNull(owner) = %v, %v; want false, nil", isNull, err)
@@ -116,7 +116,7 @@ func TestFieldValueAndNull(t *testing.T) {
 		t.Fatalf("IsZero(nil owner) = %v, %v; want true, nil", isZero, err)
 	}
 
-	scopeField, _ := m.RoleField(RoleScope)
+	scopeField, _ := m.DimensionField("scope")
 	isNull, err = scopeField.IsNull(e)
 	if err != nil || isNull {
 		t.Fatalf("IsNull(non-nullable scope) = %v, %v; want false, nil", isNull, err)
@@ -128,7 +128,7 @@ func TestFieldConvert(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Describe: %v", err)
 	}
-	owner, _ := m.RoleField(RoleOwner)
+	owner, _ := m.DimensionField("owner")
 	got, err := owner.Convert("alice")
 	if err != nil {
 		t.Fatalf("Convert owner: %v", err)
@@ -137,7 +137,7 @@ func TestFieldConvert(t *testing.T) {
 		t.Fatalf("owner conversion = %v", got)
 	}
 
-	scope, _ := m.RoleField(RoleScope)
+	scope, _ := m.DimensionField("scope")
 	got, err = scope.Convert("42")
 	if err != nil {
 		t.Fatalf("Convert scope: %v", err)

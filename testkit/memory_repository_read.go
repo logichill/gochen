@@ -22,7 +22,7 @@ func (r *MemoryRepository[T, ID]) Get(ctx context.Context, id ID, s spec.Spec) (
 		if !ok {
 			return entityNotFound(id)
 		}
-		if isolated && !visibleInIsolation[T, ID](entity, isolationID) {
+		if isolated && !r.visibleInIsolation(entity, isolationID) {
 			return entityNotFound(id)
 		}
 		ok, matchErr := r.visibleEntity(s, entity)
@@ -32,7 +32,7 @@ func (r *MemoryRepository[T, ID]) Get(ctx context.Context, id ID, s spec.Spec) (
 		if !ok {
 			return entityNotFound(id)
 		}
-		result = shallowClone(entity)
+		result = cloneEntityState(entity)
 		return nil
 	})
 	return result, err
@@ -52,7 +52,7 @@ func (r *MemoryRepository[T, ID]) List(ctx context.Context, offset, limit int, s
 		visible := make([]ID, 0, len(state.order))
 		for _, id := range state.order {
 			entity := state.entities[id]
-			if isolated && !visibleInIsolation[T, ID](entity, isolationID) {
+			if isolated && !r.visibleInIsolation(entity, isolationID) {
 				continue
 			}
 			ok, matchErr := r.visibleEntity(s, entity)
@@ -67,7 +67,7 @@ func (r *MemoryRepository[T, ID]) List(ctx context.Context, offset, limit int, s
 		start, end := pageBounds(len(visible), offset, limit)
 		result = make([]T, 0, end-start)
 		for _, id := range visible[start:end] {
-			result = append(result, shallowClone(state.entities[id]))
+			result = append(result, cloneEntityState(state.entities[id]))
 		}
 		return nil
 	})
@@ -86,7 +86,7 @@ func (r *MemoryRepository[T, ID]) Count(ctx context.Context, s spec.Spec) (int64
 	var count int64
 	err = r.withReadState(ctx, func(state *memoryState[T, ID]) error {
 		for _, entity := range state.entities {
-			if isolated && !visibleInIsolation[T, ID](entity, isolationID) {
+			if isolated && !r.visibleInIsolation(entity, isolationID) {
 				continue
 			}
 			ok, matchErr := r.visibleEntity(s, entity)
@@ -117,7 +117,7 @@ func (r *MemoryRepository[T, ID]) Exists(ctx context.Context, id ID, s spec.Spec
 		if !ok {
 			return nil
 		}
-		if isolated && !visibleInIsolation[T, ID](entity, isolationID) {
+		if isolated && !r.visibleInIsolation(entity, isolationID) {
 			return nil
 		}
 		ok, matchErr := r.visibleEntity(s, entity)

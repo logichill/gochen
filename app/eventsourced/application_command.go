@@ -54,7 +54,15 @@ func (a *Application[T, ID]) executeAttempt(
 	if err := a.matchAggregate(spec, aggregate, errors.NotFound); err != nil {
 		return zero, err
 	}
+	protected, err := a.execution.CaptureProtected(aggregate)
+	if err != nil {
+		return zero, err
+	}
 	if err := fn(ctx, aggregate); err != nil {
+		aggregate.ClearUncommittedEvents()
+		return zero, err
+	}
+	if err := a.execution.CheckProtected(protected, aggregate); err != nil {
 		aggregate.ClearUncommittedEvents()
 		return zero, err
 	}

@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"gochen/app"
 	"gochen/app/internal/depcheck"
 	"gochen/app/query"
 	"gochen/auth"
@@ -48,7 +49,7 @@ type TxRunner interface {
 	WithinTx(ctx context.Context, fn func(txCtx context.Context) error) error
 }
 
-// Stage 定义单个动作的生命周期钩子。
+// Stage 定义单个动作的生命周期钩子；After 与 PostCommit 接收独立实体副本。
 type Stage[T any] struct {
 	Before     func(ctx context.Context, entity T) error
 	After      func(ctx context.Context, entity T) error
@@ -66,7 +67,7 @@ func (h Hooks[T]) For(action string) Stage[T] {
 	return h[action]
 }
 
-// Projector 在生成审计快照前投影实体。
+// Projector 在生成审计快照前投影独立实体副本。
 type Projector[T any] func(entity T) (any, error)
 
 // Limits 是构造期冻结的应用上限。
@@ -133,6 +134,7 @@ type Core[T domain.IEntity[ID], ID comparable] struct {
 	limits     Limits
 	projector  Projector[T]
 	metadata   *meta.Metadata
+	execution  app.ExecutionDescriptor
 
 	repo   domcrud.IRepository[T, ID]
 	read   ReadRepository[T, ID]
@@ -168,7 +170,7 @@ func New[T domain.IEntity[ID], ID comparable](opts Options[T, ID]) (*Core[T, ID]
 	needsWrite := false
 	for _, action := range descriptor.Actions {
 		switch action.Kind {
-		case auth.KindCreate, auth.KindUpdate, auth.KindDelete:
+		case auth.KindCreate, auth.KindUpdate, auth.KindDelete, auth.KindTransfer:
 			needsWrite = true
 		}
 	}
@@ -196,9 +198,42 @@ func New[T domain.IEntity[ID], ID comparable](opts Options[T, ID]) (*Core[T, ID]
 			return nil, err
 		}
 	}
-	vocabulary := opts.Authorizer.Vocabulary()
+	vocabulary := opts.Authorizer.Vocabulary().Copy()
 	if err := ValidateVocabulary(vocabulary, metadata, opts.Read); err != nil {
 		return nil, err
+	}
+	effective := opts.Read.(app.IExecutionDescriptorProvider).ExecutionDescriptor()
+	for _, action := range descriptor.Actions {
+		if action.Kind != auth.KindTransfer {
+			continue
+		}
+		var zero T
+		if _, ok := any(zero).(domain.ISettableVersion); !ok {
+			return nil, errors.NewCode(errors.InvalidInput, "transfer action requires entity version support")
+		}
+		if opts.Hooks.For(action.Name).Before != nil {
+			return nil, errors.NewCode(errors.InvalidInput, "transfer supports After and PostCommit hooks; repository owns candidate construction")
+		}
+		if _, ok := opts.Repo.(domcrud.ITransferRepository[T, ID]); !ok {
+			return nil, errors.NewCode(errors.InvalidInput, "transfer action requires repository transfer capability")
+		}
+		if action.ReceiveAction == "" {
+			if len(action.Dimensions) != 0 {
+				return nil, errors.NewCode(errors.InvalidInput, "receive action must not declare transfer dimensions")
+			}
+			continue
+		}
+		receive, exists := actions[action.ReceiveAction]
+		if !exists || receive.Kind != auth.KindTransfer || receive.ReceiveAction != "" || receive.Name == action.Name || len(action.Dimensions) == 0 {
+			return nil, errors.NewCode(errors.InvalidInput, "transfer action must declare a distinct receive action and dimensions")
+		}
+		seen := map[meta.Dimension]bool{}
+		for _, dimension := range action.Dimensions {
+			if seen[dimension] || !effective.CanTransfer(dimension) {
+				return nil, errors.NewCode(errors.InvalidInput, "transfer action has an invalid dimension capability")
+			}
+			seen[dimension] = true
+		}
 	}
 	return &Core[T, ID]{
 		resource:   descriptor.Resource,
@@ -211,6 +246,7 @@ func New[T domain.IEntity[ID], ID comparable](opts Options[T, ID]) (*Core[T, ID]
 		limits:     opts.Limits.Normalize(),
 		projector:  opts.Projector,
 		metadata:   metadata,
+		execution:  opts.Read.(app.IExecutionDescriptorProvider).ExecutionDescriptor(),
 		repo:       opts.Repo,
 		read:       opts.Read,
 		tx:         opts.Tx,
@@ -227,6 +263,9 @@ func New[T domain.IEntity[ID], ID comparable](opts Options[T, ID]) (*Core[T, ID]
 func (c *Core[T, ID]) Descriptor() auth.Descriptor {
 	out := c.descriptor
 	out.Actions = append([]auth.Action(nil), c.descriptor.Actions...)
+	for i := range out.Actions {
+		out.Actions[i].Dimensions = append([]meta.Dimension(nil), out.Actions[i].Dimensions...)
+	}
 	return out
 }
 
@@ -248,6 +287,7 @@ func BuildDescriptor(resource string, defaults, custom []auth.Action) (auth.Desc
 	descriptor := auth.Descriptor{Resource: resource}
 	actions := make(map[string]auth.Action, len(defaults)+len(custom))
 	add := func(action auth.Action, requireKind bool) error {
+		action.Dimensions = append([]meta.Dimension(nil), action.Dimensions...)
 		action.Name = strings.TrimSpace(action.Name)
 		if action.Name == "" {
 			return errors.NewCode(errors.InvalidInput, "action name cannot be empty")
@@ -282,7 +322,7 @@ func BuildDescriptor(resource string, defaults, custom []auth.Action) (auth.Desc
 
 func validKind(kind auth.Kind) bool {
 	switch kind {
-	case auth.KindRead, auth.KindList, auth.KindCreate, auth.KindUpdate, auth.KindDelete:
+	case auth.KindRead, auth.KindList, auth.KindCreate, auth.KindUpdate, auth.KindDelete, auth.KindTransfer:
 		return true
 	default:
 		return false
@@ -328,34 +368,15 @@ func validateAuditDataSource[T domain.IEntity[ID], ID comparable](
 
 // ValidateVocabulary 校验授权词汇只引用实体已知字段与仓储已注册的命名条件。
 func ValidateVocabulary(vocabulary auth.Vocabulary, metadata *meta.Metadata, read any) error {
-	roles := make(map[spec.Role]struct{}, len(vocabulary.Roles))
-	for _, role := range vocabulary.Roles {
-		if !role.IsValid() || role == spec.RoleTenant {
-			return errors.NewCode(errors.InvalidInput, "vocabulary references an unauthorized role").
-				WithContext("role", string(role))
-		}
-		roles[role] = struct{}{}
-	}
-	for _, field := range vocabulary.Fields {
-		if _, ok := metadata.Field(strings.TrimSpace(field)); !ok {
-			return errors.NewCode(errors.InvalidInput, "vocabulary references unknown field").
-				WithContext("field", field)
-		}
-	}
-	if len(vocabulary.Named) == 0 {
-		return nil
-	}
-	provider, ok := read.(domcrud.INamedConditionProvider)
+	provider, ok := read.(app.IExecutionDescriptorProvider)
 	if !ok || depcheck.IsNil(provider) {
-		return errors.NewCode(errors.InvalidInput, "authorizer declares named conditions but repository does not register them")
+		return errors.NewCode(errors.InvalidInput, "repository must expose its effective execution contract")
 	}
-	for _, name := range vocabulary.Named {
-		if !provider.HasNamedCondition(strings.TrimSpace(name)) {
-			return errors.NewCode(errors.InvalidInput, "vocabulary references unknown named condition").
-				WithContext("named", name)
-		}
+	d := provider.ExecutionDescriptor()
+	if d.Metadata() == nil || d.Metadata().Type() != metadata.Type() {
+		return errors.NewCode(errors.InvalidInput, "execution contract entity type does not match application")
 	}
-	return nil
+	return d.ValidateVocabulary(vocabulary)
 }
 
 // ValidateIDType 校验实体 ID 为 string 或整数类型（含别名）。
@@ -396,11 +417,11 @@ func (c *Core[T, ID]) canonicalIDs(ids []ID) []string {
 }
 
 func (c *Core[T, ID]) authorize(ctx context.Context, action string, ids []ID) (spec.Spec, auth.Decision, error) {
-	return AuthorizeAction(ctx, c.resource, c.authorizer, c.descriptor, c.actions, c.vocabulary, action, c.canonicalIDs(ids))
+	return AuthorizeAction(ctx, c.resource, c.authorizer, c.descriptor, c.actions, c.vocabulary, c.metadata, action, c.canonicalIDs(ids))
 }
 
 func (c *Core[T, ID]) authorizeKind(ctx context.Context, action string, ids []ID, kinds ...auth.Kind) (spec.Spec, auth.Decision, error) {
-	return AuthorizeKind(ctx, c.resource, c.authorizer, c.descriptor, c.actions, c.vocabulary, action, c.canonicalIDs(ids), kinds...)
+	return AuthorizeKind(ctx, c.resource, c.authorizer, c.descriptor, c.actions, c.vocabulary, c.metadata, action, c.canonicalIDs(ids), kinds...)
 }
 
 // AuthorizeAction 按构造期冻结的资源、动作与词汇执行一次授权判定。
@@ -411,8 +432,10 @@ func AuthorizeAction(
 	descriptor auth.Descriptor,
 	actions map[string]auth.Action,
 	vocabulary auth.Vocabulary,
+	metadata *meta.Metadata,
 	action string,
 	ids []string,
+	targets ...auth.Assignment,
 ) (spec.Spec, auth.Decision, error) {
 	declared, ok := actions[action]
 	if !ok {
@@ -430,9 +453,10 @@ func AuthorizeAction(
 		Action:     action,
 		Permission: permission,
 		IDs:        ids,
+		Targets:    append([]auth.Assignment(nil), targets...),
 	})
 	if err != nil {
-		return spec.Spec{}, auth.Decision{}, errors.Wrap(err, errors.Forbidden, "authorization failed").
+		return spec.Spec{}, auth.Decision{}, errors.Wrap(err, errors.Code(err), "authorization failed").
 			WithContext("action", action)
 	}
 	if !decision.Allowed {
@@ -440,7 +464,7 @@ func AuthorizeAction(
 			WithContext("action", action).
 			WithContext("reason", decision.Reason)
 	}
-	if err := decision.ValidateAgainst(vocabulary); err != nil {
+	if err := decision.ValidateAgainst(vocabulary, metadata); err != nil {
 		return spec.Spec{}, auth.Decision{}, err
 	}
 	if err := decision.Spec.Err(); err != nil {
@@ -457,6 +481,7 @@ func AuthorizeKind(
 	descriptor auth.Descriptor,
 	actions map[string]auth.Action,
 	vocabulary auth.Vocabulary,
+	metadata *meta.Metadata,
 	action string,
 	ids []string,
 	kinds ...auth.Kind,
@@ -479,21 +504,7 @@ func AuthorizeKind(
 			WithContext("action", action).
 			WithContext("kind", string(declared.Kind))
 	}
-	return AuthorizeAction(ctx, resource, authorizer, descriptor, actions, vocabulary, action, ids)
-}
-
-// ValidateWriteSpec 校验写路径规约为纯谓词；新建规约不得引用 ID 角色。
-func ValidateWriteSpec(s spec.Spec, creating bool) error {
-	if err := s.Err(); err != nil {
-		return errors.Wrap(err, errors.Internal, "invalid write spec")
-	}
-	if s.HasNamed() {
-		return errors.NewCode(errors.Internal, "write spec must not contain named conditions")
-	}
-	if creating && s.ReferencesRole(spec.RoleID) {
-		return errors.NewCode(errors.Internal, "create spec must not reference the id role")
-	}
-	return nil
+	return AuthorizeAction(ctx, resource, authorizer, descriptor, actions, vocabulary, metadata, action, ids)
 }
 
 func (c *Core[T, ID]) applyAssignments(entity T, assignments []auth.Assignment) error {
@@ -501,27 +512,27 @@ func (c *Core[T, ID]) applyAssignments(entity T, assignments []auth.Assignment) 
 		if err := assignment.Validate(); err != nil {
 			return err
 		}
-		field, ok := c.metadata.RoleField(assignment.Role)
+		field, ok := c.metadata.DimensionField(assignment.Dimension)
 		if !ok {
 			return errors.NewCode(errors.Internal, "entity does not expose the assigned role").
-				WithContext("role", string(assignment.Role))
+				WithContext("role", string(assignment.Dimension))
 		}
 		converted, err := field.Convert(assignment.Value)
 		if err != nil {
 			return errors.Wrap(err, errors.InvalidInput, "assignment value conversion failed").
-				WithContext("role", string(assignment.Role))
+				WithContext("role", string(assignment.Dimension))
 		}
-		if err := ValidateAssignedValue(assignment.Role, converted); err != nil {
-			return err
+		if !c.execution.CanAssign(assignment.Dimension) {
+			return errors.NewCode(errors.Internal, "create assignment lacks resource capability")
 		}
 		current, ok := field.Value(entity)
 		if !ok {
 			return errors.NewCode(errors.Internal, "assignment target field cannot be read").
-				WithContext("role", string(assignment.Role))
+				WithContext("role", string(assignment.Dimension))
 		}
 		if !current.CanSet() {
 			return errors.NewCode(errors.Internal, "assignment target field cannot be set").
-				WithContext("role", string(assignment.Role))
+				WithContext("role", string(assignment.Dimension))
 		}
 		if current.IsZero() {
 			current.Set(converted)
@@ -529,35 +540,8 @@ func (c *Core[T, ID]) applyAssignments(entity T, assignments []auth.Assignment) 
 		}
 		if !reflect.DeepEqual(current.Interface(), converted.Interface()) {
 			return errors.NewCode(errors.Forbidden, "assignment conflicts with an existing field value").
-				WithContext("role", string(assignment.Role))
+				WithContext("role", string(assignment.Dimension))
 		}
-	}
-	return nil
-}
-
-// ValidateAssignedValue 校验服务端赋值只写非零的范围与主体。
-func ValidateAssignedValue(role spec.Role, value reflect.Value) error {
-	for value.Kind() == reflect.Ptr {
-		if value.IsNil() {
-			return errors.NewCode(errors.InvalidInput, "assignment value cannot be nil").
-				WithContext("role", string(role))
-		}
-		value = value.Elem()
-	}
-	switch role {
-	case spec.RoleScope:
-		if value.Kind() < reflect.Int || value.Kind() > reflect.Int64 || value.Int() <= 0 {
-			return errors.NewCode(errors.InvalidInput, "scope assignment must be a positive integer").
-				WithContext("role", string(role))
-		}
-	case spec.RoleOwner:
-		if value.Kind() != reflect.String || strings.TrimSpace(value.String()) == "" {
-			return errors.NewCode(errors.InvalidInput, "owner assignment must be a non-empty string").
-				WithContext("role", string(role))
-		}
-	default:
-		return errors.NewCode(errors.InvalidInput, "assignment role is not allowed").
-			WithContext("role", string(role))
 	}
 	return nil
 }
@@ -571,30 +555,27 @@ func ValidateAssignments(entity any, assignments []auth.Assignment, metadata *me
 		if err := assignment.Validate(); err != nil {
 			return err
 		}
-		field, ok := metadata.RoleField(assignment.Role)
+		field, ok := metadata.DimensionField(assignment.Dimension)
 		if !ok {
 			return errors.NewCode(errors.Internal, "entity does not expose the assigned role").
-				WithContext("role", string(assignment.Role))
+				WithContext("role", string(assignment.Dimension))
 		}
 		converted, err := field.Convert(assignment.Value)
 		if err != nil {
 			return errors.Wrap(err, errors.InvalidInput, "assignment value conversion failed").
-				WithContext("role", string(assignment.Role))
-		}
-		if err := ValidateAssignedValue(assignment.Role, converted); err != nil {
-			return err
+				WithContext("role", string(assignment.Dimension))
 		}
 		current, ok := field.Value(entity)
 		if !ok {
 			return errors.NewCode(errors.Internal, "assignment target field cannot be read").
-				WithContext("role", string(assignment.Role))
+				WithContext("role", string(assignment.Dimension))
 		}
 		for current.Kind() == reflect.Interface && !current.IsNil() {
 			current = current.Elem()
 		}
 		if !reflect.DeepEqual(current.Interface(), converted.Interface()) {
 			return errors.NewCode(errors.Forbidden, "assignment does not match the command result").
-				WithContext("role", string(assignment.Role))
+				WithContext("role", string(assignment.Dimension))
 		}
 	}
 	return nil
@@ -636,7 +617,11 @@ func (c *Core[T, ID]) invokeAfter(ctx context.Context, stage Stage[T], entity T)
 	if stage.After == nil {
 		return nil
 	}
-	return stage.After(ctx, entity)
+	view, err := meta.Clone(entity)
+	if err != nil {
+		return err
+	}
+	return stage.After(ctx, view)
 }
 
 // schedulePostCommit 在事务提交后执行钩子；txCtx 只用于登记回调，
@@ -645,8 +630,12 @@ func (c *Core[T, ID]) schedulePostCommit(txCtx, runCtx context.Context, stage St
 	if stage.PostCommit == nil {
 		return nil
 	}
+	view, err := meta.Clone(entity)
+	if err != nil {
+		return err
+	}
 	return contextx.AppendAfterCommit(txCtx, func(context.Context) error {
-		return stage.PostCommit(runCtx, entity)
+		return stage.PostCommit(runCtx, view)
 	})
 }
 
@@ -666,73 +655,6 @@ func (c *Core[T, ID]) scheduleBulkPostCommit(txCtx context.Context, callbacks []
 		}
 		return joinErrors(errs)
 	})
-}
-
-func (c *Core[T, ID]) boundary(ctx context.Context, entity T) (tenant string, scope int64, owner string) {
-	tenant = contextx.TenantID(ctx)
-	if field, ok := c.metadata.RoleField(spec.RoleTenant); ok {
-		if value, ok := fieldString(field, entity); ok && value != "" {
-			tenant = value
-		}
-	}
-	if field, ok := c.metadata.RoleField(spec.RoleScope); ok {
-		if value, ok := fieldInt64(field, entity); ok {
-			scope = value
-		}
-	}
-	if field, ok := c.metadata.RoleField(spec.RoleOwner); ok {
-		if value, ok := fieldString(field, entity); ok {
-			owner = value
-		}
-	}
-	return tenant, scope, owner
-}
-
-func fieldString(field meta.Field, entity any) (string, bool) {
-	value, ok := field.Value(entity)
-	if !ok {
-		return "", false
-	}
-	for value.Kind() == reflect.Ptr {
-		if value.IsNil() {
-			return "", false
-		}
-		value = value.Elem()
-	}
-	switch value.Kind() {
-	case reflect.String:
-		return value.String(), true
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return strconv.FormatInt(value.Int(), 10), true
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		return strconv.FormatUint(value.Uint(), 10), true
-	default:
-		return "", false
-	}
-}
-
-func fieldInt64(field meta.Field, entity any) (int64, bool) {
-	value, ok := field.Value(entity)
-	if !ok {
-		return 0, false
-	}
-	for value.Kind() == reflect.Ptr {
-		if value.IsNil() {
-			return 0, false
-		}
-		value = value.Elem()
-	}
-	switch value.Kind() {
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return value.Int(), true
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		if value.Uint() > uint64(^uint64(0)>>1) {
-			return 0, false
-		}
-		return int64(value.Uint()), true
-	default:
-		return 0, false
-	}
 }
 
 func marshalJSON(value any, message string) (json.RawMessage, error) {

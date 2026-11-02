@@ -3,27 +3,27 @@ package governance
 import (
 	"context"
 
-	"gochen/auth/scoped"
+	"gochen/auth"
 	"gochen/errors"
 )
 
 // --- Snapshot 层：固定策略版本 ---
 
 type snapshotAuthorizer struct {
-	inner scoped.IAuthorizer
+	inner auth.IAuthorizer
 	cfg   *config
 }
 
-func (a *snapshotAuthorizer) Authorize(ctx context.Context, action string, targets ...any) (scoped.Decision, error) {
+func (a *snapshotAuthorizer) Authorize(ctx context.Context, req auth.Request) (auth.Decision, error) {
 	snapshot, err := a.cfg.snapshot.ResolveSnapshot(ctx)
 	if err != nil {
 		if !a.cfg.lenientSnapshot {
 			// Fail-Closed：拿不到策略快照说明无法保证判定依据的一致性。
-			return scoped.Deny("snapshot_unavailable"), errors.Wrap(err, errors.Forbidden,
+			return auth.Decision{Reason: "snapshot_unavailable"}, errors.Wrap(err, errors.Forbidden,
 				"policy snapshot is unavailable; denying request")
 		}
 		// 宽松模式：继续判定，但不带快照版本。
-		return a.inner.Authorize(ctx, action, targets...)
+		return a.inner.Authorize(ctx, req)
 	}
 	if snapshot.Key == "" {
 		if diag, ok := a.cfg.snapshot.(snapshotDiagnostics); ok {
@@ -31,7 +31,7 @@ func (a *snapshotAuthorizer) Authorize(ctx context.Context, action string, targe
 		}
 	}
 	recordSnapshotCapture(ctx, snapshot)
-	decision, err := a.inner.Authorize(ctx, action, targets...)
+	decision, err := a.inner.Authorize(ctx, req)
 	if err != nil {
 		return decision, err
 	}
@@ -39,6 +39,4 @@ func (a *snapshotAuthorizer) Authorize(ctx context.Context, action string, targe
 	return decision, nil
 }
 
-func (a *snapshotAuthorizer) Require(ctx context.Context, action string, targets ...any) error {
-	return requireVia(ctx, a, action, targets...)
-}
+func (a *snapshotAuthorizer) Vocabulary() auth.Vocabulary { return a.inner.Vocabulary().Copy() }

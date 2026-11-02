@@ -2,11 +2,14 @@ package eventsourced
 
 import (
 	"context"
+	"gochen/app"
+	"gochen/domain/meta"
 	"testing"
 
 	esstore "gochen/app/eventsourced/eventstore"
 	"gochen/auth"
 	"gochen/contextx"
+
 	deventsourced "gochen/domain/eventsourced"
 	"gochen/domain/spec"
 	"gochen/errors"
@@ -22,6 +25,7 @@ func newApplicationRepository(t *testing.T) (*EventSourcedRepository[*testAggreg
 	events := store.NewMemoryEventStore[int64]()
 	reg, upgraders := newTestRegistryAndUpgraders()
 	require.NoError(t, reg.Register("ValueSet", func() any { return &valueSetEvent{} }))
+	require.NoError(t, reg.Register("DimensionsSet", func() any { return &dimensionsSetEvent{} }))
 	adapter, err := esstore.NewDomainEventStore(esstore.DomainEventStoreOptions[int64]{
 		PublishMode:      esstore.PublishModePersistOnly,
 		AggregateType:    "TestAggregate",
@@ -108,8 +112,8 @@ func TestApplicationGetReturnsNotFoundOutsideSpec(t *testing.T) {
 	require.NoError(t, repo.Save(ctx, hidden))
 
 	authorizer := &specAuthorizer{
-		vocabulary: auth.Vocabulary{Fields: []string{"Value"}},
-		decision:   auth.Decision{Allowed: true, Spec: spec.Eq("Value", 5)},
+		vocabulary: auth.Vocabulary{Refs: []meta.Ref{meta.ByField("Value")}},
+		decision:   auth.Decision{Allowed: true, Spec: spec.Eq(meta.ByField("Value"), 5)},
 	}
 	app, err := NewApplication[*testAggregate, int64](repo, Options[*testAggregate, int64]{
 		Resource:   "test.aggregate",
@@ -134,8 +138,8 @@ func TestApplicationExecuteRejectsStateOutsideSpec(t *testing.T) {
 	app, err := NewApplication[*testAggregate, int64](repo, Options[*testAggregate, int64]{
 		Resource: "test.aggregate",
 		Authorizer: &specAuthorizer{
-			vocabulary: auth.Vocabulary{Fields: []string{"Value"}},
-			decision:   auth.Decision{Allowed: true, Spec: spec.Eq("Value", 5)},
+			vocabulary: auth.Vocabulary{Refs: []meta.Ref{meta.ByField("Value")}},
+			decision:   auth.Decision{Allowed: true, Spec: spec.Eq(meta.ByField("Value"), 5)},
 		},
 	})
 	require.NoError(t, err)
@@ -204,15 +208,15 @@ func TestApplicationExecuteNewValidatesAuthoritativeAssignment(t *testing.T) {
 	})
 	require.NoError(t, err)
 	authorizer := &specAuthorizer{
-		vocabulary: auth.Vocabulary{Roles: []spec.Role{spec.RoleOwner}},
+		vocabulary: auth.Vocabulary{Refs: []meta.Ref{meta.ByDimension("owner")}, Assignable: []meta.Dimension{"owner"}},
 		decision: auth.Decision{
 			Allowed: true,
 			Spec:    spec.All(),
-			Assign:  []auth.Assignment{{Role: spec.RoleOwner, Value: "alice"}},
+			Assign:  []auth.Assignment{{Dimension: "owner", Value: "alice"}},
 		},
 	}
 	app, err := NewApplication[*ownedAggregate, int64](repo, Options[*ownedAggregate, int64]{
-		Resource:   "owned.aggregate",
+		Contract: app.ResourceContract{Assignable: []meta.Dimension{"owner"}}, Resource: "owned.aggregate",
 		Authorizer: authorizer,
 	})
 	require.NoError(t, err)
@@ -335,22 +339,24 @@ func TestApplicationValidatesAfterCommand(t *testing.T) {
 func TestApplicationRejectsNamedVocabulary(t *testing.T) {
 	repo, _ := newApplicationRepository(t)
 	authorizer := &specAuthorizer{
-		vocabulary: auth.Vocabulary{Named: []string{"visibleTo"}},
-		decision:   auth.Decision{Allowed: true, Spec: spec.All()},
+		vocabulary: auth.Vocabulary{},
+		decision:   auth.Decision{Allowed: true, Spec: spec.Named("active")},
 	}
-	_, err := NewApplication[*testAggregate, int64](repo, Options[*testAggregate, int64]{
+	app, err := NewApplication[*testAggregate, int64](repo, Options[*testAggregate, int64]{
 		Resource:   "test.aggregate",
 		Authorizer: authorizer,
 	})
-	require.Truef(t, errors.Is(err, errors.InvalidInput), "named conditions must be rejected: %v", err)
+	require.NoError(t, err)
+	_, err = app.Get(context.Background(), 1)
+	require.ErrorIs(t, err, errors.Internal)
 }
 
 func TestApplicationAuditTrailRejectsNonBoundarySpec(t *testing.T) {
 	ctx := context.Background()
 	repo, events := newApplicationRepository(t)
 	authorizer := &specAuthorizer{
-		vocabulary: auth.Vocabulary{Fields: []string{"Value"}},
-		decision:   auth.Decision{Allowed: true, Spec: spec.Eq("Value", 1)},
+		vocabulary: auth.Vocabulary{Refs: []meta.Ref{meta.ByField("Value")}},
+		decision:   auth.Decision{Allowed: true, Spec: spec.Eq(meta.ByField("Value"), 1)},
 	}
 	app, err := NewApplication[*testAggregate, int64](repo, Options[*testAggregate, int64]{
 		Resource:   "test.aggregate",
@@ -423,7 +429,7 @@ func TestApplicationCommandHandlerIgnoresNonCommandMessages(t *testing.T) {
 
 type ownedAggregate struct {
 	*deventsourced.EventSourcedAggregate[int64]
-	Owner string `role:"owner"`
+	Owner string `dim:"owner"`
 	Value int
 }
 

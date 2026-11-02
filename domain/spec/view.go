@@ -1,5 +1,7 @@
 package spec
 
+import "gochen/domain/meta"
+
 // Kind 是规约节点的种类，供 Core 之外的解释器（例如 Runtime 的 SQL 解释器）
 // 读取规约结构。
 type Kind string
@@ -42,8 +44,8 @@ func (s Spec) Kind() Kind {
 	}
 }
 
-// Field 返回字段比较节点引用的字段或角色。
-func (s Spec) Field() string { return s.field }
+// Ref 返回比较节点的类型化引用。
+func (s Spec) Ref() meta.Ref { return s.field }
 
 // Value 返回 Eq 节点的值。
 func (s Spec) Value() any { return s.value }

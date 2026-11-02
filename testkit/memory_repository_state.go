@@ -6,6 +6,7 @@ import (
 	"reflect"
 
 	"gochen/domain"
+	"gochen/domain/meta"
 	"gochen/errors"
 )
 
@@ -54,21 +55,15 @@ func cloneMemoryState[T domain.IEntity[ID], ID comparable](state memoryState[T, 
 		order:    append([]ID(nil), state.order...),
 	}
 	for id, entity := range state.entities {
-		cloned.entities[id] = shallowClone(entity)
+		cloned.entities[id] = cloneEntityState(entity)
 	}
 	return cloned
 }
 
-func shallowClone[T any](value T) T {
-	rv := reflect.ValueOf(value)
-	if !rv.IsValid() || rv.Kind() != reflect.Ptr || rv.IsNil() || rv.Elem().Kind() != reflect.Struct {
-		return value
-	}
-	copyValue := reflect.New(rv.Elem().Type())
-	copyValue.Elem().Set(rv.Elem())
-	cloned, ok := copyValue.Interface().(T)
-	if !ok {
-		return value
+func cloneEntityState[T any](value T) T {
+	cloned, err := meta.Clone(value)
+	if err != nil {
+		panic(err)
 	}
 	return cloned
 }

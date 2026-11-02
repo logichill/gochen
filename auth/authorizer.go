@@ -7,8 +7,10 @@ package auth
 import (
 	"context"
 	"reflect"
+	"sort"
 	"strings"
 
+	"gochen/domain/meta"
 	"gochen/domain/spec"
 	"gochen/errors"
 )
@@ -26,38 +28,36 @@ type Request struct {
 	Action     string
 	Permission string
 	IDs        []string
+	Targets    []Assignment
 }
 
 // Decision 是一次判定结果；零值即拒绝。
 type Decision struct {
-	Allowed bool
-	Reason  string
-	Spec    spec.Spec
-	Assign  []Assignment
+	ID              string
+	SnapshotVersion string
+	MatchedRules    []string
+	Allowed         bool
+	Reason          string
+	Spec            spec.Spec
+	Assign          []Assignment
 }
 
-// Assignment 是一条服务端权威赋值，只能针对 RoleScope、RoleOwner。
+// Assignment 是针对项目维度的服务端权威赋值。
 type Assignment struct {
-	Role  spec.Role
-	Value any
+	Dimension meta.Dimension `json:"dimension"`
+	Value     any            `json:"value"`
 }
 
 // Validate 校验赋值针对的角色。
 func (a Assignment) Validate() error {
-	switch a.Role {
-	case spec.RoleScope, spec.RoleOwner:
-		return nil
-	default:
-		return errors.NewCode(errors.InvalidInput, "assignment role is not allowed").
-			WithContext("role", string(a.Role))
-	}
+	_, err := meta.ParseDimension(string(a.Dimension))
+	return err
 }
 
-// Vocabulary 声明判定结果可能引用的角色、字段与命名条件。
+// Vocabulary 声明判定结果可能引用的字段与可赋值维度。
 type Vocabulary struct {
-	Roles  []spec.Role
-	Fields []string
-	Named  []string
+	Refs       []meta.Ref
+	Assignable []meta.Dimension
 }
 
 // Kind 描述动作的流程形状。
@@ -69,6 +69,8 @@ const (
 	KindCreate Kind = "create"
 	KindUpdate Kind = "update"
 	KindDelete Kind = "delete"
+	// KindTransfer 通过独立端口执行维度迁移。
+	KindTransfer Kind = "transfer"
 )
 
 // Action 是 Descriptor 中的一个动作声明。
@@ -78,6 +80,10 @@ type Action struct {
 	Kind       Kind
 	Label      string
 	Risk       string
+	// ReceiveAction 是迁移动作的接收授权动作；接收动作本身保持此字段为空。
+	ReceiveAction string
+	// Dimensions 限定该迁移动作获准写入的维度。
+	Dimensions []meta.Dimension
 }
 
 // Descriptor 声明一个资源的动作集合，不包含 HTTP 路由。
@@ -90,6 +96,7 @@ type Descriptor struct {
 func (d Descriptor) Action(name string) (Action, bool) {
 	for _, a := range d.Actions {
 		if a.Name == name {
+			a.Dimensions = append([]meta.Dimension(nil), a.Dimensions...)
 			return a, true
 		}
 	}
@@ -170,7 +177,7 @@ func All(authorizers ...IAuthorizer) (IAuthorizer, error) {
 
 func (a *allAuthorizer) Authorize(ctx context.Context, req Request) (Decision, error) {
 	specs := make([]spec.Spec, 0, len(a.authorizers))
-	assignments := make(map[spec.Role]any)
+	assignments := make(map[meta.Dimension]any)
 	for _, authorizer := range a.authorizers {
 		decision, err := authorizer.Authorize(ctx, req)
 		if err != nil {
@@ -191,33 +198,33 @@ func (a *allAuthorizer) Authorize(ctx context.Context, req Request) (Decision, e
 			if err := assignment.Validate(); err != nil {
 				return Decision{}, err
 			}
-			if existing, ok := assignments[assignment.Role]; ok {
+			if existing, ok := assignments[assignment.Dimension]; ok {
 				if !reflect.DeepEqual(existing, assignment.Value) {
 					return Decision{Allowed: false, Reason: "assignment_conflict"}, nil
 				}
 				continue
 			}
-			assignments[assignment.Role] = assignment.Value
+			assignments[assignment.Dimension] = assignment.Value
 		}
 	}
 	out := Decision{Allowed: true, Spec: spec.And(specs...)}
-	for role, value := range assignments {
-		out.Assign = append(out.Assign, Assignment{Role: role, Value: value})
+	for dimension, value := range assignments {
+		out.Assign = append(out.Assign, Assignment{Dimension: dimension, Value: value})
 	}
+	sort.Slice(out.Assign, func(i, j int) bool { return out.Assign[i].Dimension < out.Assign[j].Dimension })
 	return out, nil
 }
 
-func (a *allAuthorizer) Vocabulary() Vocabulary { return a.vocabulary }
+func (a *allAuthorizer) Vocabulary() Vocabulary { return a.vocabulary.Copy() }
 
 func mergeVocabulary(a, b Vocabulary) Vocabulary {
-	a.Roles = appendUniqueRoles(a.Roles, b.Roles...)
-	a.Fields = appendUnique(a.Fields, b.Fields...)
-	a.Named = appendUnique(a.Named, b.Named...)
+	a.Refs = appendUniqueRefs(a.Refs, b.Refs...)
+	a.Assignable = appendUniqueDimensions(a.Assignable, b.Assignable...)
 	return a
 }
 
-func appendUniqueRoles(dst []spec.Role, values ...spec.Role) []spec.Role {
-	seen := make(map[spec.Role]struct{}, len(dst)+len(values))
+func appendUniqueRefs(dst []meta.Ref, values ...meta.Ref) []meta.Ref {
+	seen := make(map[meta.Ref]struct{}, len(dst)+len(values))
 	for _, v := range dst {
 		seen[v] = struct{}{}
 	}
@@ -231,8 +238,8 @@ func appendUniqueRoles(dst []spec.Role, values ...spec.Role) []spec.Role {
 	return dst
 }
 
-func appendUnique(dst []string, values ...string) []string {
-	seen := make(map[string]struct{}, len(dst)+len(values))
+func appendUniqueDimensions(dst []meta.Dimension, values ...meta.Dimension) []meta.Dimension {
+	seen := make(map[meta.Dimension]struct{}, len(dst)+len(values))
 	for _, v := range dst {
 		seen[v] = struct{}{}
 	}

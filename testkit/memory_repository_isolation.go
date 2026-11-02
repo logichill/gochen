@@ -6,8 +6,9 @@ import (
 
 	"gochen/contextx"
 	"gochen/domain"
-	"gochen/domain/crud"
+	"gochen/domain/meta"
 	"gochen/errors"
+	"reflect"
 )
 
 // L2 空间隔离的内存实现。
@@ -56,11 +57,17 @@ func withMemoryIsolation[T domain.IEntity[ID], ID comparable](resolve IsolationR
 		if r == nil {
 			return
 		}
-		var zero T
-		if _, ok := any(zero).(crud.ITenantEntity[ID]); !ok {
-			panic("testkit: memory isolation requires entity to implement domain/crud.ITenantEntity")
-		}
 		r.isolated = true
+		r.isolationRef = meta.ByDimension("tenant")
+		r.isolationResolve = resolve
+	}
+}
+
+// WithMemoryIsolationField 显式绑定任意字段或维度作为隔离槽位。
+func WithMemoryIsolationField[T domain.IEntity[ID], ID comparable](ref meta.Ref, resolve IsolationResolveFunc) MemoryOption[T, ID] {
+	return func(r *MemoryRepository[T, ID]) {
+		r.isolated = true
+		r.isolationRef = ref
 		r.isolationResolve = resolve
 	}
 }
@@ -114,21 +121,33 @@ func (r *MemoryRepository[T, ID]) resolveIsolationKey(ctx context.Context) (stri
 }
 
 // visible 判断实体是否属于指定隔离空间。
-func visibleInIsolation[T domain.IEntity[ID], ID comparable](entity T, isolationID string) bool {
-	aware, ok := any(entity).(crud.ITenantEntity[ID])
+func (r *MemoryRepository[T, ID]) visibleInIsolation(entity T, isolationID string) bool {
+	field, err := r.metadata.Resolve(r.isolationRef)
+	if err != nil {
+		return false
+	}
+	current, ok := field.Value(entity)
 	if !ok {
 		return false
 	}
-	return aware.GetTenantID() == isolationID
+	expected, err := field.Convert(isolationID)
+	return err == nil && reflect.DeepEqual(current.Interface(), expected.Interface())
 }
 
 // stampIsolation 在写入前标记归属。
-func stampIsolation[T domain.IEntity[ID], ID comparable](entity T, isolationID string) error {
-	aware, ok := any(entity).(crud.ITenantEntity[ID])
-	if !ok {
-		return errors.NewCode(errors.Unsupported,
-			"entity does not implement domain/crud.ITenantEntity")
+func (r *MemoryRepository[T, ID]) stampIsolation(entity T, isolationID string) error {
+	field, err := r.metadata.Resolve(r.isolationRef)
+	if err != nil {
+		return err
 	}
-	aware.SetTenantID(isolationID)
+	converted, err := field.Convert(isolationID)
+	if err != nil {
+		return err
+	}
+	target, ok := field.Value(entity)
+	if !ok || !target.CanSet() {
+		return errors.NewCode(errors.InvalidInput, "isolation field is not settable")
+	}
+	target.Set(converted)
 	return nil
 }

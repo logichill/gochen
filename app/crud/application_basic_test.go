@@ -172,7 +172,10 @@ func TestNewReadApplicationOnlyDeclaresReadActions(t *testing.T) {
 
 func TestCreateValidatesDomainBeforeApplicationPolicy(t *testing.T) {
 	order := make([]string, 0, 2)
-	repo := testkit.NewMemoryRepository[*validatingEntity, int64](testkit.NewInt64Sequence(1))
+	repo, repositoryErr := testkit.NewMemoryRepository[*validatingEntity, int64](testkit.NewInt64Sequence(1))
+	if repositoryErr != nil {
+		t.Fatal(repositoryErr)
+	}
 	app, err := NewApplication[*validatingEntity, int64](repo, Options[*validatingEntity, int64]{
 		Resource:   "doc",
 		Authorizer: auth.Allow(),
@@ -195,7 +198,10 @@ func TestCreateValidatesDomainBeforeApplicationPolicy(t *testing.T) {
 
 func TestCreateStopsAfterDomainInvariantFailure(t *testing.T) {
 	order := make([]string, 0, 2)
-	repo := testkit.NewMemoryRepository[*validatingEntity, int64](testkit.NewInt64Sequence(1))
+	repo, repositoryErr := testkit.NewMemoryRepository[*validatingEntity, int64](testkit.NewInt64Sequence(1))
+	if repositoryErr != nil {
+		t.Fatal(repositoryErr)
+	}
 	app, err := NewApplication[*validatingEntity, int64](repo, Options[*validatingEntity, int64]{
 		Resource:   "doc",
 		Authorizer: auth.Allow(),

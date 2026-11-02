@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"gochen/auth/scoped"
+	"gochen/auth"
 )
 
 // AuthzLogEntryType 区分审计日志的种类。
@@ -98,23 +98,11 @@ type IAuthzAuditStore interface {
 	ListAuthzLogEntries(ctx context.Context, entryType AuthzLogEntryType, limit int) ([]AuthzLogEntry, error)
 }
 
-// LoggedResourcesOf 把决策授权的资源投影为审计日志资源快照。
-func LoggedResourcesOf(decision scoped.Decision) []AuthzLoggedResource {
-	if len(decision.AuthorizedResources) == 0 {
-		return nil
-	}
-	out := make([]AuthzLoggedResource, 0, len(decision.AuthorizedResources))
-	for _, resource := range decision.AuthorizedResources {
-		resource = resource.Normalize()
-		out = append(out, AuthzLoggedResource{
-			Kind:           resource.Kind,
-			ID:             resource.ID,
-			ManagedScopeID: resource.ManagedScopeID,
-			GlobalScope:    resource.GlobalScope,
-			TenantID:       resource.TenantID,
-			OwnerID:        resource.OwnerID,
-			Revision:       resource.Revision,
-		})
+// LoggedResourcesOf 记录请求明确列出的资源标识。
+func LoggedResourcesOf(req auth.Request) []AuthzLoggedResource {
+	out := make([]AuthzLoggedResource, 0, len(req.IDs))
+	for _, id := range req.IDs {
+		out = append(out, AuthzLoggedResource{Kind: req.Resource, ID: id})
 	}
 	return out
 }

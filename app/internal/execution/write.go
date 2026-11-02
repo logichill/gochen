@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 
 	"gochen/app/internal/depcheck"
+	"gochen/app/operation"
 	"gochen/auth"
 	domaudited "gochen/domain/audited"
 	"gochen/domain/spec"
@@ -13,6 +14,7 @@ import (
 
 // Create 创建单个实体：授权 → 事务{ Before → 赋值 → 校验 → Create → After → 审计 } → PostCommit。
 func (c *Core[T, ID]) Create(ctx context.Context, entity T) error {
+	ctx = operation.EnsureOperationID(ctx)
 	if err := checkContext(ctx); err != nil {
 		return err
 	}
@@ -23,7 +25,7 @@ func (c *Core[T, ID]) Create(ctx context.Context, entity T) error {
 	if err != nil {
 		return err
 	}
-	if err := ValidateWriteSpec(spec, true); err != nil {
+	if err := c.execution.ValidateWriteSpec(spec, true); err != nil {
 		return err
 	}
 	if depcheck.IsNil(c.tx) {
@@ -48,6 +50,7 @@ func (c *Core[T, ID]) Create(ctx context.Context, entity T) error {
 // Update 更新单个实体：授权 → 事务{ Get → 快照 → Before → 校验 → Update → After → 审计 } → PostCommit。
 // 无业务字段变更时跳过写入与审计。
 func (c *Core[T, ID]) Update(ctx context.Context, entity T) error {
+	ctx = operation.EnsureOperationID(ctx)
 	if err := checkContext(ctx); err != nil {
 		return err
 	}
@@ -59,7 +62,7 @@ func (c *Core[T, ID]) Update(ctx context.Context, entity T) error {
 	if err != nil {
 		return err
 	}
-	if err := ValidateWriteSpec(spec, false); err != nil {
+	if err := c.execution.ValidateWriteSpec(spec, false); err != nil {
 		return err
 	}
 	if depcheck.IsNil(c.tx) {
@@ -87,6 +90,7 @@ func (c *Core[T, ID]) Update(ctx context.Context, entity T) error {
 
 // Delete 删除单个实体。audited 构造下为软删，其余为物理删。
 func (c *Core[T, ID]) Delete(ctx context.Context, id ID) error {
+	ctx = operation.EnsureOperationID(ctx)
 	if err := checkContext(ctx); err != nil {
 		return err
 	}
@@ -94,7 +98,7 @@ func (c *Core[T, ID]) Delete(ctx context.Context, id ID) error {
 	if err != nil {
 		return err
 	}
-	if err := ValidateWriteSpec(spec, false); err != nil {
+	if err := c.execution.ValidateWriteSpec(spec, false); err != nil {
 		return err
 	}
 	if depcheck.IsNil(c.tx) {
@@ -118,6 +122,7 @@ func (c *Core[T, ID]) Delete(ctx context.Context, id ID) error {
 
 // DeleteBulk 一次授权、一个事务删除多个实体；任一失败整批回滚。
 func (c *Core[T, ID]) DeleteBulk(ctx context.Context, ids []ID) error {
+	ctx = operation.EnsureOperationID(ctx)
 	if err := checkContext(ctx); err != nil {
 		return err
 	}
@@ -131,7 +136,7 @@ func (c *Core[T, ID]) DeleteBulk(ctx context.Context, ids []ID) error {
 	if err != nil {
 		return err
 	}
-	if err := ValidateWriteSpec(spec, false); err != nil {
+	if err := c.execution.ValidateWriteSpec(spec, false); err != nil {
 		return err
 	}
 	if depcheck.IsNil(c.tx) {
@@ -196,7 +201,8 @@ func (c *Core[T, ID]) createOne(
 	if depcheck.IsNil(c.audit) {
 		return domaudited.AuditRecord{}, false, nil
 	}
-	return c.record(txCtx, act, action, entity, snapshot), true, nil
+	record, err := c.record(txCtx, act, action, entity, snapshot)
+	return record, true, err
 }
 
 // updateLoaded 在已开启的事务中更新实体。before 是事务内读取的当前状态，
@@ -212,6 +218,10 @@ func (c *Core[T, ID]) updateLoaded(
 	fn func(context.Context, T) error,
 ) (T, domaudited.AuditRecord, bool, error) {
 	stage := c.hooks.For(action)
+	protected, err := c.execution.CaptureProtected(before)
+	if err != nil {
+		return entity, domaudited.AuditRecord{}, false, err
+	}
 	beforeState, err := c.businessSnapshot(before)
 	if err != nil {
 		return entity, domaudited.AuditRecord{}, false, err
@@ -225,8 +235,14 @@ func (c *Core[T, ID]) updateLoaded(
 			return entity, domaudited.AuditRecord{}, false, err
 		}
 	}
+	if err := c.execution.CheckProtected(protected, entity); err != nil {
+		return entity, domaudited.AuditRecord{}, false, err
+	}
 	// 写前钩子校验命令产出的目标状态，单条与批量更新遵循相同顺序。
 	if err := c.invokeBefore(txCtx, stage, entity); err != nil {
+		return entity, domaudited.AuditRecord{}, false, err
+	}
+	if err := c.execution.CheckProtected(protected, entity); err != nil {
 		return entity, domaudited.AuditRecord{}, false, err
 	}
 	if err := c.validate(entity); err != nil {
@@ -264,7 +280,8 @@ func (c *Core[T, ID]) updateLoaded(
 	if depcheck.IsNil(c.audit) {
 		return entity, domaudited.AuditRecord{}, false, nil
 	}
-	return entity, c.record(txCtx, act, action, entity, changes), true, nil
+	record, err := c.record(txCtx, act, action, entity, changes)
+	return entity, record, true, err
 }
 
 // businessSnapshot 捕获全部业务字段，独立于审计投影与 JSON 输出字段选择。
@@ -272,7 +289,7 @@ func (c *Core[T, ID]) updateLoaded(
 func (c *Core[T, ID]) businessSnapshot(entity T) (json.RawMessage, error) {
 	state := make(map[string]any)
 	for _, field := range c.metadata.Fields() {
-		if field.Role != "" || field.Managed {
+		if field.Identity || field.Managed {
 			continue
 		}
 		value, ok := field.Value(entity)
@@ -324,7 +341,8 @@ func (c *Core[T, ID]) deleteOne(
 	if depcheck.IsNil(c.audit) {
 		return domaudited.AuditRecord{}, false, nil
 	}
-	return c.record(txCtx, act, action, entity, nil), true, nil
+	record, err := c.record(txCtx, act, action, entity, nil)
+	return record, true, err
 }
 
 func (c *Core[T, ID]) validateBulkIDs(ids []ID) error {

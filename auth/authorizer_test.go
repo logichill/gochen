@@ -2,10 +2,10 @@ package auth_test
 
 import (
 	"context"
-	"testing"
-
 	"gochen/auth"
+	"gochen/domain/meta"
 	"gochen/domain/spec"
+	"testing"
 )
 
 type stubAuthorizer struct {
@@ -32,12 +32,12 @@ func TestAllow(t *testing.T) {
 
 func TestAllCombine(t *testing.T) {
 	a := stubAuthorizer{
-		decision:   auth.Decision{Allowed: true, Spec: spec.Eq("A", 1), Assign: []auth.Assignment{{Role: spec.RoleOwner, Value: "u1"}}},
-		vocabulary: auth.Vocabulary{Roles: []spec.Role{spec.RoleOwner}, Fields: []string{"A"}},
+		decision:   auth.Decision{Allowed: true, Spec: spec.Eq(meta.ByField("A"), 1), Assign: []auth.Assignment{{Dimension: "owner", Value: "u1"}}},
+		vocabulary: auth.Vocabulary{Refs: []meta.Ref{meta.ByDimension("owner"), meta.ByField("A")}},
 	}
 	b := stubAuthorizer{
-		decision:   auth.Decision{Allowed: true, Spec: spec.Eq("B", 2)},
-		vocabulary: auth.Vocabulary{Roles: []spec.Role{spec.RoleOwner, spec.RoleScope}, Named: []string{"visibleTo"}},
+		decision:   auth.Decision{Allowed: true, Spec: spec.Eq(meta.ByField("B"), 2)},
+		vocabulary: auth.Vocabulary{Refs: []meta.Ref{meta.ByDimension("owner"), meta.ByDimension("scope")}},
 	}
 	combined, err := auth.All(a, b)
 	if err != nil {
@@ -50,14 +50,14 @@ func TestAllCombine(t *testing.T) {
 	if !decision.Allowed {
 		t.Fatalf("decision = %+v", decision)
 	}
-	if got := decision.Spec.Canonical(); got != "and(eq(A,1),eq(B,2))" {
+	if got := decision.Spec.Canonical(); got != "and(eq(field:A,1),eq(field:B,2))" {
 		t.Fatalf("spec = %s", got)
 	}
-	if len(decision.Assign) != 1 || decision.Assign[0].Role != spec.RoleOwner {
+	if len(decision.Assign) != 1 || decision.Assign[0].Dimension != "owner" {
 		t.Fatalf("assign = %+v", decision.Assign)
 	}
 	vocab := combined.Vocabulary()
-	if len(vocab.Roles) != 2 || len(vocab.Fields) != 1 || len(vocab.Named) != 1 {
+	if len(vocab.Refs) != 3 {
 		t.Fatalf("vocabulary = %+v", vocab)
 	}
 }
@@ -73,8 +73,8 @@ func TestAllDenyAndConflict(t *testing.T) {
 		t.Fatalf("deny decision = %+v, %v", decision, err)
 	}
 
-	left := stubAuthorizer{decision: auth.Decision{Allowed: true, Spec: spec.All(), Assign: []auth.Assignment{{Role: spec.RoleOwner, Value: "u1"}}}}
-	right := stubAuthorizer{decision: auth.Decision{Allowed: true, Spec: spec.All(), Assign: []auth.Assignment{{Role: spec.RoleOwner, Value: "u2"}}}}
+	left := stubAuthorizer{decision: auth.Decision{Allowed: true, Spec: spec.All(), Assign: []auth.Assignment{{Dimension: "owner", Value: "u1"}}}}
+	right := stubAuthorizer{decision: auth.Decision{Allowed: true, Spec: spec.All(), Assign: []auth.Assignment{{Dimension: "owner", Value: "u2"}}}}
 	combined, err = auth.All(left, right)
 	if err != nil {
 		t.Fatalf("All: %v", err)

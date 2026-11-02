@@ -16,6 +16,10 @@
 
 ## CRUD 与审计实现的文件组织
 
+仓储通过 `app.IExecutionDescriptorProvider` 暴露已绑定的只读资源契约，Application 构造校验 Vocabulary.Refs / Assignable。全部维度默认受普通更新保护，mutable 分类支持业务编辑。授权条件采用类型化 Ref，Named 用于仓储业务读查询。
+
+CRUD / Audited 的 `Transfer` 由 KindTransfer、ReceiveAction 和 Dimensions 声明，接收调用方版本与目标意图。入口在事务外完成两阶段授权，再在同源事务中执行维度写入、实际后像回读和双记录审计；已有事务中的调用返回 FailedPrecondition。迁移钩子支持 After / PostCommit，并使用独立展示副本。外部 REST / 命令迁移入口共用 `operation.Runner.ExecuteTransfer`，要求幂等键与原调用方版本。
+
 `crud` 与 `audited` 在各自的 `application.go` 定义应用和构造器，共享 `app/internal/execution` 的读写、批量、生命周期和审计执行骨架。`crud/application_read.go` 与 `application_write.go` 提供公共入口；`interfaces.go`、`options.go`、`hooks.go` 承载契约与配置。
 
 ## CRUD 装配
@@ -77,6 +81,8 @@ Hooks 以动作名为键，标准写动作使用 `create` / `update` / `delete`�
 | `PostCommit` | 事务提交之后 | 不回滚已提交写入 |
 
 `PostCommit` 要求仓储实现 `app/crud.ITransactional`。通知、外部同步等副作用应在提交后执行；需要回滚保证的 Hook 应使用事务仓储。
+
+`Before` 接收待写实体。审计 `Projector`、`After` 与 `PostCommit` 各自接收独立副本；展示或通知逻辑的输入修改与持久化实体、返回实体、审计维度事实相互隔离。
 
 `Execute` / `ExecuteNew` / 批量命令及 `Restore` 在提交后回调失败时返回已提交实体与 `contextx.AfterCommitError`。实体的 ID、版本与业务状态保持有效，调用方可据此返回降级成功或补偿失败的提交后阶段。
 

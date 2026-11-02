@@ -68,16 +68,17 @@ func WithMemoryCrossIsolationReads[T domain.IEntity[ID], ID comparable](audit IC
 }
 
 // validateCrossIsolationDeclaration 拦下让开闸声明落空或无意义的配置。
-func (r *MemoryRepository[T, ID]) validateCrossIsolationDeclaration() {
+func (r *MemoryRepository[T, ID]) validateCrossIsolationDeclaration() error {
 	if !r.crossIsolationReads {
-		return
+		return nil
 	}
 	if r.crossIsolationAudit == nil {
-		panic("testkit: memory cross-isolation reads require a non-nil audit sink")
+		return errors.NewCode(errors.InvalidInput, "memory cross-isolation reads require an audit sink")
 	}
 	if !r.isolated {
-		panic("testkit: memory cross-isolation reads require WithMemoryIsolation")
+		return errors.NewCode(errors.InvalidInput, "memory cross-isolation reads require isolation")
 	}
+	return nil
 }
 
 // crossIsolationRelaxed 判断本次读取是否满足两道闸，并在放行时完成留痕。

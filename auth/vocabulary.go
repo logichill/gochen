@@ -1,99 +1,74 @@
 package auth
 
 import (
-	"gochen/domain/spec"
+	"gochen/domain/meta"
 	"gochen/errors"
 )
 
-// Validate 校验词汇只声明已知的角色、字段与命名条件。
-//
-// available 由 Application 构造时汇总：角色取框架已知集合，
-// 字段取实体字段元数据，命名条件取自仓储注册。
-func (v Vocabulary) Validate(available Vocabulary) error {
-	fields := stringSet(available.Fields)
-	named := stringSet(available.Named)
-	for _, role := range v.Roles {
-		if !role.IsValid() {
-			return errors.NewCode(errors.InvalidInput, "vocabulary references unknown role").
-				WithContext("role", string(role))
-		}
-		if len(available.Roles) > 0 && !hasRole(available.Roles, role) {
-			return errors.NewCode(errors.InvalidInput, "vocabulary references unknown role").
-				WithContext("role", string(role))
+// Copy 返回授权词汇的独立副本。
+func (v Vocabulary) Copy() Vocabulary {
+	return Vocabulary{Refs: append([]meta.Ref(nil), v.Refs...), Assignable: append([]meta.Dimension(nil), v.Assignable...)}
+}
+
+// Validate 校验词汇在实体上具有合法绑定。
+func (v Vocabulary) Validate(metadata *meta.Metadata) error {
+	for _, ref := range v.Refs {
+		if _, err := metadata.Resolve(ref); err != nil {
+			return err
 		}
 	}
-	for _, field := range v.Fields {
-		if _, ok := fields[field]; !ok {
-			return errors.NewCode(errors.InvalidInput, "vocabulary references unknown field").
-				WithContext("field", field)
-		}
-	}
-	for _, name := range v.Named {
-		if _, ok := named[name]; !ok {
-			return errors.NewCode(errors.InvalidInput, "vocabulary references unknown named condition").
-				WithContext("named", name)
+	for _, dimension := range v.Assignable {
+		if _, err := metadata.Resolve(meta.ByDimension(dimension)); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-// ValidateAgainst 校验判定结果只引用词汇内声明的项。
-func (d Decision) ValidateAgainst(v Vocabulary) error {
+// ValidateAgainst 校验实际引用和赋值；字段别名按实体字段身份比较。
+func (d Decision) ValidateAgainst(v Vocabulary, metadata *meta.Metadata) error {
 	if !d.Allowed {
 		return nil
 	}
-	roles := roleSet(v.Roles)
-	fields := stringSet(v.Fields)
-	named := stringSet(v.Named)
-	for _, field := range d.Spec.Fields() {
-		if _, ok := fields[field]; ok {
-			continue
-		}
-		if _, ok := roles[spec.Role(field)]; ok {
-			continue
-		}
-		return errors.NewCode(errors.Internal, "decision spec references field outside vocabulary").
-			WithContext("field", field)
+	if err := d.Spec.Err(); err != nil {
+		return errors.Wrap(err, errors.Internal, "authorizer returned an invalid spec")
 	}
-	for _, name := range d.Spec.NamedNames() {
-		if _, ok := named[name]; !ok {
-			return errors.NewCode(errors.Internal, "decision spec references named condition outside vocabulary").
-				WithContext("named", name)
+	if d.Spec.HasNamed() {
+		return errors.NewCode(errors.Internal, "authorization spec must use typed field references")
+	}
+	fields := make(map[string]struct{}, len(v.Refs))
+	for _, ref := range v.Refs {
+		field, err := metadata.Resolve(ref)
+		if err != nil {
+			return errors.Wrap(err, errors.Internal, "invalid authorization vocabulary")
+		}
+		fields[field.Name] = struct{}{}
+	}
+	for _, ref := range d.Spec.Refs() {
+		field, err := metadata.Resolve(ref)
+		if err != nil {
+			return errors.Wrap(err, errors.Internal, "decision reference has no binding")
+		}
+		if _, ok := fields[field.Name]; !ok {
+			return errors.NewCode(errors.Internal, "decision reference is outside vocabulary").WithContext("reference", ref.String())
 		}
 	}
+	assignable := make(map[meta.Dimension]struct{}, len(v.Assignable))
+	for _, dim := range v.Assignable {
+		assignable[dim] = struct{}{}
+	}
+	seen := make(map[meta.Dimension]struct{}, len(d.Assign))
 	for _, assignment := range d.Assign {
 		if err := assignment.Validate(); err != nil {
-			return err
+			return errors.Wrap(err, errors.Internal, "invalid decision assignment")
 		}
-		if _, ok := roles[assignment.Role]; !ok && len(v.Roles) > 0 {
-			return errors.NewCode(errors.Internal, "decision assignment references role outside vocabulary").
-				WithContext("role", string(assignment.Role))
+		if _, ok := assignable[assignment.Dimension]; !ok {
+			return errors.NewCode(errors.Internal, "decision assignment is outside vocabulary").WithContext("dimension", string(assignment.Dimension))
 		}
+		if _, duplicate := seen[assignment.Dimension]; duplicate {
+			return errors.NewCode(errors.Internal, "duplicate decision assignment")
+		}
+		seen[assignment.Dimension] = struct{}{}
 	}
 	return nil
-}
-
-func stringSet(values []string) map[string]struct{} {
-	set := make(map[string]struct{}, len(values))
-	for _, value := range values {
-		set[value] = struct{}{}
-	}
-	return set
-}
-
-func roleSet(roles []spec.Role) map[spec.Role]struct{} {
-	set := make(map[spec.Role]struct{}, len(roles))
-	for _, role := range roles {
-		set[role] = struct{}{}
-	}
-	return set
-}
-
-func hasRole(roles []spec.Role, target spec.Role) bool {
-	for _, role := range roles {
-		if role == target {
-			return true
-		}
-	}
-	return false
 }

@@ -12,21 +12,11 @@ import (
 	"gochen/errors"
 )
 
-// Role 是框架定义的字段角色；实体通过 domain/meta 的字段标签声明角色字段。
-type Role = meta.Role
-
-const (
-	RoleID     = meta.RoleID
-	RoleTenant = meta.RoleTenant
-	RoleScope  = meta.RoleScope
-	RoleOwner  = meta.RoleOwner
-)
-
 // Spec 是领域层唯一的行级谓词类型。零值不匹配任何实体；非法构造携带错误，
 // 任何解释器遇到它都返回该错误。
 type Spec struct {
 	kind     specKind
-	field    string
+	field    meta.Ref
 	value    any
 	values   []any
 	name     string
@@ -82,7 +72,7 @@ func INLimit() int {
 func All() Spec { return Spec{kind: specAll} }
 
 // Eq 返回 field 等于 v 的规约。v 为 nil 或类型不允许时得到非法规约。
-func Eq[F ~string](field F, v any) Spec {
+func Eq(field meta.Ref, v any) Spec {
 	f, err := normalizeField(field)
 	if err != nil {
 		return Spec{err: err}
@@ -96,13 +86,13 @@ func Eq[F ~string](field F, v any) Spec {
 
 // In 返回 field 属于给定值的规约。空集合等于零值；含 nil、超过 IN 上限或
 // 出现不允许的值类型时得到非法规约。
-func In[F ~string](field F, vs ...any) Spec {
+func In(field meta.Ref, vs ...any) Spec {
 	f, err := normalizeField(field)
 	if err != nil {
 		return Spec{err: err}
 	}
 	if len(vs) == 0 {
-		return Spec{}
+		return Spec{kind: specIn, field: f}
 	}
 	if limit := INLimit(); len(vs) > limit {
 		return Spec{err: errors.NewCode(errors.InvalidInput, "IN exceeds configured limit").
@@ -131,7 +121,7 @@ func In[F ~string](field F, vs ...any) Spec {
 }
 
 // IsNull 返回 field 为 NULL 的规约。
-func IsNull[F ~string](field F) Spec {
+func IsNull(field meta.Ref) Spec {
 	f, err := normalizeField(field)
 	if err != nil {
 		return Spec{err: err}
@@ -152,7 +142,7 @@ func And(ss ...Spec) Spec {
 		case specAll:
 			continue
 		case specNone:
-			return Spec{}
+			out = append(out, s)
 		case specAnd:
 			out = append(out, s.children...)
 		default:
@@ -181,7 +171,7 @@ func Or(ss ...Spec) Spec {
 		case specNone:
 			continue
 		case specAll:
-			return All()
+			out = append(out, s)
 		case specOr:
 			out = append(out, s.children...)
 		default:
@@ -218,10 +208,56 @@ func Named(name string, args ...any) Spec {
 func (s Spec) Err() error { return s.err }
 
 // IsAll 报告规约是否匹配所有实体。
-func (s Spec) IsAll() bool { return s.err == nil && s.kind == specAll }
+func (s Spec) IsAll() bool {
+	if s.err != nil {
+		return false
+	}
+	if s.kind == specAll {
+		return true
+	}
+	if s.kind == specOr {
+		for _, child := range s.children {
+			if child.IsAll() {
+				return true
+			}
+		}
+	}
+	if s.kind == specAnd {
+		for _, child := range s.children {
+			if !child.IsAll() {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
 
 // IsNone 报告规约是否不匹配任何实体。
-func (s Spec) IsNone() bool { return s.err == nil && s.kind == specNone }
+func (s Spec) IsNone() bool {
+	if s.err != nil {
+		return false
+	}
+	if s.kind == specNone || (s.kind == specIn && len(s.values) == 0) {
+		return true
+	}
+	if s.kind == specAnd {
+		for _, child := range s.children {
+			if child.IsNone() {
+				return true
+			}
+		}
+	}
+	if s.kind == specOr {
+		for _, child := range s.children {
+			if !child.IsNone() {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
 
 // HasNamed 报告规约树中是否包含命名条件。
 func (s Spec) HasNamed() bool {
@@ -239,19 +275,19 @@ func (s Spec) HasNamed() bool {
 	return false
 }
 
-// ReferencesRole 报告规约树中是否引用了指定角色。
-func (s Spec) ReferencesRole(role Role) bool {
+// References 报告规约树是否包含指定引用。
+func (s Spec) References(ref meta.Ref) bool {
 	if s.err != nil {
 		return false
 	}
 	switch s.kind {
 	case specEq, specIn, specIsNull:
-		if s.field == string(role) {
+		if s.field == ref {
 			return true
 		}
 	case specAnd, specOr:
 		for _, child := range s.children {
-			if child.ReferencesRole(role) {
+			if child.References(ref) {
 				return true
 			}
 		}
@@ -285,22 +321,22 @@ func collectNamed(s Spec, out map[string]struct{}) {
 	}
 }
 
-// Fields 返回规约树引用到的字段或角色，按名称排序并去重。
-func (s Spec) Fields() []string {
+// Refs 返回规约树的类型化引用，按诊断表示排序并去重。
+func (s Spec) Refs() []meta.Ref {
 	if s.err != nil {
 		return nil
 	}
-	seen := make(map[string]struct{})
+	seen := make(map[meta.Ref]struct{})
 	collectFields(s, seen)
-	out := make([]string, 0, len(seen))
+	out := make([]meta.Ref, 0, len(seen))
 	for field := range seen {
 		out = append(out, field)
 	}
-	sort.Strings(out)
+	sort.Slice(out, func(i, j int) bool { return out[i].String() < out[j].String() })
 	return out
 }
 
-func collectFields(s Spec, out map[string]struct{}) {
+func collectFields(s Spec, out map[meta.Ref]struct{}) {
 	switch s.kind {
 	case specEq, specIn, specIsNull:
 		out[s.field] = struct{}{}
@@ -316,21 +352,27 @@ func (s Spec) Canonical() string {
 	if s.err != nil {
 		return "<invalid>"
 	}
+	if s.IsAll() {
+		return "all"
+	}
+	if s.IsNone() {
+		return "none"
+	}
 	switch s.kind {
 	case specNone:
 		return "none"
 	case specAll:
 		return "all"
 	case specEq:
-		return "eq(" + s.field + "," + canonicalValue(s.value) + ")"
+		return "eq(" + s.field.String() + "," + canonicalValue(s.value) + ")"
 	case specIn:
 		parts := make([]string, 0, len(s.values))
 		for _, v := range s.values {
 			parts = append(parts, canonicalValue(v))
 		}
-		return "in(" + s.field + "," + strings.Join(parts, ",") + ")"
+		return "in(" + s.field.String() + "," + strings.Join(parts, ",") + ")"
 	case specIsNull:
-		return "isnull(" + s.field + ")"
+		return "isnull(" + s.field.String() + ")"
 	case specNamed:
 		parts := make([]string, 0, len(s.args)+1)
 		parts = append(parts, s.name)
@@ -354,19 +396,8 @@ func (s Spec) Canonical() string {
 	}
 }
 
-func normalizeField[F ~string](field F) (string, error) {
-	f := strings.TrimSpace(string(field))
-	if f == "" {
-		return "", errors.NewCode(errors.InvalidInput, "spec field cannot be empty")
-	}
-	if f == string(RoleTenant) {
-		return "", errors.NewCode(errors.InvalidInput, "tenant role cannot be used in a spec")
-	}
-	if strings.HasPrefix(f, "@") && !Role(f).IsValid() {
-		return "", errors.NewCode(errors.InvalidInput, "unknown role in spec").
-			WithContext("field", f)
-	}
-	return f, nil
+func normalizeField(field meta.Ref) (meta.Ref, error) {
+	return field, field.Validate()
 }
 
 func normalizeValue(v any) (any, error) {

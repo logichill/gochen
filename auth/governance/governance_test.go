@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"gochen/auth"
 	"gochen/auth/governance"
 	"gochen/testkit/require"
 )
@@ -45,7 +46,7 @@ func TestAuditAccurateCacheHitPerRequest(t *testing.T) {
 	require.NoError(t, err)
 
 	// 第一次请求：冷启动回源，应当 CacheHit == false
-	_, err = wrapped.Authorize(context.Background(), "order:read")
+	_, err = wrapped.Authorize(context.Background(), auth.Request{Resource: "order", Action: "read", Permission: "order:api:read"})
 	require.NoError(t, err)
 	require.Equal(t, 1, len(auditStore.entries))
 	require.False(t, auditStore.entries[0].CacheHit, "首次请求必须记录 CacheHit=false (cache miss)")
@@ -53,7 +54,7 @@ func TestAuditAccurateCacheHitPerRequest(t *testing.T) {
 	require.Equal(t, "policy-key", auditStore.entries[0].SnapshotKey)
 
 	// 第二次请求：TTL 内，应当 CacheHit == true
-	_, err = wrapped.Authorize(context.Background(), "order:read")
+	_, err = wrapped.Authorize(context.Background(), auth.Request{Resource: "order", Action: "read", Permission: "order:api:read"})
 	require.NoError(t, err)
 	require.Equal(t, 2, len(auditStore.entries))
 	require.True(t, auditStore.entries[1].CacheHit, "TTL 内再次请求必须记录 CacheHit=true (cache hit)")
@@ -78,7 +79,7 @@ func TestAuditConcurrentCacheHitIsolation(t *testing.T) {
 	require.NoError(t, err)
 
 	// 预热缓存（产生一次 cache miss）
-	_, err = wrapped.Authorize(context.Background(), "order:read")
+	_, err = wrapped.Authorize(context.Background(), auth.Request{Resource: "order", Action: "read", Permission: "order:api:read"})
 	require.NoError(t, err)
 
 	// 并发执行 20 次请求，全部应在 TTL 内命中缓存
@@ -88,7 +89,7 @@ func TestAuditConcurrentCacheHitIsolation(t *testing.T) {
 	for i := 0; i < concurrency; i++ {
 		go func() {
 			defer wg.Done()
-			_, authErr := wrapped.Authorize(context.Background(), "order:read")
+			_, authErr := wrapped.Authorize(context.Background(), auth.Request{Resource: "order", Action: "read", Permission: "order:api:read"})
 			if authErr != nil {
 				t.Errorf("authorize failed: %v", authErr)
 			}
@@ -126,7 +127,7 @@ func TestAuditDirectSnapshotFuncRecordsCacheHit(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	_, err = wrapped.Authorize(context.Background(), "order:read")
+	_, err = wrapped.Authorize(context.Background(), auth.Request{Resource: "order", Action: "read", Permission: "order:api:read"})
 	require.NoError(t, err)
 	require.Equal(t, 1, len(auditStore.entries))
 	require.True(t, auditStore.entries[0].CacheHit)

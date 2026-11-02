@@ -4,28 +4,28 @@ import (
 	"context"
 	"fmt"
 
-	"gochen/auth/scoped"
+	"gochen/auth"
 	"gochen/errors"
 )
 
 // --- Audit 层：决策留痕 ---
 
 type auditAuthorizer struct {
-	inner scoped.IAuthorizer
+	inner auth.IAuthorizer
 	cfg   *config
 }
 
-func (a *auditAuthorizer) Authorize(ctx context.Context, action string, targets ...any) (scoped.Decision, error) {
+func (a *auditAuthorizer) Authorize(ctx context.Context, req auth.Request) (auth.Decision, error) {
 	start := a.cfg.clock.Now()
 	var capture snapshotCapture
 	auditCtx := withSnapshotCapture(ctx, &capture)
-	decision, err := a.inner.Authorize(auditCtx, action, targets...)
+	decision, err := a.inner.Authorize(auditCtx, req)
 	if decision.ID == "" {
 		id, genErr := a.cfg.idGenerator.Next()
 		switch {
 		case genErr != nil && a.cfg.strictAudit:
 			// 严格模式与审计写入失败同口径：留痕要素缺失即拒绝。
-			return scoped.Deny("audit_unavailable"), errors.Wrap(genErr, errors.Forbidden,
+			return auth.Decision{Reason: "audit_unavailable"}, errors.Wrap(genErr, errors.Forbidden,
 				"failed to assign decision ID; denying request")
 		case genErr == nil:
 			decision.ID = id
@@ -41,12 +41,12 @@ func (a *auditAuthorizer) Authorize(ctx context.Context, action string, targets 
 		Type:            AuthzLogEntryTypeDecision,
 		Timestamp:       start,
 		DecisionID:      decision.ID,
-		Action:          action,
-		Effect:          string(decision.Effect),
-		ReasonCode:      decision.ReasonCode,
+		Action:          req.Permission,
+		Effect:          decisionEffect(decision),
+		ReasonCode:      decision.Reason,
 		SnapshotVersion: decision.SnapshotVersion,
 		LatencyMs:       a.cfg.clock.Now().Sub(start).Milliseconds(),
-		Resources:       LoggedResourcesOf(decision),
+		Resources:       LoggedResourcesOf(req),
 		MatchedRules:    decision.MatchedRules,
 	}
 	if decision.SnapshotVersion != "" {
@@ -78,7 +78,7 @@ func (a *auditAuthorizer) Authorize(ctx context.Context, action string, targets 
 	if auditErr := a.saveAuditEntrySafely(ctx, entry); auditErr != nil {
 		if a.cfg.strictAudit {
 			// 严格模式：留痕失败即拒绝，保证“无审计不放行”。
-			return scoped.Deny("audit_unavailable"), errors.Wrap(auditErr, errors.Forbidden,
+			return auth.Decision{Reason: "audit_unavailable"}, errors.Wrap(auditErr, errors.Forbidden,
 				"authorization audit store is unavailable; denying request")
 		}
 		// 默认 fail-open：审计不可用不阻塞授权。
@@ -101,6 +101,4 @@ func (a *auditAuthorizer) saveAuditEntrySafely(ctx context.Context, entry AuthzL
 	return a.cfg.auditStore.SaveAuthzLogEntry(ctx, entry)
 }
 
-func (a *auditAuthorizer) Require(ctx context.Context, action string, targets ...any) error {
-	return requireVia(ctx, a, action, targets...)
-}
+func (a *auditAuthorizer) Vocabulary() auth.Vocabulary { return a.inner.Vocabulary().Copy() }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"gochen/domain/spec"
 
+	"gochen/app"
 	"gochen/app/eventsourced/eventstore"
 	"gochen/app/internal/depcheck"
 	"gochen/app/internal/execution"
@@ -27,6 +28,7 @@ type Options[T deventsourced.IEventSourcedAggregate[ID], ID comparable] struct {
 	ActionPermissions map[string]string
 	Validator         validate.IValidator
 	Limits            execution.Limits
+	Contract          app.ResourceContract
 
 	// ConcurrencyRetry 配置保存阶段并发冲突时的自动重试；重试会重新加载
 	// 聚合并重新执行命令函数，因此命令必须可重入。
@@ -55,6 +57,7 @@ type Application[T deventsourced.IEventSourcedAggregate[ID], ID comparable] stru
 	limits      execution.Limits
 	metadata    *meta.Metadata
 	interpreter *spec.Interpreter
+	execution   app.ExecutionDescriptor
 
 	retryConfig        *RetryConfig
 	isConcurrencyError IsConcurrencyError
@@ -90,11 +93,12 @@ func NewApplication[T deventsourced.IEventSourcedAggregate[ID], ID comparable](
 	if err != nil {
 		return nil, err
 	}
-	vocabulary := options.Authorizer.Vocabulary()
-	if len(vocabulary.Named) > 0 {
-		return nil, errors.NewCode(errors.InvalidInput, "eventsourced vocabulary cannot declare named conditions")
+	vocabulary := options.Authorizer.Vocabulary().Copy()
+	effective, err := app.BindContract(metadata, options.Contract)
+	if err != nil {
+		return nil, err
 	}
-	if err := execution.ValidateVocabulary(vocabulary, metadata, nil); err != nil {
+	if err := effective.ValidateVocabulary(vocabulary); err != nil {
 		return nil, err
 	}
 	application := &Application[T, ID]{
@@ -108,6 +112,7 @@ func NewApplication[T deventsourced.IEventSourcedAggregate[ID], ID comparable](
 		limits:             options.Limits.Normalize(),
 		metadata:           metadata,
 		interpreter:        spec.NewInterpreter(),
+		execution:          effective,
 		retryConfig:        normalizeRetryConfig(options.ConcurrencyRetry),
 		isConcurrencyError: DefaultIsConcurrencyError,
 		history:            options.History,
@@ -160,7 +165,7 @@ func (a *Application[T, ID]) Execute(
 	if err != nil {
 		return zero, err
 	}
-	if err := execution.ValidateWriteSpec(spec, false); err != nil {
+	if err := a.execution.ValidateWriteSpec(spec, false); err != nil {
 		return zero, err
 	}
 	runCtx, err := a.commandContext(ctx, action, opts)
@@ -196,8 +201,14 @@ func (a *Application[T, ID]) ExecuteNew(
 	if err != nil {
 		return zero, err
 	}
-	if err := execution.ValidateWriteSpec(spec, true); err != nil {
+	if err := a.execution.ValidateWriteSpec(spec, true); err != nil {
 		return zero, err
+	}
+	for _, assignment := range decision.Assign {
+		if !a.execution.CanAssign(assignment.Dimension) {
+			return zero, errors.NewCode(errors.Internal, "create assignment lacks resource capability").
+				WithContext("dimension", string(assignment.Dimension))
+		}
 	}
 	runCtx, err := a.commandContext(ctx, action, opts)
 	if err != nil {
@@ -252,7 +263,7 @@ func (a *Application[T, ID]) AuditTrail(
 	if err != nil {
 		return nil, err
 	}
-	if err := execution.ValidateAuditSpec(spec); err != nil {
+	if err := execution.ValidateAuditSpec(spec, a.metadata); err != nil {
 		return nil, err
 	}
 	aggregate, err := a.repo.Get(ctx, id)
@@ -284,7 +295,7 @@ func (a *Application[T, ID]) authorizeKind(ctx context.Context, action string, i
 	for _, id := range ids {
 		canonical = append(canonical, execution.FormatID(id))
 	}
-	return execution.AuthorizeKind(ctx, a.resource, a.authorizer, a.descriptor, a.actions, a.vocabulary, action, canonical, kinds...)
+	return execution.AuthorizeKind(ctx, a.resource, a.authorizer, a.descriptor, a.actions, a.vocabulary, a.metadata, action, canonical, kinds...)
 }
 
 func (a *Application[T, ID]) matchAggregate(spec spec.Spec, aggregate T, code errors.ErrorCode) error {

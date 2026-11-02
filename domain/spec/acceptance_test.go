@@ -1,12 +1,15 @@
 package spec
 
-import "testing"
+import (
+	"gochen/domain/meta"
+	"testing"
+)
 
 // 阶段 0 验收场景：用现有下游的真实形态验证规约代数与内存解释器。
 
 type alifeTask struct {
-	ID         int64  `role:"id"`
-	AssigneeID *int64 `role:"owner"`
+	ID         int64  `entity:"id"`
+	AssigneeID *int64 `dim:"owner"`
 	CreatedBy  string
 }
 
@@ -18,7 +21,7 @@ func TestAcceptanceAlifeAssigneeOrCreator(t *testing.T) {
 
 	// 当前 alife 的用户字段是 int64；D13 迁移后主体是 string，
 	// 解释器按字段类型把 "42" 转成 int64 后比较。
-	s := Or(Eq(RoleOwner, "42"), Eq("CreatedBy", "42"))
+	s := Or(Eq(meta.ByDimension("owner"), "42"), Eq(meta.ByField("CreatedBy"), "42"))
 	i := NewInterpreter()
 	for _, tc := range []struct {
 		name   string
@@ -40,25 +43,25 @@ func TestAcceptanceAlifeAssigneeOrCreator(t *testing.T) {
 }
 
 type emsTask struct {
-	ID             int64 `role:"id"`
-	ManagedScopeID int64 `role:"scope"`
-	LegacyTenantID int64 `role:"tenant"`
+	ID             int64 `entity:"id"`
+	ManagedScopeID int64 `dim:"scope"`
+	LegacyTenantID int64 `dim:"tenant"`
 }
 
 func TestAcceptanceEmsScopeIsolation(t *testing.T) {
 	inScope := &emsTask{ID: 1, ManagedScopeID: 2, LegacyTenantID: 9}
 	outOfScope := &emsTask{ID: 2, ManagedScopeID: 3, LegacyTenantID: 9}
 	i := NewInterpreter()
-	ok, err := i.Match(In(RoleScope, 1, 2), inScope)
+	ok, err := i.Match(In(meta.ByDimension("scope"), 1, 2), inScope)
 	if err != nil || !ok {
 		t.Fatalf("in-scope Match = %v, %v", ok, err)
 	}
-	ok, err = i.Match(In(RoleScope, 1, 2), outOfScope)
+	ok, err = i.Match(In(meta.ByDimension("scope"), 1, 2), outOfScope)
 	if err != nil || ok {
 		t.Fatalf("out-of-scope Match = %v, %v", ok, err)
 	}
-	// 租户隔离是仓储不变量，不允许进入规约。
-	if s := In(RoleTenant, 9); s.Err() == nil {
-		t.Fatal("tenant in spec must be rejected")
+	// 领域维度采用中性语法，资源契约承担隔离引用限制。
+	if s := In(meta.ByDimension("tenant"), 9); s.Err() != nil {
+		t.Fatal("valid dimension syntax must be accepted")
 	}
 }

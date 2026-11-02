@@ -30,7 +30,10 @@ type auditedMemoryEntity struct {
 
 func TestMemoryRepositoryCRUDAndStablePagination(t *testing.T) {
 	ctx := context.Background()
-	repository := NewMemoryRepository[*memoryEntity, int64](NewInt64Sequence(1))
+	repository, repositoryErr := NewMemoryRepository[*memoryEntity, int64](NewInt64Sequence(1))
+	if repositoryErr != nil {
+		t.Fatal(repositoryErr)
+	}
 	first := &memoryEntity{Name: "first"}
 	second := &memoryEntity{Name: "second"}
 
@@ -78,10 +81,13 @@ func TestMemoryRepositoryCRUDAndStablePagination(t *testing.T) {
 func TestMemoryRepositorySupportsGenericIDs(t *testing.T) {
 	ctx := context.Background()
 	next := 0
-	repository := NewMemoryRepository[*stringMemoryEntity, string](GeneratorFunc[string](func() (string, error) {
+	repository, repositoryErr := NewMemoryRepository[*stringMemoryEntity, string](GeneratorFunc[string](func() (string, error) {
 		next++
 		return fmt.Sprintf("entity-%d", next), nil
 	}))
+	if repositoryErr != nil {
+		t.Fatal(repositoryErr)
+	}
 	entity := &stringMemoryEntity{Name: "generic"}
 
 	if err := repository.Create(ctx, entity, spec.All()); err != nil {
@@ -97,7 +103,10 @@ func TestMemoryRepositorySupportsGenericIDs(t *testing.T) {
 
 func TestMemoryRepositoryBulkUpdateIsAtomic(t *testing.T) {
 	ctx := context.Background()
-	repository := NewMemoryRepository[*memoryEntity, int64](NewInt64Sequence(1))
+	repository, repositoryErr := NewMemoryRepository[*memoryEntity, int64](NewInt64Sequence(1))
+	if repositoryErr != nil {
+		t.Fatal(repositoryErr)
+	}
 	first := &memoryEntity{Name: "first"}
 	if err := repository.Create(ctx, first, spec.All()); err != nil {
 		t.Fatalf("create: %v", err)
@@ -121,7 +130,10 @@ func TestMemoryRepositoryBulkUpdateIsAtomic(t *testing.T) {
 
 func TestMemoryRepositoryTransactionRollbackAndConflict(t *testing.T) {
 	ctx := context.Background()
-	repository := NewMemoryRepository[*memoryEntity, int64](NewInt64Sequence(1))
+	repository, repositoryErr := NewMemoryRepository[*memoryEntity, int64](NewInt64Sequence(1))
+	if repositoryErr != nil {
+		t.Fatal(repositoryErr)
+	}
 	wantErr := stderrors.New("rollback")
 
 	err := repository.WithinTx(ctx, func(txCtx context.Context) error {
@@ -158,7 +170,10 @@ func TestMemoryRepositoryTransactionRollbackAndConflict(t *testing.T) {
 
 func TestAuditedMemoryRepositoryVisibilityAndAtomicAudit(t *testing.T) {
 	ctx := context.Background()
-	repository := NewAuditedMemoryRepository[*auditedMemoryEntity, int64](NewInt64Sequence(1))
+	repository, repositoryErr := NewAuditedMemoryRepository[*auditedMemoryEntity, int64](NewInt64Sequence(1))
+	if repositoryErr != nil {
+		t.Fatal(repositoryErr)
+	}
 	entity := &auditedMemoryEntity{Name: "article"}
 	if err := repository.Create(ctx, entity, spec.All()); err != nil {
 		t.Fatalf("create: %v", err)
@@ -188,7 +203,7 @@ func TestAuditedMemoryRepositoryVisibilityAndAtomicAudit(t *testing.T) {
 		_, err := repository.SaveAuditRecord(txCtx, audited.AuditRecord{
 			EntityID: "1",
 			Action:   "delete",
-			Operator: "tester",
+			Operator: "tester", OperationID: "test-operation", ResourceKind: "doc",
 		})
 		if err != nil {
 			return err

@@ -3,7 +3,6 @@ package testkit
 import (
 	"gochen/domain"
 	"gochen/domain/spec"
-	"gochen/errors"
 )
 
 // MemoryDataSourceID 是 testkit 内存仓储与内存审计存储共用的数据源标识（D17）。
@@ -63,20 +62,6 @@ func (r *MemoryRepository[T, ID]) matchSpec(s spec.Spec, entity T) (bool, error)
 		r.interpreter = spec.NewInterpreter(opts...)
 	}
 	return r.interpreter.Match(s, entity)
-}
-
-// requireWriteSpec 校验写路径规约：必须是纯谓词，新建不得引用主键角色。
-func requireWriteSpec(s spec.Spec, creating bool) error {
-	if err := s.Err(); err != nil {
-		return errors.Wrap(err, errors.Internal, "invalid spec")
-	}
-	if s.HasNamed() {
-		return errors.NewCode(errors.Internal, "write spec must not contain named conditions")
-	}
-	if creating && s.ReferencesRole(spec.RoleID) {
-		return errors.NewCode(errors.Internal, "create spec must not reference the id role")
-	}
-	return nil
 }
 
 // visibleEntity 报告实体是否未软删且满足规约。

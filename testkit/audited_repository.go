@@ -16,18 +16,22 @@ type AuditedMemoryRepository[T audited.IAuditedEntity[ID], ID comparable] struct
 	*MemoryRepository[T, ID]
 
 	auditMu       sync.RWMutex
-	audits        map[string][]audited.AuditRecord
+	audits        map[string][]memoryAuditRecord
 	nextAuditID   int64
 	auditRevision uint64
 }
 
 // NewAuditedMemoryRepository 创建审计型内存仓储。
-func NewAuditedMemoryRepository[T audited.IAuditedEntity[ID], ID comparable](generator gen.IGenerator[ID]) *AuditedMemoryRepository[T, ID] {
-	return &AuditedMemoryRepository[T, ID]{
-		MemoryRepository: NewMemoryRepository[T, ID](generator),
-		audits:           make(map[string][]audited.AuditRecord),
-		nextAuditID:      1,
+func NewAuditedMemoryRepository[T audited.IAuditedEntity[ID], ID comparable](generator gen.IGenerator[ID], opts ...MemoryOption[T, ID]) (*AuditedMemoryRepository[T, ID], error) {
+	repository, err := NewMemoryRepository[T, ID](generator, opts...)
+	if err != nil {
+		return nil, err
 	}
+	return &AuditedMemoryRepository[T, ID]{
+		MemoryRepository: repository,
+		audits:           make(map[string][]memoryAuditRecord),
+		nextAuditID:      1,
+	}, nil
 }
 
 var (
