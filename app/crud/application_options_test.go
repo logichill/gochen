@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"gochen/app/internal/execution"
+	"gochen/app"
 	"gochen/auth"
 	"gochen/errors"
 )
@@ -21,7 +21,7 @@ func TestOptionsAreCapturedAtConstruction(t *testing.T) {
 	app, _ := newTestApplication(t, Options[*testEntity, int64]{
 		Actions: actions,
 		Hooks:   hooks,
-		Limits:  execution.Limits{MaxBulkSize: 1, MaxPageSize: 1},
+		Limits:  app.Limits{MaxBulkSize: 1, MaxPageSize: 1},
 	})
 
 	// 调用方继续修改共享的 map/slice，不得影响已构造应用。
@@ -61,7 +61,7 @@ func TestOptionsAreCapturedAtConstruction(t *testing.T) {
 
 func TestLimitsNormalizeNonPositiveValues(t *testing.T) {
 	app, _ := newTestApplication(t, Options[*testEntity, int64]{
-		Limits: execution.Limits{MaxBulkSize: -1, MaxPageSize: 0},
+		Limits: app.Limits{MaxBulkSize: -1, MaxPageSize: 0},
 	})
 	if app.MaxBulkSize() != 1000 || app.MaxPageSize() != 1000 {
 		t.Fatalf("normalized limits = %d/%d", app.MaxBulkSize(), app.MaxPageSize())

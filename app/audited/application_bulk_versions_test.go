@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"testing"
 
+	"gochen/app"
 	appcrud "gochen/app/crud"
-	"gochen/app/internal/execution"
 	"gochen/auth"
 	domaudited "gochen/domain/audited"
 	"gochen/domain/spec"
@@ -106,7 +106,7 @@ func TestExecuteBulkDuplicateIDsRejected(t *testing.T) {
 
 func TestExecuteBulkExceedsBulkLimit(t *testing.T) {
 	options := updateActionOptions("rename")
-	options.Limits = execution.Limits{MaxBulkSize: 1}
+	options.Limits = app.Limits{MaxBulkSize: 1}
 	app, _ := newAuditedApplication(t, options)
 	ctx := operatorContext(t, "alice")
 	first := mustCreateDoc(t, app, ctx, "a")
@@ -180,7 +180,7 @@ func TestExecuteNewBulkRejectsOversizedBulk(t *testing.T) {
 	app, repo := newAuditedApplication(t, Options[*auditDoc, int64]{
 		Options: appcrud.Options[*auditDoc, int64]{
 			Actions: []auth.Action{{Name: "import", Kind: auth.KindCreate}},
-			Limits:  execution.Limits{MaxBulkSize: 1},
+			Limits:  app.Limits{MaxBulkSize: 1},
 		},
 	})
 	ctx := operatorContext(t, "alice")

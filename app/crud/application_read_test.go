@@ -2,7 +2,7 @@ package crud
 
 import (
 	"context"
-	"gochen/app/internal/execution"
+	"gochen/app"
 	"gochen/app/query"
 	"gochen/auth"
 	"gochen/domain/meta"
@@ -16,7 +16,7 @@ import (
 
 func TestListNormalizesPageBounds(t *testing.T) {
 	app, _ := newTestApplication(t, Options[*testEntity, int64]{
-		Limits: execution.Limits{MaxPageSize: 2},
+		Limits: app.Limits{MaxPageSize: 2},
 	})
 	ctx := context.Background()
 	mustCreate(t, app, ctx, "a")
@@ -101,7 +101,7 @@ func TestGetExistsCountAndQuery(t *testing.T) {
 
 func TestQueryNormalizesPageBounds(t *testing.T) {
 	app, _ := newTestApplication(t, Options[*testEntity, int64]{
-		Limits: execution.Limits{MaxPageSize: 2},
+		Limits: app.Limits{MaxPageSize: 2},
 	})
 	ctx := context.Background()
 	for _, name := range []string{"a", "b", "c"} {

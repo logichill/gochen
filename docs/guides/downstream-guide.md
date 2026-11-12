@@ -53,8 +53,8 @@ replace gochen-runtime => ../gochen-runtime
 组合根统一创建 DB、ORM、HTTP server、Transport、EventBus、Projection、日志和 ID 生成器，再通过构造函数或 options 注入。
 
 - 常用路径使用 Runtime `quick`，详见 [Quick 装配](quick-assembly.md)。
-- 有 provider、事件处理器、聚合 metadata 或投影注册的模块，使用 `gochen-runtime/host.Module(...).Provide(...).RouteRegistrar(...).Build()` 等 builder 能力。
-- Host 运行配置通过 `gochen-runtime/host/config` 注入；模块契约位于 `host/module`。内部 assembly 与 runtime capability 供自定义 Host / adapter 集成使用。
+- 普通模块使用 `gochen-runtime/host.Module(...).Application(application).RouteRegistrar(routes).Build()`，传入已经显式构造的实例；事件、投影和 Worker 同样采用 typed 声明，DI `Provide` 仅用于高级服务装配。
+- Host 运行配置通过 `gochen-runtime/host/config` 注入；模块契约位于 `host/module`。自定义生命周期实现 `module.IModule`；内部 assembly 不再作为下游扩展入口。源码迁移见 [核心候选迁移](core-next-migration.md)。
 - 配置结构化加载使用 Runtime `config.Provider.Load`，处理类型转换与校验错误。
 
 Host 的健康路由挂在 BasePath 下；BasePath 为 `/api/v1` 时是 `/api/v1/healthz` 和 `/api/v1/readyz`。监控路由需显式启用 `WithEnableMonitoringRoutes(true)`，并在部署边界控制访问。

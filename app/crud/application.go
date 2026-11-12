@@ -30,10 +30,7 @@ func NewApplication[T domain.IEntity[ID], ID comparable](
 	if depcheck.IsNil(repo) {
 		return nil, errors.NewCode(errors.InvalidInput, "repository cannot be nil")
 	}
-	audits, err := auditQueryStore(options.Audit)
-	if err != nil {
-		return nil, err
-	}
+	audits := options.Audit
 	if err := rejectUndeclaredAudit(options.Actions, audits); err != nil {
 		return nil, err
 	}
@@ -54,7 +51,6 @@ func NewApplication[T domain.IEntity[ID], ID comparable](
 		Read:         repo,
 		Tx:           repo,
 		Audit:        options.Audit,
-		Audits:       audits,
 	})
 	if err != nil {
 		return nil, err
@@ -72,10 +68,7 @@ func NewReadApplication[T domain.IEntity[ID], ID comparable](
 	if depcheck.IsNil(repo) {
 		return nil, errors.NewCode(errors.InvalidInput, "repository cannot be nil")
 	}
-	audits, err := auditQueryStore(options.Audit)
-	if err != nil {
-		return nil, err
-	}
+	audits := options.Audit
 	if err := rejectUndeclaredAudit(options.Actions, audits); err != nil {
 		return nil, err
 	}
@@ -94,7 +87,6 @@ func NewReadApplication[T domain.IEntity[ID], ID comparable](
 		Limits:       options.Limits,
 		Read:         repo,
 		Audit:        options.Audit,
-		Audits:       audits,
 	})
 	if err != nil {
 		return nil, err
@@ -153,17 +145,6 @@ func standardActions(resource string, permissions map[string]string, writable, w
 		})
 	}
 	return actions, nil
-}
-
-func auditQueryStore(audit domaudited.IAuditStore) (domaudited.IAuditQueryStore, error) {
-	if depcheck.IsNil(audit) {
-		return nil, nil
-	}
-	store, ok := any(audit).(domaudited.IAuditQueryStore)
-	if !ok || depcheck.IsNil(store) {
-		return nil, errors.NewCode(errors.InvalidInput, "audit store must implement IAuditQueryStore")
-	}
-	return store, nil
 }
 
 func rejectUndeclaredAudit(actions []auth.Action, store domaudited.IAuditQueryStore) error {

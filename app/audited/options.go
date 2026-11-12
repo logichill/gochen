@@ -1,8 +1,8 @@
 package audited
 
 import (
+	"gochen/app"
 	appcrud "gochen/app/crud"
-	"gochen/app/internal/execution"
 	domaudited "gochen/domain/audited"
 )
 
@@ -11,7 +11,7 @@ import (
 // 在 crud 配置之上增加审计投影函数；软删、审计存储与生命周期端口由仓储能力自动装配。
 type Options[T domaudited.IAuditedEntity[ID], ID comparable] struct {
 	appcrud.Options[T, ID]
-	Projector execution.Projector[T]
+	Projector app.Projector[T]
 }
 
 // ExecOption 配置一次命令执行的审计元数据。

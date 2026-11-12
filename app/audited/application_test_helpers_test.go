@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"testing"
 
+	"gochen/app"
 	"gochen/auth"
 	"gochen/contextx"
 	domaudited "gochen/domain/audited"
@@ -78,7 +79,7 @@ func newAuditedApplication(
 func newAuditedApplicationWith(
 	t *testing.T,
 	repo *testkit.AuditedMemoryRepository[*auditDoc, int64],
-	store domaudited.IAuditStore,
+	store app.IAuditRepository,
 	options Options[*auditDoc, int64],
 ) (*Application[*auditDoc, int64], *testkit.AuditedMemoryRepository[*auditDoc, int64]) {
 	t.Helper()

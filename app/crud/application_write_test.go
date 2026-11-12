@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"gochen/app/internal/execution"
+	"gochen/app"
 	"gochen/auth"
 	"gochen/errors"
 )
@@ -158,7 +158,7 @@ func TestDeleteBulkIsAtomicAndAuthorizesOnce(t *testing.T) {
 
 func TestDeleteBulkValidation(t *testing.T) {
 	app, _ := newTestApplication(t, Options[*testEntity, int64]{
-		Limits: execution.Limits{MaxBulkSize: 2},
+		Limits: app.Limits{MaxBulkSize: 2},
 	})
 	ctx := context.Background()
 	mustCreate(t, app, ctx, "a")
@@ -284,7 +284,7 @@ func TestExecuteNewCreatesEntity(t *testing.T) {
 
 func TestExecuteNewBulkCreatesAndValidatesLimit(t *testing.T) {
 	app, _ := newTestApplication(t, Options[*testEntity, int64]{
-		Limits: execution.Limits{MaxBulkSize: 2},
+		Limits: app.Limits{MaxBulkSize: 2},
 	})
 	ctx := context.Background()
 

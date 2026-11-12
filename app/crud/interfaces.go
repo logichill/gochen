@@ -5,9 +5,7 @@ import (
 	"gochen/app"
 	"gochen/domain/spec"
 
-	"gochen/app/internal/execution"
 	"gochen/app/query"
-	"gochen/auth"
 	"gochen/domain"
 	domaudited "gochen/domain/audited"
 	domcrud "gochen/domain/crud"
@@ -26,12 +24,12 @@ type IReadRepository[T domain.IEntity[ID], ID comparable] interface {
 type Repository[T domain.IEntity[ID], ID comparable] interface {
 	domcrud.IRepository[T, ID]
 	IReadRepository[T, ID]
-	execution.TxRunner
+	app.ITransactionRunner
 }
 
 // IDescriptorProvider 暴露应用资源的动作清单与基础配额。
 type IDescriptorProvider interface {
-	Descriptor() auth.Descriptor
+	app.IDescriptorProvider
 	MaxPageSize() int
 	MaxBulkSize() int
 }

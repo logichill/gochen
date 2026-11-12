@@ -123,3 +123,21 @@ Hooks 以动作名为键，标准写动作使用 `create` / `update` / `delete`�
 - Purge / Restore 的业务校验与副作用配置在各自动作的 Stage。
 - REST 使用 `Mount` / `Action`；HTTP 请求体验证和批量限制分别使用 `WithValidator`、`WithMaxBulkSize`。
 - 仓储读取和写入显式接收 `spec.Spec`，隔离和资源由构造选项 `WithIsolation` / `WithResourceKind` 声明。
+
+## 公共配置与审计契约
+
+共享配置在 `gochen/app`：CRUD、audited 和 ES 的 `Options.Limits` 均使用
+`app.Limits{MaxBulkSize: 100, MaxPageSize: 50}`，非正上限默认归一为 1000。
+`audited.Options.Projector` 使用 `app.Projector[T]`，只接收独立展示副本。
+应用登记可依赖仅提供 `Descriptor()` 的 `app.IDescriptorProvider`，CRUD 自身的
+`crud.IDescriptorProvider` 继续组合分页和批量上限。
+
+CRUD 仓储的事务能力为 `app.ITransactionRunner`。可选 `crud.Options.Audit`
+和 `audited.NewApplication` 的审计参数均要求 `app.IAuditRepository`，组合审计写入、
+历史查询及数据源标识；audited 业务仓储也必须声明数据源。普通 CRUD 未启用审计时
+不强制业务仓储提供数据源标识，启用时在构造阶段核对同源。
+实现必须用事务回调传入的上下文参与同一事务，保证审计失败回滚业务写入，不能仅返回相同的
+数据源字符串。只读应用仍可启用历史查询而不要求写事务。
+
+这些类型不再通过内部 execution 包公开，不保留旧类型别名。公开消费示例见
+`options_test.go`；事务回滚、批量失败、投影隔离和 Transfer 语义由现有应用回归测试覆盖。

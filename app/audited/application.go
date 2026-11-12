@@ -8,6 +8,7 @@ import (
 	"context"
 	"strings"
 
+	"gochen/app"
 	appcrud "gochen/app/crud"
 	"gochen/app/internal/execution"
 	"gochen/app/query"
@@ -22,6 +23,7 @@ import (
 // Repository 是 audited 应用要求的仓储组合。
 type Repository[T domaudited.IAuditedEntity[ID], ID comparable] interface {
 	appcrud.Repository[T, ID]
+	domcrud.IDataSourceProvider
 	domaudited.IRestoreRepository[T, ID]
 	domaudited.IDeletedQueryRepository[T, ID]
 	domcrud.IPurgeRepository[T, ID]
@@ -36,10 +38,10 @@ type Application[T domaudited.IAuditedEntity[ID], ID comparable] struct {
 //
 // 约束：
 //   - repo 必须提供读写、事务、恢复、已删查询与永久删除端口；
-//   - auditStore 必须非空，并实现 IAuditQueryStore，且与仓储声明同一数据源。
+//   - auditStore 必须非空，且与仓储声明并参与同一数据源事务。
 func NewApplication[T domaudited.IAuditedEntity[ID], ID comparable](
 	repo Repository[T, ID],
-	auditStore domaudited.IAuditStore,
+	auditStore app.IAuditRepository,
 	options Options[T, ID],
 ) (*Application[T, ID], error) {
 	if depcheck.IsNil(repo) {
@@ -47,10 +49,6 @@ func NewApplication[T domaudited.IAuditedEntity[ID], ID comparable](
 	}
 	if depcheck.IsNil(auditStore) {
 		return nil, errors.NewCode(errors.InvalidInput, "audit store cannot be nil")
-	}
-	audits, ok := any(auditStore).(domaudited.IAuditQueryStore)
-	if !ok || depcheck.IsNil(audits) {
-		return nil, errors.NewCode(errors.InvalidInput, "audit store must implement IAuditQueryStore")
 	}
 	defaults, err := standardActions(options.Resource, options.ActionPermissions)
 	if err != nil {
@@ -70,7 +68,6 @@ func NewApplication[T domaudited.IAuditedEntity[ID], ID comparable](
 		Read:         repo,
 		Tx:           repo,
 		Audit:        auditStore,
-		Audits:       audits,
 		SoftDelete:   true,
 		Restore:      repo,
 		Deleted:      repo,

@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"gochen/app"
 	"gochen/domain/spec"
 	"reflect"
 	"sort"
@@ -15,7 +16,6 @@ import (
 	"strings"
 	"time"
 
-	"gochen/app"
 	"gochen/app/query"
 	"gochen/auth"
 	"gochen/contextx"
@@ -44,11 +44,6 @@ const (
 // SystemOperator 是系统身份代为执行时写入审计的执行者标识。
 const SystemOperator = "system"
 
-// TxRunner 是执行骨架使用的最小事务端口。
-type TxRunner interface {
-	WithinTx(ctx context.Context, fn func(txCtx context.Context) error) error
-}
-
 // Stage 定义单个动作的生命周期钩子；After 与 PostCommit 接收独立实体副本。
 type Stage[T any] struct {
 	Before     func(ctx context.Context, entity T) error
@@ -67,31 +62,6 @@ func (h Hooks[T]) For(action string) Stage[T] {
 	return h[action]
 }
 
-// Projector 在生成审计快照前投影独立实体副本。
-type Projector[T any] func(entity T) (any, error)
-
-// Limits 是构造期冻结的应用上限。
-type Limits struct {
-	MaxBulkSize int
-	MaxPageSize int
-}
-
-const (
-	defaultMaxBulkSize = 1000
-	defaultMaxPageSize = 1000
-)
-
-// Normalize 补齐非正数上限。
-func (l Limits) Normalize() Limits {
-	if l.MaxBulkSize <= 0 {
-		l.MaxBulkSize = defaultMaxBulkSize
-	}
-	if l.MaxPageSize <= 0 {
-		l.MaxPageSize = defaultMaxPageSize
-	}
-	return l
-}
-
 // ReadRepository 是执行骨架要求的读端口：按 ID 读取 + 统一查询端口。
 type ReadRepository[T domain.IEntity[ID], ID comparable] interface {
 	app.IExecutionDescriptorProvider
@@ -108,14 +78,13 @@ type Options[T domain.IEntity[ID], ID comparable] struct {
 	Defaults     []auth.Action
 	Hooks        Hooks[T]
 	Validator    validate.IValidator
-	Limits       Limits
-	Projector    Projector[T]
+	Limits       app.Limits
+	Projector    app.Projector[T]
 
-	Repo   domcrud.IRepository[T, ID]
-	Read   ReadRepository[T, ID]
-	Tx     TxRunner
-	Audit  domaudited.IAuditStore
-	Audits domaudited.IAuditQueryStore
+	Repo  domcrud.IRepository[T, ID]
+	Read  ReadRepository[T, ID]
+	Tx    app.ITransactionRunner
+	Audit app.IAuditRepository
 
 	// 以下端口只在软删/生命周期构造中使用。
 	SoftDelete bool
@@ -134,16 +103,15 @@ type Core[T domain.IEntity[ID], ID comparable] struct {
 	actions      map[string]auth.Action
 	hooks        Hooks[T]
 	validator    validate.IValidator
-	limits       Limits
-	projector    Projector[T]
+	limits       app.Limits
+	projector    app.Projector[T]
 	metadata     *meta.Metadata
 	execution    app.ExecutionDescriptor
 
-	repo   domcrud.IRepository[T, ID]
-	read   ReadRepository[T, ID]
-	tx     TxRunner
-	audit  domaudited.IAuditStore
-	audits domaudited.IAuditQueryStore
+	repo  domcrud.IRepository[T, ID]
+	read  ReadRepository[T, ID]
+	tx    app.ITransactionRunner
+	audit app.IAuditRepository
 
 	softDelete bool
 	restore    domaudited.IRestoreRepository[T, ID]
@@ -207,9 +175,6 @@ func New[T domain.IEntity[ID], ID comparable](opts Options[T, ID]) (*Core[T, ID]
 			return nil, errors.NewCode(errors.InvalidInput, "soft-delete application requires restore, deleted-query and purge ports")
 		}
 	}
-	if !depcheck.IsNil(opts.Audit) && depcheck.IsNil(opts.Audits) {
-		return nil, errors.NewCode(errors.InvalidInput, "audit store must implement IAuditQueryStore")
-	}
 	if opts.SoftDelete && depcheck.IsNil(opts.Audit) {
 		return nil, errors.NewCode(errors.InvalidInput, "soft-delete application requires an audit store")
 	}
@@ -272,7 +237,6 @@ func New[T domain.IEntity[ID], ID comparable](opts Options[T, ID]) (*Core[T, ID]
 		read:         opts.Read,
 		tx:           opts.Tx,
 		audit:        opts.Audit,
-		audits:       opts.Audits,
 		softDelete:   opts.SoftDelete,
 		restore:      opts.Restore,
 		deleted:      opts.Deleted,
@@ -376,12 +340,12 @@ func freezeHooks[T any](hooks Hooks[T]) Hooks[T] {
 
 // validateAuditDataSource 要求审计存储与业务仓储声明同一份数据源（D7、D17）。
 func validateAuditDataSource[T domain.IEntity[ID], ID comparable](
-	audit domaudited.IAuditStore,
+	audit app.IAuditRepository,
 	repo domcrud.IRepository[T, ID],
 	read ReadRepository[T, ID],
 ) error {
-	auditProvider, ok := any(audit).(domcrud.IDataSourceProvider)
-	if !ok || depcheck.IsNil(auditProvider) || strings.TrimSpace(auditProvider.DataSourceID()) == "" {
+	auditProvider := audit
+	if depcheck.IsNil(auditProvider) || strings.TrimSpace(auditProvider.DataSourceID()) == "" {
 		return errors.NewCode(errors.InvalidInput, "audit store must declare its data source")
 	}
 	var business any = repo

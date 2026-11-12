@@ -248,7 +248,7 @@ func (c *Core[T, ID]) AuditTrail(ctx context.Context, id ID, offset, limit int) 
 	if err := checkContext(ctx); err != nil {
 		return nil, err
 	}
-	if depcheck.IsNil(c.audits) {
+	if depcheck.IsNil(c.audit) {
 		return nil, errors.NewCode(errors.Unsupported, "audit query store is not configured")
 	}
 	s, _, err := c.authorizeKind(ctx, ActionAuditRead, []ID{id}, auth.KindRead)
@@ -260,7 +260,7 @@ func (c *Core[T, ID]) AuditTrail(ctx context.Context, id ID, offset, limit int) 
 	}
 	s = spec.And(s, spec.Eq(meta.ID(), FormatID(id)))
 	offset, limit = c.normalizePage(offset, limit)
-	return c.audits.ListAuditRecords(domaudited.WithAuditResourceKind(ctx, c.resource), FormatID(id), offset, limit, s)
+	return c.audit.ListAuditRecords(domaudited.WithAuditResourceKind(ctx, c.resource), FormatID(id), offset, limit, s)
 }
 
 // ValidateAuditSpec 校验审计规约引用实体标识或维度字段。

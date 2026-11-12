@@ -107,6 +107,26 @@ middleware 顺序为基础 API → 外层分组 → 内层分组 → 模块 → 
 
 应用声明用于启动前单线程装配，每个 Application 只能 Build/Run 一次。模块工厂在 Host Prepare 时执行，模块依赖、扩展及生命周期能力保持不变。Quick 不接受 WithModules、WithModuleHTTP 或非空 WithModuleHTTPDefaults：使用 Modules、Mount、Group 声明，避免两套设置互相覆盖。底层 Host 仍提供显式配置能力。
 
+## typed Module 声明
+
+Module 是模块参与系统的资源声明中心，不是运行期服务定位器。Repository、Application、Routes 在模块 ctor 中显式创建一次：
+
+```go
+return host.Module("notes").
+    Name("笔记").
+    Application(application).
+    RouteRegistrar(module.RouteRegistrarFunc(quick.RESTRegistrar[*Note, string](application))).
+    Build()
+```
+
+`Application` 接受 `app.IDescriptorProvider`，非 HTTP 用例也会登记。Routes 引用同一个应用，不复制动作或权限声明。`DependsOn` 只声明启动顺序；`PublicFeatures` 只声明可公开能力。角色入口接收实例，不再接收工厂函数。`RuntimeComponent` 必须使用非 nil 指针，以明确同一 Host 内唯一的 Start/Stop 所有者。不同类型相同或同类型不同对象都不是身份相同；同一对象的事件订阅与 Worker 生命周期分别回收。
+
+`Projection(module.ProjectionOf[ID](projection))` 只做类型化声明，真实管理器仍在实际注册时检查 ID 类型，不支持的 ID 在启动时失败并回滚。提供应用的描述在构造期冻结，模块 Build 复制声明集合，Host 在路由核对后封存应用登记；自定义 Extension 的内部可变状态由自身契约管理。
+
+`quick.Module` 只是将路由函数转换为这个正式模块，没有第二份生命周期实现。高级模块通过 `module.ApplicationRegistryFrom(initOptions)` 取得窄登记端口，不导入内部 Registry。详细迁移和不变边界见 [核心候选迁移](core-next-migration.md)。
+
+完整普通模块示例：在 Runtime 执行 `GOWORK=off go run ./examples/typed-module`。它显式初始化独立 SQLite 内存表，并提供真实 HTTP CRUD、权限拒绝、版本冲突与关闭测试，监听本机回环地址。示例认证头仅作本机演示，不能用于生产。
+
 ## 可运行示例
 
 在 `gochen-runtime` 仓库执行：

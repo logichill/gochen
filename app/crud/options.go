@@ -5,7 +5,6 @@ import (
 	"gochen/app/internal/execution"
 	"gochen/auth"
 	"gochen/domain"
-	domaudited "gochen/domain/audited"
 	"gochen/validate"
 )
 
@@ -26,8 +25,8 @@ type Options[T domain.IEntity[ID], ID comparable] struct {
 	ActionPermissions map[string]string
 	Hooks             Hooks[T]
 	Validator         validate.IValidator
-	Limits            execution.Limits
-	Audit             domaudited.IAuditStore
+	Limits            app.Limits
+	Audit             app.IAuditRepository
 }
 
 // ExecOption 配置一次命令执行的审计元数据。

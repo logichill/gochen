@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"gochen/app"
 	"gochen/auth"
 	"gochen/domain/spec"
 	"gochen/errors"
@@ -47,14 +48,6 @@ func TestNewApplicationRejectsInvalidOptions(t *testing.T) {
 				Resource:   "doc",
 				Authorizer: auth.Allow(),
 				Actions:    []auth.Action{{Name: ActionAuditRead, Kind: auth.KindRead}},
-			},
-		},
-		{
-			name: "audit store without query port",
-			options: Options[*testEntity, int64]{
-				Resource:   "doc",
-				Authorizer: auth.Allow(),
-				Audit:      saveOnlyAuditStore{},
 			},
 		},
 	}
@@ -243,5 +236,12 @@ func TestApplicationValidatorFailureLeavesNothingPersisted(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatalf("expected no persisted entity, got %d", count)
+	}
+}
+
+// 不完整的审计实现不能再进入公开构造参数；组合端口在编译期要求全部能力。
+func TestAuditRepositoryRequiresQueryPort(t *testing.T) {
+	if _, ok := any(saveOnlyAuditStore{}).(app.IAuditRepository); ok {
+		t.Fatal("save-only store unexpectedly implements the complete audit contract")
 	}
 }

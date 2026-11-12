@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"gochen/app/internal/execution"
+	"gochen/app"
 	"gochen/errors"
 )
 
@@ -12,7 +12,7 @@ func TestDeleteBulkEmptyBulkSkipsValidationAndAuthorization(t *testing.T) {
 	authorizer := newCountingAuthorizer()
 	app, _ := newTestApplication(t, Options[*testEntity, int64]{
 		Authorizer: authorizer,
-		Limits:     execution.Limits{MaxBulkSize: 2},
+		Limits:     app.Limits{MaxBulkSize: 2},
 	})
 	ctx := context.Background()
 

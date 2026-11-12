@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"gochen/app"
 	appcrud "gochen/app/crud"
 	"gochen/auth"
 	domaudited "gochen/domain/audited"
@@ -22,9 +23,6 @@ func TestNewApplicationValidatesPorts(t *testing.T) {
 	}
 	if _, err := NewApplication[*auditDoc, int64](repo, nil, valid); !errors.Is(err, errors.InvalidInput) {
 		t.Fatalf("NewApplication(nil audit store) = %v, want InvalidInput", err)
-	}
-	if _, err := NewApplication[*auditDoc, int64](repo, saveOnlyAuditStore{}, valid); !errors.Is(err, errors.InvalidInput) {
-		t.Fatalf("NewApplication(store without query port) = %v, want InvalidInput", err)
 	}
 	if _, err := NewApplication[*auditDoc, int64](repo, otherSourceAuditStore{}, valid); !errors.Is(err, errors.InvalidInput) {
 		t.Fatalf("NewApplication(data source mismatch) = %v, want InvalidInput", err)
@@ -274,4 +272,11 @@ type failingAuditValue string
 
 func (failingAuditValue) MarshalJSON() ([]byte, error) {
 	return nil, errors.NewCode(errors.Internal, "audit serialization failed")
+}
+
+// 不完整的审计实现不能再进入公开构造参数；组合端口在编译期要求全部能力。
+func TestAuditRepositoryRequiresQueryPort(t *testing.T) {
+	if _, ok := any(saveOnlyAuditStore{}).(app.IAuditRepository); ok {
+		t.Fatal("save-only store unexpectedly implements the complete audit contract")
+	}
 }

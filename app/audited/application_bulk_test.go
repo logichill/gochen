@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"gochen/app"
 	appcrud "gochen/app/crud"
-	"gochen/app/internal/execution"
 	"gochen/auth"
 	"gochen/contextx"
 	"gochen/domain/spec"
@@ -101,7 +101,7 @@ func TestDeleteBulkRejectsDuplicateIDs(t *testing.T) {
 func TestDeleteBulkRejectsOversizedBulk(t *testing.T) {
 	options := Options[*auditDoc, int64]{
 		Options: appcrud.Options[*auditDoc, int64]{
-			Limits: execution.Limits{MaxBulkSize: 1},
+			Limits: app.Limits{MaxBulkSize: 1},
 		},
 	}
 	app, _ := newAuditedApplication(t, options)

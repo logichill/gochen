@@ -27,7 +27,7 @@ type Options[T esdomain.IEventSourcedAggregate[ID], ID comparable] struct {
 	Actions           []auth.Action
 	ActionPermissions map[string]string
 	Validator         validate.IValidator
-	Limits            execution.Limits
+	Limits            app.Limits
 	Contract          app.ResourceContract
 
 	// ConcurrencyRetry 配置保存阶段并发冲突时的自动重试；重试会重新加载
@@ -54,7 +54,7 @@ type Application[T esdomain.IEventSourcedAggregate[ID], ID comparable] struct {
 	descriptor  auth.Descriptor
 	actions     map[string]auth.Action
 	validator   validate.IValidator
-	limits      execution.Limits
+	limits      app.Limits
 	metadata    *meta.Metadata
 	interpreter *spec.Interpreter
 	execution   app.ExecutionDescriptor
