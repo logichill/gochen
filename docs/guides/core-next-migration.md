@@ -16,7 +16,7 @@
 | `Projection(factory)` | `Projection(module.ProjectionOf[ID](projection))` | 投影注册/回滚 |
 | `RuntimeComponent(factory)` | `RuntimeComponent(workerPointer)` | Worker 所有权、启动/关闭、入口核对 |
 | `host/module/assembly` 公共转换结构 | `host.Module(...).Build()` 或自定义 `module.IModule` | 转换实现内收至 `host/internal/assembly` |
-| `host.NewRegistry` / `host.Registry` | Host 管理实例；高级模块用 `module.ApplicationRegistryFrom(opts)` | REST `WithRegistry` 接收 `module.IApplicationRegistry`；不再手工创建第二份目录 |
+| `host.NewRegistry` / `host.Registry` | Host 管理实例；高级模块用 `module.ApplicationRegistryFrom(opts)` | REST `WithStartupRegistry` 接收 `module.IApplicationRegistry`；不再手工创建第二份目录 |
 | quick 自有轻量模块实现 | quick 转换为正式 host.Module | Group/Mount/依赖/中间件语义保留 |
 
 不保留旧入口的别名或双轨兼容层。普通装配在 ModuleCtor 中显式创建依赖一次，再登记同一个实例。`Provide` 仍可登记高级 DI 服务，但不会推测该服务的角色；依赖排序不等于服务定位。
