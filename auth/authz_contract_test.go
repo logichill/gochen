@@ -3,8 +3,6 @@ package auth_test
 import (
 	"context"
 	"gochen/auth"
-	"gochen/auth/action"
-	"gochen/auth/scoped"
 	"gochen/domain/meta"
 	"gochen/domain/spec"
 	"gochen/errors"
@@ -50,11 +48,11 @@ func (r contractResolver) Vocabulary() auth.Vocabulary {
 
 func contractAuthorizers(t *testing.T) map[string]auth.IAuthorizer {
 	t.Helper()
-	rbac, err := action.RBAC(contractChecker{})
+	rbac, err := newContractAuthorizer(contractChecker{})
 	require.NoError(t, err)
-	full, err := scoped.New(contractChecker{}, contractResolver{spec: spec.Eq(meta.ByDimension("owner"), "u1")})
+	full, err := newContractAuthorizer(contractChecker{}, auth.WithScope(contractResolver{spec: spec.Eq(meta.ByDimension("owner"), "u1")}))
 	require.NoError(t, err)
-	deniedRBAC, err := action.RBAC(contractChecker{denied: true})
+	deniedRBAC, err := newContractAuthorizer(contractChecker{denied: true})
 	require.NoError(t, err)
 	return map[string]auth.IAuthorizer{
 		"allow":  auth.Allow(),
@@ -119,13 +117,21 @@ func TestAuthorizerContractSystemIdentityBypassesPolicy(t *testing.T) {
 
 func TestAuthorizerContractErrorsStayErrors(t *testing.T) {
 	cause := errors.NewCode(errors.Internal, "checker unavailable")
-	rbac, err := action.RBAC(contractChecker{err: cause})
+	rbac, err := newContractAuthorizer(contractChecker{err: cause})
 	require.NoError(t, err)
 	_, err = rbac.Authorize(context.Background(), auth.Request{Resource: "task", Action: "read", Permission: "task:api:read"})
 	require.ErrorIs(t, err, cause)
 
-	full, err := scoped.New(contractChecker{}, contractResolver{err: cause})
+	full, err := newContractAuthorizer(contractChecker{}, auth.WithScope(contractResolver{err: cause}))
 	require.NoError(t, err)
 	_, err = full.Authorize(context.Background(), auth.Request{Resource: "task", Action: "read", Permission: "task:api:read"})
 	require.ErrorIs(t, err, cause)
+}
+
+func newContractAuthorizer(checker auth.IActionChecker, options ...auth.PermissionOption) (auth.IAuthorizer, error) {
+	policy, err := auth.NewPermissionPolicy(checker, options...)
+	if err != nil {
+		return nil, err
+	}
+	return auth.New(auth.Options{Policy: policy})
 }

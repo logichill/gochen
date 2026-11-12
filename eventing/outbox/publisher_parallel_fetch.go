@@ -82,7 +82,11 @@ func (p *ParallelPublisher[ID]) claimedDrainContext(ctx context.Context) (contex
 	if ctx != nil && ctx.Err() == nil {
 		return ctx, func() {}
 	}
-	return context.WithTimeout(context.Background(), defaultParallelPublisherStopTimeout)
+	parent := context.Background()
+	if ctx != nil {
+		parent = context.WithoutCancel(ctx)
+	}
+	return context.WithTimeout(parent, defaultParallelPublisherStopTimeout)
 }
 
 func (p *ParallelPublisher[ID]) drainClaimedEntriesToWorkers(ctx context.Context, entries []OutboxEntry[ID]) {

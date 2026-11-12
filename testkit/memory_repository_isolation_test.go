@@ -216,7 +216,7 @@ func TestIsolation_RequiresTenantAwareEntity(t *testing.T) {
 
 // 9) 隔离键来源可换：与 SQL 侧 IsolationCols.Resolve 同构。
 //
-// 内存仓储没有"列"的概念，归属槽位固定是 ITenantEntity，可换的只有取值来源。
+// 默认绑定 tenant 维度，自定义解析器提供本次请求的隔离键。
 // 这三个用例与 runtime 的 isolation_test.go 中对应用例断言同一组事实。
 
 type memOrgKey struct{}

@@ -39,7 +39,7 @@ func TestParallelPublisher_StopDrainsQueuedWork(t *testing.T) {
 
 	reg := newTestRegistry(t)
 	upgraders := newTestUpgraders()
-	p, err := NewParallelPublisher(repo, slowBus, cfg, logging.NewNoopLogger(), 1, reg, upgraders)
+	p, err := newTestParallelPublisher(repo, slowBus, cfg, logging.NewNoopLogger(), 1, reg, upgraders)
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -75,7 +75,7 @@ func TestParallelPublisher_StopTimeoutCancelsRunningPublishContext(t *testing.T)
 		CleanupInterval: 24 * time.Hour,
 	}
 
-	p, err := NewParallelPublisher(repo, blockingBus, cfg, logging.NewNoopLogger(), 1, newTestRegistry(t), newTestUpgraders())
+	p, err := newTestParallelPublisher(repo, blockingBus, cfg, logging.NewNoopLogger(), 1, newTestRegistry(t), newTestUpgraders())
 	require.NoError(t, err)
 	require.NoError(t, p.SetBatchOperations(&recordingBatchOps{}))
 
@@ -125,7 +125,7 @@ func TestParallelPublisher_SettersRejectChangesAfterStart(t *testing.T) {
 		MaxRetries:      3,
 		CleanupInterval: 24 * time.Hour,
 	}
-	p, err := NewParallelPublisher(repo, bus, cfg, logging.NewNoopLogger(), 1, newTestRegistry(t), newTestUpgraders())
+	p, err := newTestParallelPublisher(repo, bus, cfg, logging.NewNoopLogger(), 1, newTestRegistry(t), newTestUpgraders())
 	require.NoError(t, err)
 
 	require.NoError(t, p.SetMetricsRecorder(nil))

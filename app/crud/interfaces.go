@@ -2,6 +2,7 @@ package crud
 
 import (
 	"context"
+	"gochen/app"
 	"gochen/domain/spec"
 
 	"gochen/app/internal/execution"
@@ -14,8 +15,9 @@ import (
 
 // IReadRepository 是只读应用要求的读端口：按 ID 读取 + 统一查询端口。
 //
-// 列表与计数统一走查询端口，Exists 由 Get 派生。
+// 列表与计数统一走查询端口，Exists 由 Get 派生；资源契约由仓储本体提供。
 type IReadRepository[T domain.IEntity[ID], ID comparable] interface {
+	app.IExecutionDescriptorProvider
 	Get(ctx context.Context, id ID, s spec.Spec) (T, error)
 	query.IQueryableRepository[T]
 }

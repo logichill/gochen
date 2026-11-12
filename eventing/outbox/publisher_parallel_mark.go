@@ -285,8 +285,21 @@ func (p *ParallelPublisher[ID]) markFlushContext(ctx context.Context, final bool
 		stopCtx := p.markStopCtx
 		p.mu.Unlock()
 		if stopCtx != nil && stopCtx.Err() == nil {
-			return context.WithTimeout(stopCtx, defaultParallelPublisherStopTimeout)
+			// 停止调用只提供时间上限，资源写入保留发布任务的可信身份。
+			parent := context.Background()
+			if ctx != nil {
+				parent = context.WithoutCancel(ctx)
+			}
+			deadline := time.Now().Add(defaultParallelPublisherStopTimeout)
+			if stopDeadline, ok := stopCtx.Deadline(); ok && stopDeadline.Before(deadline) {
+				deadline = stopDeadline
+			}
+			return context.WithDeadline(parent, deadline)
 		}
 	}
-	return context.WithTimeout(context.Background(), defaultParallelPublisherStopTimeout)
+	parent := context.Background()
+	if ctx != nil {
+		parent = context.WithoutCancel(ctx)
+	}
+	return context.WithTimeout(parent, defaultParallelPublisherStopTimeout)
 }

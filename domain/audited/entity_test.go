@@ -104,8 +104,8 @@ func TestAuditedEntity_SoftDeleteAndRestore(t *testing.T) {
 	}
 }
 
-// TestAuditedEntity_SetUpdatedInfo_IncrementsVersion 验证 AuditedEntity SetUpdatedInfo IncrementsVersion。
-func TestAuditedEntity_SetUpdatedInfo_IncrementsVersion(t *testing.T) {
+// TestAuditedEntity_SetUpdatedInfo_PreservesVersion 验证审计信息设置保留持久化版本。
+func TestAuditedEntity_SetUpdatedInfo_PreservesVersion(t *testing.T) {
 	e := &AuditedEntity[int64]{Entity: crud.Entity[int64]{ID: 1, Version: 7}}
 	at := time.Now()
 
@@ -117,8 +117,8 @@ func TestAuditedEntity_SetUpdatedInfo_IncrementsVersion(t *testing.T) {
 	if !e.GetUpdatedAt().Equal(at) {
 		t.Fatalf("unexpected UpdatedAt: %v, want %v", e.GetUpdatedAt(), at)
 	}
-	if e.GetVersion() != 8 {
-		t.Fatalf("expected Version incremented to 8, got %d", e.GetVersion())
+	if e.GetVersion() != 7 {
+		t.Fatalf("expected Version unchanged at 7, got %d", e.GetVersion())
 	}
 }
 

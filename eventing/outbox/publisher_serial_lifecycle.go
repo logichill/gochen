@@ -6,7 +6,6 @@ import (
 
 	"gochen/errors"
 	"gochen/observe/logging"
-	"gochen/process/task"
 )
 
 // Start 启动后台轮询循环；同一个 publisher 只允许启动并停止一次。
@@ -30,18 +29,17 @@ func (p *Publisher[ID]) Start(ctx context.Context) error {
 		p.mu.Unlock()
 		return nil
 	}
+	if err := p.tasks.checkActive(); err != nil {
+		p.mu.Unlock()
+		return err
+	}
 	p.started = true
 	p.freezeCoreLocked()
 	runCtx, cancel := context.WithCancel(ctx)
 	p.runCancel = cancel
-	if p.supervisor == nil {
-		p.supervisor = task.NewTaskSupervisorWithLogger("eventing.outbox.publisher", p.log)
-	}
 	p.mu.Unlock()
 
-	if err := p.supervisor.Go(runCtx, "poll_loop", func(taskCtx context.Context) {
-		p.loop(taskCtx)
-	}); err != nil {
+	if err := p.tasks.registry.Go(runCtx, p.tasks.prefix+"poll_loop"); err != nil {
 		cancel()
 		p.mu.Lock()
 		p.started = false
@@ -91,8 +89,8 @@ func (p *Publisher[ID]) Stop(ctx context.Context) error {
 	if err := p.waitForStop(ctx); err != nil {
 		return err
 	}
-	if p.supervisor != nil {
-		return p.supervisor.Stop(ctx)
+	if p.tasks != nil {
+		return p.tasks.registry.Stop(ctx)
 	}
 	return nil
 }
@@ -126,21 +124,6 @@ func (p *Publisher[ID]) loop(ctx context.Context) {
 	defer func() {
 		publishTicker.Stop()
 		cleanupTicker.Stop()
-
-		p.mu.Lock()
-		p.started = false
-		p.stopped = true
-		cancel := p.runCancel
-		p.runCancel = nil
-		p.mu.Unlock()
-		if cancel != nil {
-			cancel()
-		}
-
-		close(p.doneCh)
-		p.processMu.Lock()
-		p.stopDoneOnce.Do(func() { close(p.stopDone) })
-		p.processMu.Unlock()
 	}()
 	for {
 		select {
@@ -171,4 +154,22 @@ func (p *Publisher[ID]) loop(ctx context.Context) {
 			return
 		}
 	}
+}
+
+func (p *Publisher[ID]) runPollLoop(ctx context.Context) error {
+	defer func() {
+		p.mu.Lock()
+		p.started, p.stopped = false, true
+		cancel := p.runCancel
+		p.runCancel = nil
+		p.mu.Unlock()
+		if cancel != nil {
+			cancel()
+		}
+		close(p.doneCh)
+		p.processMu.Lock()
+		p.stopDoneOnce.Do(func() { close(p.stopDone) })
+		p.processMu.Unlock()
+	}()
+	return p.tasks.execute(ctx, "poll_loop", func(ctx context.Context) error { p.loop(ctx); return nil })
 }

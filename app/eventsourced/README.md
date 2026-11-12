@@ -1,10 +1,10 @@
 # 事件溯源应用模板
 
-`app/eventsourced` 提供领域仓储、事件溯源应用与审计轨迹。组合根按需选择以下适配包；当前核心模板仍引用 eventstore 的历史查询接口与类型，依赖方向整改保留为独立架构批次（D04）：
+`app/eventsourced` 提供领域仓储、事件溯源应用、历史读模型与查询。历史分页直接接收 `store.IAggregateEventReader`；组合根按需选择以下适配包：
 
 | 包 | 内容 |
 | --- | --- |
-| `app/eventsourced/eventstore` | DomainEventStore、快照仓储装饰器、事件历史查询 |
+| `app/eventsourced/eventstore` | DomainEventStore、快照仓储装饰器 |
 | `app/eventsourced/subscriber` | 事件处理模板、投影模板、处理器/投影注册与清理 |
 
 使用 Runtime 时，常规接入推荐 `quick.EventSourced` / `quick.AtomicEventSourced`，统一组合领域存储与仓储，聚合类型只声明一次。发布模式与依赖仍显式提供，示例见 [Quick 装配](../../docs/guides/quick-assembly.md#事件溯源)。仅依赖 Core 或需要自定义领域存储时使用下面的底层构造入口。
@@ -28,4 +28,12 @@
 
 授权器返回的规约在内存中对回放后的聚合求值：读入状态不匹配时 `Get` / `Execute` / `AuditTrail` 返回 NotFound。命令执行成功后依次做赋值核对、`domain.IValidatable` 与 `Options.Validator` 校验，再检查最终状态的写规约；`Execute` / `ExecuteNew` 的写规约不匹配时返回 Forbidden，并保持事件流原状。`ExecuteNew` 收到已有聚合时返回 InvalidInput。操作人、动作、原因与关联 ID 写入事件元数据，历史条目直接读取这些字段。命令总线接入使用 `AsExecuteHandler` / `AsExecuteNewHandler`；`Execute` 不提供跨聚合原子保证，多聚合写入使用原子仓储。
 
-事件溯源仓储的 `Get` / `Save` 不接收 `spec.Spec`（与 SQL 仓储端口 D6 的签名不同）：事件流是唯一事实来源，不存在可合并进 `WHERE` 的行；规约由 Application 在回放后对聚合求值，判定失败时不追加事件。
+事件溯源 Application 在回放后的聚合上求值 `spec.Spec`，判定通过后执行命令和保存。领域事件仓储的 `Get` / `Save` 接收聚合身份和状态。
+
+## 事件历史
+
+`EventHistoryEntry`、`EventHistoryPage`、`EventHistoryMapper` 和查询函数均位于本包。`Options.History`、`LoadEventHistoryPage`、`LoadEventHistoryEntries` 接收 `store.IAggregateEventReader`，读取聚合版本和分页事件；`EventHistory` / `EventHistoryAfter` 接收 `store.IEventReader`。
+
+条目保存事件、聚合、版本、时间及操作人等元数据，业务通过 mapper 提供摘要。分页按聚合类型和 ID 区分事件流，并校验偏移与整数溢出。
+
+`Application.AuditTrail` 先按聚合当前状态授权。直接调用历史 helper 时，调用方负责建立访问边界。

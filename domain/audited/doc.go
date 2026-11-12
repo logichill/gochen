@@ -20,7 +20,6 @@
 //
 // 审计记录：
 //   - [AuditRecord] — 审计记录结构。
-//   - [AuditOperation] — 审计操作类型枚举。
 //
 // # 与 ITimestamps 的关系。
 //
@@ -29,8 +28,8 @@
 //
 // # 版本号递增。
 //
-// SetUpdatedInfo 会递增版本号（乐观锁语义）。
-// SetUpdatedAt 仅设置时间，不递增版本号。
+// SetUpdatedInfo 和 SetUpdatedAt 设置审计信息，保留当前版本。
+// CRUD/Audited 仓储以写入前版本约束原子更新，并统一计算下一版本。
 //
 // # 软删除语义。
 //

@@ -32,7 +32,7 @@ type IAuditable interface {
 	// - audited 场景下建议返回对应的 DeletedBy。
 	GetDeletedBy() *string
 
-	// 设置审计信息（由基础设施层调用）
+	// 设置审计信息（由基础设施层调用）；版本由仓储根据写入前版本推进。
 	SetCreatedInfo(by string, at time.Time)
 	SetUpdatedInfo(by string, at time.Time)
 }
@@ -98,13 +98,10 @@ func (e *AuditedEntity[ID]) SetCreatedAt(t time.Time) {
 	e.CreatedAt = t
 }
 
-// SetUpdatedInfo 一次性写入更新人和更新时间，并推进乐观锁版本。
+// SetUpdatedInfo 一次性写入更新人和更新时间；版本由仓储根据写入前版本推进。
 func (e *AuditedEntity[ID]) SetUpdatedInfo(by string, at time.Time) {
 	e.UpdatedBy = by
 	e.UpdatedAt = at
-	// 所有"修改类"操作都会推动版本号递增，便于审计与乐观锁控制；
-	// 约定：软删/恢复等操作在落库前也会调用 SetUpdatedInfo（由仓储/服务驱动），因此版本推进统一在此发生。
-	e.Version++
 }
 
 // SetUpdatedAt 设置更新At。

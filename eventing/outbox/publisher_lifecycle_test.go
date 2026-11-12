@@ -25,7 +25,7 @@ func TestPublisher_Start_Stop(t *testing.T) {
 
 	reg := newTestRegistry(t)
 	upgraders := newTestUpgraders()
-	publisher, err := NewPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), reg, upgraders)
+	publisher, err := newTestPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), reg, upgraders)
 	assert.NoError(t, err)
 
 	ctx := context.Background()
@@ -65,7 +65,7 @@ func TestPublisher_ContextCancellation(t *testing.T) {
 
 	reg := newTestRegistry(t)
 	upgraders := newTestUpgraders()
-	publisher, err := NewPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), reg, upgraders)
+	publisher, err := newTestPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), reg, upgraders)
 	assert.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -97,7 +97,7 @@ func TestPublisher_CleanupPublished(t *testing.T) {
 
 	reg := newTestRegistry(t)
 	upgraders := newTestUpgraders()
-	publisher, err := NewPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), reg, upgraders)
+	publisher, err := newTestPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), reg, upgraders)
 	assert.NoError(t, err)
 
 	ctx := context.Background()
@@ -123,7 +123,7 @@ func TestPublisher_CleanupInterval(t *testing.T) {
 
 	reg := newTestRegistry(t)
 	upgraders := newTestUpgraders()
-	publisher, err := NewPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), reg, upgraders)
+	publisher, err := newTestPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), reg, upgraders)
 	assert.NoError(t, err)
 
 	ctx := context.Background()
@@ -149,7 +149,7 @@ func TestPublisher_ConcurrentStopWaitsForManualPublish(t *testing.T) {
 		return nil
 	}}
 	cfg := OutboxConfig{PublishInterval: time.Hour, CleanupInterval: time.Hour, BatchSize: 1, RetryInterval: time.Second, RetentionPeriod: time.Hour}
-	publisher, err := NewPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), newTestRegistry(t), newTestUpgraders())
+	publisher, err := newTestPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), newTestRegistry(t), newTestUpgraders())
 	assert.NoError(t, err)
 	ctx := context.Background()
 	assert.NoError(t, publisher.Start(ctx))
@@ -188,7 +188,7 @@ func TestPublisher_StopThenStart_RestartsAfterDefensiveStop(t *testing.T) {
 		RetryInterval:   30 * time.Second,
 		RetentionPeriod: 24 * time.Hour,
 	}
-	publisher, err := NewPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), newTestRegistry(t), newTestUpgraders())
+	publisher, err := newTestPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), newTestRegistry(t), newTestUpgraders())
 	assert.NoError(t, err)
 
 	ctx := context.Background()
@@ -215,7 +215,7 @@ func TestPublisher_StopThenStart_RestartsAfterDefensiveStop(t *testing.T) {
 // TestPublisher_StartThenStop_IsTerminal 锁定一次性语义的另一面：
 // 正常启动并停止后进入终止态，再次 Start 必须要求创建新实例。
 func TestPublisher_StartThenStop_IsTerminal(t *testing.T) {
-	publisher, err := NewPublisher(&MockOutboxRepository{}, &MockEventBus{}, DefaultOutboxConfig(), logging.NewNoopLogger(), newTestRegistry(t), newTestUpgraders())
+	publisher, err := newTestPublisher(&MockOutboxRepository{}, &MockEventBus{}, DefaultOutboxConfig(), logging.NewNoopLogger(), newTestRegistry(t), newTestUpgraders())
 	assert.NoError(t, err)
 
 	ctx := context.Background()

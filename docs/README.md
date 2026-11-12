@@ -13,6 +13,8 @@
 | [框架架构](architecture/framework-design.md) | 能力分层、依赖方向、生命周期和并发约定 |
 | [源码文件组织](architecture/source-layout.md) | 实现文件前缀、职责拆分与主要模块导航 |
 | [分层授权](architecture/layered-authz.md) | L0–L4、DataScope、写入约束与跨隔离读取 |
+| [强类型授权接入](guides/declarative-authorization.md) | 声明编译、可信事实、多资源命令和独立入口门禁 |
+| [资源契约与归属迁移](architecture/resource-contracts.md) | 实体字段、授权条件、普通更新保护、Transfer 与历史审计 |
 | [开发规范](../SPEC.md) / [仓库约定](../AGENTS.md) | 编码规则、顶级包与依赖矩阵 |
 
 首次接入可按“项目入口 → 下游接入指南 → Quick 装配 → 示例”阅读。

@@ -1,5 +1,7 @@
 package action_test
 
+import auth "gochen/auth"
+
 import (
 	"context"
 	"testing"
@@ -52,22 +54,22 @@ func TestRequireActionFailsClosed(t *testing.T) {
 	ctx := context.Background()
 
 	// checker 缺失 → 拒绝，绝不放行。
-	err := action.RequireAction(ctx, nil, "order:api:create")
+	err := auth.RequireAction(ctx, nil, "order:api:create")
 	require.Error(t, err)
 	require.True(t, errors.Is(err, errors.Forbidden))
 
-	granted := action.ActionCheckerFunc(func(context.Context, string) error { return nil })
+	granted := auth.ActionCheckerFunc(func(context.Context, string) error { return nil })
 
 	// 动作码非法 → 拒绝（即使 checker 会放行）。
-	err = action.RequireAction(ctx, granted, "api:order")
+	err = auth.RequireAction(ctx, granted, "api:order")
 	require.Error(t, err)
 	require.True(t, errors.Is(err, errors.InvalidInput))
 
-	require.NoError(t, action.RequireAction(ctx, granted, "order:api:create"))
+	require.NoError(t, auth.RequireAction(ctx, granted, "order:api:create"))
 }
 
 func TestActionCheckerFuncNil(t *testing.T) {
-	var fn action.ActionCheckerFunc
+	var fn auth.ActionCheckerFunc
 	err := fn.RequireAction(context.Background(), "order:api:create")
 	require.Error(t, err)
 	require.True(t, errors.Is(err, errors.InvalidInput))

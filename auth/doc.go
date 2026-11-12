@@ -1,30 +1,19 @@
-// Package auth 提供统一授权端口、身份与共享值对象，以及 Allow / All 授权器。
+// Package auth 提供强类型声明编译、统一策略执行、可信事实与授权治理。
 //
-// L1/L3/L4 能力按三个正交子包组织，各自对应一个渐进档位（见
-// docs/architecture/framework-design.md）：
+// 组合根通过 Compile 将 Descriptor、实体元数据、规则及可信提供方连接为冻结计划。
+// Application 消费 IAuthorizer；自定义多资源命令由 app.Command 自动授权全部实际资源。
+// 请求 IDs 与 Targets 表达客户端意图，NewFact 注册的提供方按需读取可信投影。
+// 事实会话绑定本次内核、身份和意图，读取及返回值各自保持独立。
 //
-//	auth/action      L1  当前主体能否执行该动作（权限码）
-//	auth/scoped      L3  主体在什么数据范围内、能对哪条资源做什么
-//	auth/governance  L4  策略版本留痕、决策审计与监控
+// New 组合 IPolicy 与 GovernanceOptions，执行固定的版本解析、判定校验、审计和指标链。
+// 特殊领域规则实现 IPolicy 或 ISpecResolver，通用动作检查和交集组合由根包承担。
+// OnPermissionDenied 仅在动作权限拒绝后进入；范围拒绝和提供方故障终止执行。
 //
-// 依赖拓扑（严格单向，禁止反向）：
+// auth/action 保留权限码及通配工具；auth/scoped 保留 DataScope、条件构造与身份绑定。
+// L0–L4 表达职责：应用编排、动作权限、仓储隔离、范围条件和决策治理。
+// 仓储继续以 contextx.TenantID 执行隔离，并原子落实 Decision.Spec、版本和归属保护。
 //
-//	action     -> auth, domain, errors, internal
-//	scoped     -> auth, action, domain, errors, internal
-//	governance -> auth, clock, gen, errors, internal
-//
-// L2 复用 contextx.TenantID 与资源隔离绑定，由具体 Repo 执行隔离；
-// 不为它建立只有测试消费的转发契约包。
-//
-// 分包而不是分 Option 的原因：Go 以 package 为编译单元，
-// 单纯增加配置项或 no-op 实现无法阻断依赖传递。
-// 只有物理包边界才能让 L0/L1 场景真正不把高级安全能力编译进来。
-//
-// 其它约定：
-//   - 动作权限与数据范围缺失时拒绝，快照解析失败默认拒绝；
-//   - 治理审计默认尽力写入，WithStrictAudit 可改为阻断；指标失败保持业务判定；
-//   - 安全 PEP 由业务 Application 直接调用 `auth.IAuthorizer` 完成，
-//     决策中的 `spec.Spec` 交给仓储执行；
-//   - 权限目录（registry / catalog sync）属于 Host 可选扩展，
-//     位于 gochen-runtime/host/authz。
+// ValidateEntries 将驱动独立枚举的入口与编译计划逐项核对。
+// Runtime Host 在业务模块与传输启动前执行门禁；显式放行同样需要来源与理由。
+// 权限目录、物理存储和 Host 装配由 gochen-runtime 提供。
 package auth

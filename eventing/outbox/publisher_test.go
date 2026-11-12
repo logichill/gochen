@@ -37,7 +37,7 @@ func TestPublisher_PublishPending_PublishesAllEntries(t *testing.T) {
 
 	reg := newTestRegistry(t)
 	upgraders := newTestUpgraders()
-	p, err := NewPublisher(repo, bus, cfg, logging.NewNoopLogger(), reg, upgraders)
+	p, err := newTestPublisher(repo, bus, cfg, logging.NewNoopLogger(), reg, upgraders)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -73,7 +73,7 @@ func TestPublisher_PublishPending_PublishesAllEntries(t *testing.T) {
 func TestPublisher_SettersRejectChangesAfterStart(t *testing.T) {
 	repo := &MockOutboxRepository{}
 	eventBus := &MockEventBus{}
-	p, err := NewPublisher(repo, eventBus, DefaultOutboxConfig(), logging.NewNoopLogger(), newTestRegistry(t), newTestUpgraders())
+	p, err := newTestPublisher(repo, eventBus, DefaultOutboxConfig(), logging.NewNoopLogger(), newTestRegistry(t), newTestUpgraders())
 	require.NoError(t, err)
 
 	require.NoError(t, p.SetEventRegistry(newTestRegistry(t)))

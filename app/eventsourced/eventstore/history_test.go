@@ -2,16 +2,15 @@ package eventstore_test
 
 import (
 	"context"
-	"strconv"
-	"testing"
-
-	esstore "gochen/app/eventsourced/eventstore"
+	eshistory "gochen/app/eventsourced"
 	"gochen/eventing"
 	"gochen/eventing/store"
 	"gochen/testkit/require"
+	"strconv"
+	"testing"
 )
 
-// TestGetEventHistoryPage_PaginatesByVersion 验证 esstore.EventHistoryPage PaginatesByVersion。
+// TestGetEventHistoryPage_PaginatesByVersion 验证 eshistory.EventHistoryPage PaginatesByVersion。
 func TestGetEventHistoryPage_PaginatesByVersion(t *testing.T) {
 	ctx := context.Background()
 
@@ -22,12 +21,12 @@ func TestGetEventHistoryPage_PaginatesByVersion(t *testing.T) {
 		require.NoError(t, es.AppendEvents(ctx, "Agg", 1, []eventing.IStorableEvent[int64]{evt}, uint64(i-1)))
 	}
 
-	page1, err := esstore.LoadEventHistoryPage(ctx, es, "Agg", 1, 1, 2, nil)
+	page1, err := eshistory.LoadEventHistoryPage(ctx, es, "Agg", 1, 1, 2, nil)
 	require.NoError(t, err)
 	require.Equal(t, 3, page1.Total)
 	require.Len(t, page1.Entries, 2)
 
-	page2, err := esstore.LoadEventHistoryPage(ctx, es, "Agg", 1, 2, 2, nil)
+	page2, err := eshistory.LoadEventHistoryPage(ctx, es, "Agg", 1, 2, 2, nil)
 	require.NoError(t, err)
 	require.Equal(t, 3, page2.Total)
 	require.Len(t, page2.Entries, 1)
@@ -50,14 +49,14 @@ func TestLoadEventHistoryPage_OverflowingPageReturnsEmptyPage(t *testing.T) {
 	// page-1 取 1<<(IntSize-2)：乘 pageSize=20 后按字长回绕为 0，
 	// 恰好落回第 1 页偏移，是缺陷最隐蔽的触发形态（32/64 位平台通用）。
 	hugePage := int(1)<<(strconv.IntSize-2) + 1
-	page, err := esstore.LoadEventHistoryPage(ctx, es, "Order", 7, hugePage, 20, nil)
+	page, err := eshistory.LoadEventHistoryPage(ctx, es, "Order", 7, hugePage, 20, nil)
 	require.NoError(t, err)
 	require.Equal(t, 3, page.Total)
 	require.Equal(t, hugePage, page.Page)
 	require.Len(t, page.Entries, 0)
 
 	// 对照：未溢出的超大页码（page=1000000）本就返回空页，修复不应改变其行为。
-	control, err := esstore.LoadEventHistoryPage(ctx, es, "Order", 7, 1000000, 20, nil)
+	control, err := eshistory.LoadEventHistoryPage(ctx, es, "Order", 7, 1000000, 20, nil)
 	require.NoError(t, err)
 	require.Equal(t, 3, control.Total)
 	require.Len(t, control.Entries, 0)
@@ -78,7 +77,7 @@ func TestGetEventHistoryPage_TotalIsScopedByAggregateType(t *testing.T) {
 		require.NoError(t, es.AppendEvents(ctx, "AggB", 2, []eventing.IStorableEvent[int64]{evt}, uint64(i-1)))
 	}
 
-	page, err := esstore.LoadEventHistoryPage(ctx, es, "AggA", 1, 1, 10, nil)
+	page, err := eshistory.LoadEventHistoryPage(ctx, es, "AggA", 1, 1, 10, nil)
 	require.NoError(t, err)
 	require.Equal(t, 2, page.Total)
 	require.Len(t, page.Entries, 2)

@@ -5,6 +5,7 @@ import (
 	"context"
 	"reflect"
 	"testing"
+	"time"
 
 	"gochen/app"
 	"gochen/contextx"
@@ -28,6 +29,9 @@ type Document struct {
 // Repository 是本契约实际消费的仓储能力。
 type Repository interface {
 	crud.IRepository[*Document, int64]
+	crud.IBulkOperations[*Document, int64]
+	crud.IPurgeRepository[*Document, int64]
+	audited.IRestoreRepository[*Document, int64]
 	crud.ITransferRepository[*Document, int64]
 	WithinTx(context.Context, func(context.Context) error) error
 	app.IExecutionDescriptorProvider
@@ -61,6 +65,80 @@ func RunDimensions(t *testing.T, factory func(*testing.T) Repository) {
 			t.Fatalf("error = %v, want %v", err, wanted)
 		}
 	}
+	t.Run("audit stamping preserves repository version baseline", func(t *testing.T) {
+		r := factory(t)
+		entity := &Document{Name: "original", Department: 1}
+		must(t, r.Create(ctx, entity, spec.All()))
+		expected := entity.Version
+		entity.SetUpdatedInfo("alice", time.Unix(1, 0))
+		entity.SetUpdatedInfo("alice", time.Unix(2, 0))
+		if entity.Version != expected {
+			t.Fatal("audit stamping advanced the persistence version")
+		}
+		entity.Name = "changed"
+		must(t, r.Update(ctx, entity, spec.All()))
+		stored, err := r.Get(ctx, entity.ID, spec.All())
+		must(t, err)
+		if entity.Version != expected+1 || stored.Version != expected+1 {
+			t.Fatalf("update must advance exactly once: input=%d stored=%d baseline=%d", entity.Version, stored.Version, expected)
+		}
+		stale := *entity
+		stale.Version = expected
+		stale.Name = "stale"
+		code(t, r.Update(ctx, &stale, spec.All()), errors.Concurrency)
+		if stale.Version != expected {
+			t.Fatal("failed update changed the caller version")
+		}
+		must(t, r.Delete(ctx, entity, spec.All()))
+		if entity.Version != expected+1 {
+			t.Fatal("physical delete advanced the caller version")
+		}
+	})
+	t.Run("bulk soft delete restore and purge versions", func(t *testing.T) {
+		r := factory(t)
+		items := []*Document{{Name: "first", Department: 1}, {Name: "second", Department: 1}}
+		must(t, r.CreateBulk(ctx, items, spec.All()))
+		for _, item := range items {
+			must(t, item.SoftDeleteBy("alice", time.Now()))
+			item.SetUpdatedInfo("alice", time.Now())
+		}
+		must(t, r.UpdateBulk(ctx, items, spec.All()))
+		for _, item := range items {
+			deleted, err := r.GetWithDeleted(ctx, item.ID, spec.All())
+			must(t, err)
+			if deleted.Version != 1 || item.Version != 1 || !deleted.IsDeleted() {
+				t.Fatalf("bulk soft delete must advance once: input=%+v stored=%+v", item, deleted)
+			}
+			must(t, deleted.Restore())
+			deleted.SetUpdatedInfo("alice", time.Now())
+			must(t, r.Restore(ctx, deleted, spec.All()))
+			stored, err := r.Get(ctx, item.ID, spec.All())
+			must(t, err)
+			if stored.Version != 2 || deleted.Version != 2 || stored.IsDeleted() {
+				t.Fatalf("restore must advance once: input=%+v stored=%+v", deleted, stored)
+			}
+			code(t, r.Purge(ctx, item, spec.All()), errors.Concurrency)
+			must(t, r.Purge(ctx, stored, spec.All()))
+			if stored.Version != 2 {
+				t.Fatal("purge advanced the caller version")
+			}
+		}
+	})
+	t.Run("bulk rollback preserves stored versions", func(t *testing.T) {
+		r := factory(t)
+		items := []*Document{{Name: "first", Department: 1}, {Name: "second", Department: 1}}
+		must(t, r.CreateBulk(ctx, items, spec.All()))
+		items[0].Name = "changed"
+		items[1].Version = 9
+		code(t, r.UpdateBulk(ctx, items, spec.All()), errors.Concurrency)
+		for i, item := range items {
+			stored, err := r.Get(ctx, item.ID, spec.All())
+			must(t, err)
+			if stored.Version != 0 || stored.Name != []string{"first", "second"}[i] {
+				t.Fatalf("failed bulk left persisted changes: %+v", stored)
+			}
+		}
+	})
 	t.Run("conditions and protected nullable input", func(t *testing.T) {
 		r := factory(t)
 		entity := &Document{Name: "original", Department: 1}

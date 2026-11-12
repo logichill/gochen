@@ -3,14 +3,11 @@ package outbox
 import (
 	"context"
 
-	"fmt"
-
 	"time"
 
 	"gochen/errors"
 
 	"gochen/observe/logging"
-	"gochen/process/task"
 )
 
 // closeWorkChannels 关闭所有 worker 输入通道，通知其退出消费循环。
@@ -45,6 +42,10 @@ func (p *ParallelPublisher[ID]) Start(ctx context.Context) error {
 		p.mu.Unlock()
 		return nil
 	}
+	if err := p.tasks.checkActive(); err != nil {
+		p.mu.Unlock()
+		return err
+	}
 	runCtx, runCancel := context.WithCancel(ctx)
 	batchOps := p.batchOps
 	var markCh chan markOp[ID]
@@ -69,15 +70,12 @@ func (p *ParallelPublisher[ID]) Start(ctx context.Context) error {
 	p.wg.Add(p.workerCount + 2)
 	p.started = true
 	p.runCancel = runCancel
+	p.runContext = runCtx
 	p.freezeCoreLocked()
-	if p.supervisor == nil {
-		p.supervisor = task.NewTaskSupervisorWithLogger("eventing.outbox.parallel_publisher", p.log)
-	}
-
 	trackedLaunches := 0
 	markLoopLaunched := false
-	launchTracked := func(name string, fn func(context.Context)) error {
-		if err := p.supervisor.Go(runCtx, name, fn); err != nil {
+	launchTracked := func(name string) error {
+		if err := p.tasks.registry.Go(runCtx, p.tasks.prefix+name); err != nil {
 			return err
 		}
 		trackedLaunches++
@@ -92,51 +90,33 @@ func (p *ParallelPublisher[ID]) Start(ctx context.Context) error {
 		}
 		p.started = false
 		p.stopped = true
-		p.runCancel = nil
 		p.stopOnce.Do(func() { close(p.stopCh) })
 		runCancel()
 		p.mu.Unlock()
 		p.dispatchMu.Lock()
 		p.closeWorkChannels()
 		p.dispatchMu.Unlock()
-		p.stopFinalizeOnce.Do(func() { go p.finishStop(nil) })
-		return errors.Wrap(startErr, errors.Internal, "start outbox parallel publisher task failed")
+		return errors.Join(errors.Wrap(startErr, errors.Internal, "start outbox parallel publisher task failed"), p.startFinalizeStop(runCtx))
 	}
 
 	if markCh != nil && markDoneCh != nil {
-		if err := p.supervisor.Go(runCtx, "mark_loop", func(taskCtx context.Context) {
-			p.markLoop(taskCtx)
-		}); err != nil {
+		if err := p.tasks.registry.Go(runCtx, p.tasks.prefix+"mark_loop"); err != nil {
 			return abortStart(err)
 		}
 		markLoopLaunched = true
 	}
 	for i := 0; i < p.workerCount; i++ {
-		workerID := i
-		if err := launchTracked(fmt.Sprintf("worker_%d", workerID), func(taskCtx context.Context) {
-			p.worker(taskCtx, workerID, p.workChs[workerID])
-		}); err != nil {
+		if err := launchTracked(workerTaskName(i)); err != nil {
 			return abortStart(err)
 		}
 	}
-	if err := launchTracked("fetch_loop", func(taskCtx context.Context) {
-		p.fetchLoop(taskCtx)
-	}); err != nil {
+	if err := launchTracked("fetch_loop"); err != nil {
 		return abortStart(err)
 	}
-	if err := launchTracked("cleanup_loop", func(taskCtx context.Context) {
-		p.cleanupLoop(taskCtx)
-	}); err != nil {
+	if err := launchTracked("cleanup_loop"); err != nil {
 		return abortStart(err)
 	}
-	if err := p.supervisor.Go(runCtx, "context_watcher", func(taskCtx context.Context) {
-		select {
-		case <-taskCtx.Done():
-			p.requestStopFromRunContext()
-		case <-p.stopCh:
-			return
-		}
-	}); err != nil {
+	if err := p.tasks.registry.Go(runCtx, p.tasks.prefix+"context_watcher"); err != nil {
 		return abortStart(err)
 	}
 
@@ -144,19 +124,19 @@ func (p *ParallelPublisher[ID]) Start(ctx context.Context) error {
 	return nil
 }
 
-func (p *ParallelPublisher[ID]) requestStopFromRunContext() {
+func (p *ParallelPublisher[ID]) requestStopFromRunContext() error {
 	p.mu.Lock()
 	if p.stopped {
 		p.mu.Unlock()
-		return
+		return nil
 	}
-	runCancel := p.runCancel
+	runCtx := p.runContext
 	p.started = false
 	p.stopped = true
 	p.mu.Unlock()
 
 	p.stopOnce.Do(func() { close(p.stopCh) })
-	p.stopFinalizeOnce.Do(func() { go p.finishStop(runCancel) })
+	return p.startFinalizeStop(runCtx)
 }
 
 // Stop 请求并行发布器停止，并等待 worker 与批量标记协程收尾。
@@ -174,6 +154,7 @@ func (p *ParallelPublisher[ID]) Stop(ctx context.Context) error {
 	}
 	firstStop := !p.stopped
 	runCancel := p.runCancel
+	runCtx := p.runContext
 	if firstStop {
 		if p.markCh != nil {
 			p.markStopCtx = ctx
@@ -186,21 +167,23 @@ func (p *ParallelPublisher[ID]) Stop(ctx context.Context) error {
 
 	if firstStop {
 		p.stopOnce.Do(func() { close(p.stopCh) })
-		p.stopFinalizeOnce.Do(func() { go p.finishStop(runCancel) })
+		if err := p.startFinalizeStop(runCtx); err != nil {
+			return err
+		}
 	}
 
 	select {
 	case <-stopDone:
-		return nil
+		return p.tasks.registry.Stop(ctx)
 	default:
 	}
 	select {
 	case <-stopDone:
-		return nil
+		return p.tasks.registry.Stop(ctx)
 	case <-ctx.Done():
 		select {
 		case <-stopDone:
-			return nil
+			return p.tasks.registry.Stop(ctx)
 		default:
 		}
 		if runCancel != nil {
@@ -214,7 +197,7 @@ func (p *ParallelPublisher[ID]) Stop(ctx context.Context) error {
 	}
 }
 
-func (p *ParallelPublisher[ID]) finishStop(runCancel context.CancelFunc) {
+func (p *ParallelPublisher[ID]) finishStop() {
 	// fetchLoop closes worker inputs; workers drain claimed entries before final mark flush.
 	p.wg.Wait()
 	if p.markCh != nil {
@@ -223,19 +206,13 @@ func (p *ParallelPublisher[ID]) finishStop(runCancel context.CancelFunc) {
 	if p.markDoneCh != nil {
 		<-p.markDoneCh
 	}
+	p.mu.Lock()
+	runCancel := p.runCancel
+	p.runCancel = nil
+	p.mu.Unlock()
 	if runCancel != nil {
 		runCancel()
 	}
-	if p.supervisor != nil {
-		stopCtx, cancel := context.WithTimeout(context.Background(), defaultParallelPublisherStopTimeout)
-		if err := p.supervisor.Stop(stopCtx); err != nil {
-			p.log.Error(stopCtx, "stop parallel publisher task supervisor failed", logging.Error(err))
-		}
-		cancel()
-	}
-	p.mu.Lock()
-	p.runCancel = nil
-	p.mu.Unlock()
 	close(p.stopDone)
 }
 

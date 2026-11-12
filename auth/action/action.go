@@ -1,9 +1,5 @@
-// Package action 提供 L1 安全能力：判断当前主体能否执行某个动作（权限码）。
-//
-// 设计边界：
-//   - 本包只回答"能不能做这个动作"，不认识租户、数据范围、资源与策略快照；
-//   - 严禁依赖 auth/scoped、auth/governance；
-//   - 主体身份由各 Transport 的 AuthN 中间件写入 contextx，本包只消费 ctx。
+// Package action 提供权限码格式校验和按段通配匹配。
+// 动作检查器、声明编译与执行语义由 auth 根包提供。
 package action
 
 import (

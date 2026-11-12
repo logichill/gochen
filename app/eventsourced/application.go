@@ -5,14 +5,14 @@ import (
 	"gochen/domain/spec"
 
 	"gochen/app"
-	"gochen/app/eventsourced/eventstore"
 	"gochen/app/internal/execution"
 	"gochen/auth"
 	"gochen/contextx"
 	"gochen/domain"
-	deventsourced "gochen/domain/eventsourced"
+	esdomain "gochen/domain/eventsourced"
 	"gochen/domain/meta"
 	"gochen/errors"
+	"gochen/eventing/store"
 	"gochen/internal/depcheck"
 	"gochen/validate"
 )
@@ -21,7 +21,7 @@ import (
 //
 // Actions 只声明自定义动作；标准动作 read / create / update 由构造函数
 // 自动加入，配置 History 时另加 audit_read。
-type Options[T deventsourced.IEventSourcedAggregate[ID], ID comparable] struct {
+type Options[T esdomain.IEventSourcedAggregate[ID], ID comparable] struct {
 	Resource          string
 	Authorizer        auth.IAuthorizer
 	Actions           []auth.Action
@@ -38,16 +38,16 @@ type Options[T deventsourced.IEventSourcedAggregate[ID], ID comparable] struct {
 	IsConcurrencyError IsConcurrencyError
 
 	// History 提供事件历史读取能力；配置后提供 AuditTrail 并声明 audit_read。
-	History eventstore.IEventHistoryStore[ID]
+	History store.IAggregateEventReader[ID]
 
 	// HistoryMapper 将事件映射为业务可读历史条目；为 nil 时使用默认映射。
-	HistoryMapper eventstore.EventHistoryMapper[ID]
+	HistoryMapper EventHistoryMapper[ID]
 }
 
 // Application 是事件溯源业务侧的唯一入口：授权、匹配、命令后校验与审计
 // 元数据由同一对象统一编排。
-type Application[T deventsourced.IEventSourcedAggregate[ID], ID comparable] struct {
-	repo        deventsourced.IEventSourcedRepository[T, ID]
+type Application[T esdomain.IEventSourcedAggregate[ID], ID comparable] struct {
+	repo        esdomain.IEventSourcedRepository[T, ID]
 	resource    string
 	authorizer  auth.IAuthorizer
 	vocabulary  auth.Vocabulary
@@ -62,13 +62,13 @@ type Application[T deventsourced.IEventSourcedAggregate[ID], ID comparable] stru
 	retryConfig        *RetryConfig
 	isConcurrencyError IsConcurrencyError
 
-	history       eventstore.IEventHistoryStore[ID]
-	historyMapper eventstore.EventHistoryMapper[ID]
+	history       store.IAggregateEventReader[ID]
+	historyMapper EventHistoryMapper[ID]
 }
 
 // NewApplication 创建事件溯源应用。
-func NewApplication[T deventsourced.IEventSourcedAggregate[ID], ID comparable](
-	repo deventsourced.IEventSourcedRepository[T, ID],
+func NewApplication[T esdomain.IEventSourcedAggregate[ID], ID comparable](
+	repo esdomain.IEventSourcedRepository[T, ID],
 	options Options[T, ID],
 ) (*Application[T, ID], error) {
 	if depcheck.IsNil(repo) {
@@ -91,6 +91,9 @@ func NewApplication[T deventsourced.IEventSourcedAggregate[ID], ID comparable](
 	}
 	descriptor, actions, err := execution.BuildDescriptor(options.Resource, defaults, options.Actions)
 	if err != nil {
+		return nil, err
+	}
+	if err := auth.ValidatePlanBinding(options.Authorizer, descriptor, auth.ResourceAccessData); err != nil {
 		return nil, err
 	}
 	vocabulary := options.Authorizer.Vocabulary().Copy()
@@ -252,7 +255,7 @@ func (a *Application[T, ID]) AuditTrail(
 	id ID,
 	offset int,
 	limit int,
-) ([]*eventstore.EventHistoryEntry[ID], error) {
+) ([]*EventHistoryEntry[ID], error) {
 	if err := checkContext(ctx); err != nil {
 		return nil, err
 	}
@@ -274,7 +277,7 @@ func (a *Application[T, ID]) AuditTrail(
 		return nil, err
 	}
 	offset, limit = a.normalizePage(offset, limit)
-	return eventstore.LoadEventHistoryEntries(ctx, a.history, aggregate.GetAggregateType(), id, offset, limit, a.historyMapper)
+	return LoadEventHistoryEntries(ctx, a.history, aggregate.GetAggregateType(), id, offset, limit, a.historyMapper)
 }
 
 // Descriptor 返回构造期冻结的资源动作清单。

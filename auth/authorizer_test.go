@@ -14,7 +14,7 @@ type stubAuthorizer struct {
 	vocabulary auth.Vocabulary
 }
 
-func (s stubAuthorizer) Authorize(context.Context, auth.Request) (auth.Decision, error) {
+func (s stubAuthorizer) Evaluate(context.Context, auth.Request) (auth.Decision, error) {
 	return s.decision, s.err
 }
 
@@ -39,11 +39,11 @@ func TestAllCombine(t *testing.T) {
 		decision:   auth.Decision{Allowed: true, Spec: spec.Eq(meta.ByField("B"), 2)},
 		vocabulary: auth.Vocabulary{Refs: []meta.Ref{meta.ByDimension("owner"), meta.ByDimension("scope")}},
 	}
-	combined, err := auth.All(a, b)
+	combined, err := auth.AllPolicies(a, b)
 	if err != nil {
 		t.Fatalf("All: %v", err)
 	}
-	decision, err := combined.Authorize(context.Background(), auth.Request{})
+	decision, err := combined.Evaluate(context.Background(), auth.Request{})
 	if err != nil {
 		t.Fatalf("Authorize: %v", err)
 	}
@@ -64,53 +64,53 @@ func TestAllCombine(t *testing.T) {
 
 func TestAllDenyAndConflict(t *testing.T) {
 	deny := stubAuthorizer{decision: auth.Decision{Allowed: false, Reason: "no_scope"}}
-	combined, err := auth.All(stubAuthorizer{decision: auth.Decision{Allowed: true, Spec: spec.All()}}, deny)
+	combined, err := auth.AllPolicies(stubAuthorizer{decision: auth.Decision{Allowed: true, Spec: spec.All()}}, deny)
 	if err != nil {
 		t.Fatalf("All: %v", err)
 	}
-	decision, err := combined.Authorize(context.Background(), auth.Request{})
+	decision, err := combined.Evaluate(context.Background(), auth.Request{})
 	if err != nil || decision.Allowed || decision.Reason != "no_scope" {
 		t.Fatalf("deny decision = %+v, %v", decision, err)
 	}
 
 	left := stubAuthorizer{decision: auth.Decision{Allowed: true, Spec: spec.All(), Assign: []auth.Assignment{{Dimension: "owner", Value: "u1"}}}}
 	right := stubAuthorizer{decision: auth.Decision{Allowed: true, Spec: spec.All(), Assign: []auth.Assignment{{Dimension: "owner", Value: "u2"}}}}
-	combined, err = auth.All(left, right)
+	combined, err = auth.AllPolicies(left, right)
 	if err != nil {
 		t.Fatalf("All: %v", err)
 	}
-	decision, err = combined.Authorize(context.Background(), auth.Request{})
+	decision, err = combined.Evaluate(context.Background(), auth.Request{})
 	if err != nil || decision.Allowed || decision.Reason != "assignment_conflict" {
 		t.Fatalf("conflict decision = %+v, %v", decision, err)
 	}
 }
 
 func TestAllRequiresAuthorizer(t *testing.T) {
-	if _, err := auth.All(); err == nil {
+	if _, err := auth.AllPolicies(); err == nil {
 		t.Fatal("expected error for empty authorizers")
 	}
-	if _, err := auth.All(nil); err == nil {
+	if _, err := auth.AllPolicies(nil); err == nil {
 		t.Fatal("expected error for nil authorizer")
 	}
 	var authorizer *stubAuthorizer
-	if _, err := auth.All(authorizer); err == nil {
+	if _, err := auth.AllPolicies(authorizer); err == nil {
 		t.Fatal("expected error for typed nil authorizer")
 	}
 }
 
 func TestAllAllowIdentification(t *testing.T) {
-	combined, err := auth.All(auth.Allow(), auth.Allow())
+	combined, err := auth.AllPolicies(auth.AllowPolicy(), auth.AllowPolicy())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !auth.IsAllow(combined) {
+	if !combined.(interface{ UsesAllowAuthorizer() bool }).UsesAllowAuthorizer() {
 		t.Fatal("All of built-in Allow policies must retain the startup marker")
 	}
-	mixed, err := auth.All(auth.Allow(), stubAuthorizer{decision: auth.Decision{Allowed: false}})
+	mixed, err := auth.AllPolicies(auth.AllowPolicy(), stubAuthorizer{decision: auth.Decision{Allowed: false}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if auth.IsAllow(mixed) {
+	if mixed.(interface{ UsesAllowAuthorizer() bool }).UsesAllowAuthorizer() {
 		t.Fatal("All with a restricting policy must not be classified as Allow")
 	}
 }

@@ -2,6 +2,7 @@ package meta
 
 import (
 	"reflect"
+	"time"
 
 	"gochen/errors"
 )
@@ -12,7 +13,8 @@ type clonePointer struct {
 	length  int
 }
 
-// Clone 复制实体状态，保留结构体内部值并隔离导出字段的可变引用。
+// Clone 复制实体状态并隔离可变引用；无法安全复制的私有引用返回 Unsupported。
+// time.Time 的内部位置资料按不可变值保留。
 func Clone[T any](entity T) (T, error) {
 	var zero T
 	value := reflect.ValueOf(entity)
@@ -45,10 +47,17 @@ func cloneValue(value reflect.Value, pointers map[clonePointer]reflect.Value) (r
 		out.Elem().Set(element)
 		return out, nil
 	case reflect.Struct:
+		if value.Type() == reflect.TypeOf(time.Time{}) {
+			return value, nil
+		}
 		out := reflect.New(value.Type()).Elem()
 		out.Set(value)
 		for index := 0; index < value.NumField(); index++ {
 			if value.Type().Field(index).PkgPath != "" {
+				if hasPrivateReference(value.Field(index)) {
+					return reflect.Value{}, errors.NewCode(errors.Unsupported, "entity state contains a private mutable reference").
+						WithContext("type", value.Type().String()).WithContext("field", value.Type().Field(index).Name)
+				}
 				continue
 			}
 			field, err := cloneValue(value.Field(index), pointers)
@@ -120,7 +129,37 @@ func cloneValue(value reflect.Value, pointers map[clonePointer]reflect.Value) (r
 			out.Index(index).Set(element)
 		}
 		return out, nil
+	case reflect.Chan, reflect.Func, reflect.UnsafePointer:
+		if !value.IsNil() {
+			return reflect.Value{}, errors.NewCode(errors.Unsupported, "entity state contains an uncopyable reference").WithContext("type", value.Type().String())
+		}
+		return value, nil
 	default:
 		return value, nil
 	}
+}
+
+func hasPrivateReference(value reflect.Value) bool {
+	if value.Type() == reflect.TypeOf(time.Time{}) {
+		return false
+	}
+	switch value.Kind() {
+	case reflect.Ptr, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func, reflect.UnsafePointer:
+		return !value.IsNil()
+	case reflect.Interface:
+		return !value.IsNil() && hasPrivateReference(value.Elem())
+	case reflect.Struct:
+		for i := 0; i < value.NumField(); i++ {
+			if hasPrivateReference(value.Field(i)) {
+				return true
+			}
+		}
+	case reflect.Array:
+		for i := 0; i < value.Len(); i++ {
+			if hasPrivateReference(value.Index(i)) {
+				return true
+			}
+		}
+	}
+	return false
 }

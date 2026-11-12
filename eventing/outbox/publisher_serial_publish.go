@@ -14,6 +14,25 @@ func (p *Publisher[ID]) PublishPending(ctx context.Context) error {
 	if ctx == nil {
 		return errors.NewCode(errors.InvalidInput, "ctx is nil")
 	}
+	p.mu.Lock()
+	stopped := p.stopped
+	p.mu.Unlock()
+	if stopped {
+		return errors.NewCode(errors.InvalidInput, "publisher has been stopped; create a new instance")
+	}
+	if err := p.tasks.checkActive(); err != nil {
+		return err
+	}
+	return p.tasks.registry.Run(ctx, p.tasks.prefix+"publish_pending")
+}
+
+func (p *Publisher[ID]) publishPending(ctx context.Context) error {
+	if p == nil {
+		return errors.NewCode(errors.InvalidInput, "publisher cannot be nil")
+	}
+	if ctx == nil {
+		return errors.NewCode(errors.InvalidInput, "ctx is nil")
+	}
 	if err := validatePublisherDependencies(p.repo, p.bus); err != nil {
 		return err
 	}
@@ -25,6 +44,9 @@ func (p *Publisher[ID]) PublishPending(ctx context.Context) error {
 	p.mu.Unlock()
 	if stopped {
 		return errors.NewCode(errors.InvalidInput, "publisher has been stopped; create a new instance")
+	}
+	if err := p.tasks.checkActive(); err != nil {
+		return err
 	}
 	err := p.processOnce(ctx)
 	if err == nil && p.lastProcessPublished {

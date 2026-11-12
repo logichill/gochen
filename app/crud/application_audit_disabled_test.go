@@ -100,7 +100,7 @@ func TestAuditDisabledUpdateRetainsBusinessSnapshotValidation(t *testing.T) {
 		e.Extra = make(chan int)
 		return nil
 	})
-	if !errors.Is(err, errors.Internal) || !strings.Contains(err.Error(), "marshal business state") {
+	if !errors.Is(err, errors.Unsupported) {
 		t.Fatalf("expected business snapshot failure, got %v", err)
 	}
 	stored, err := repo.Get(ctx, entity.ID, spec.All())

@@ -23,7 +23,11 @@ func claimedEntryContext(ctx context.Context) (context.Context, context.CancelFu
 	if ctx != nil && ctx.Err() == nil {
 		return ctx, func() {}
 	}
-	return context.WithTimeout(context.Background(), defaultParallelPublisherStopTimeout)
+	parent := context.Background()
+	if ctx != nil {
+		parent = context.WithoutCancel(ctx)
+	}
+	return context.WithTimeout(parent, defaultParallelPublisherStopTimeout)
 }
 
 func (p *ParallelPublisher[ID]) processEntry(ctx context.Context, entry OutboxEntry[ID]) {

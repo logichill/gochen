@@ -80,7 +80,8 @@ func validateEntity[T any](entity T) error {
 	if !rv.IsValid() || ((rv.Kind() == reflect.Ptr || rv.Kind() == reflect.Interface || rv.Kind() == reflect.Map || rv.Kind() == reflect.Slice || rv.Kind() == reflect.Func) && rv.IsNil()) {
 		return errors.NewCode(errors.InvalidInput, "entity is nil")
 	}
-	return nil
+	_, err := meta.Clone(entity)
+	return err
 }
 
 func validateContext(ctx context.Context) error {

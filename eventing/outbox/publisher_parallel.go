@@ -13,7 +13,6 @@ import (
 	"gochen/eventing/registry"
 	"gochen/eventing/upcast"
 	"gochen/observe/logging"
-	"gochen/process/task"
 )
 
 // ParallelPublisher 使用 worker pool 并行发布 Outbox 记录，以提升吞吐量。
@@ -54,11 +53,12 @@ type ParallelPublisher[ID comparable] struct {
 	markStopCtx      context.Context
 	markStopped      bool
 	runCancel        context.CancelFunc
+	runContext       context.Context
 	stopFinalizeOnce sync.Once
 	// coreSnapshot 在 Start 后冻结，供热路径无锁复用（启动前依赖字段仍可变）。
 	coreSnapshot outboxPublisherCore[ID]
 	coreReady    atomic.Uint32
-	supervisor   *task.TaskSupervisor
+	tasks        *publisherTasks[ID]
 }
 
 // NewParallelPublisher 创建一个并行版 Outbox publisher。
@@ -104,7 +104,7 @@ func NewParallelPublisher[ID comparable](
 		workChs[i] = make(chan OutboxEntry[ID], bufPerWorker)
 	}
 
-	return &ParallelPublisher[ID]{
+	p := &ParallelPublisher[ID]{
 		repo:          repo,
 		bus:           bus,
 		cfg:           cfg,
@@ -115,8 +115,15 @@ func NewParallelPublisher[ID comparable](
 		workChs:       workChs,
 		stopCh:        make(chan struct{}),
 		stopDone:      make(chan struct{}),
-		supervisor:    task.NewTaskSupervisorWithLogger("eventing.outbox.parallel_publisher", logger),
-	}, nil
+	}
+	p.tasks, err = newPublisherTasks("eventing.outbox.parallel", repo, logger)
+	if err != nil {
+		return nil, err
+	}
+	if err := p.registerTasks(); err != nil {
+		return nil, err
+	}
+	return p, nil
 }
 
 // SetDLQRepository 为超过最大重试次数的记录启用 DLQ 转移。
@@ -181,16 +188,13 @@ func (p *ParallelPublisher[ID]) core() outboxPublisherCore[ID] {
 }
 
 func (p *ParallelPublisher[ID]) snapshotCoreLocked() outboxPublisherCore[ID] {
-	if p.supervisor == nil {
-		p.supervisor = task.NewTaskSupervisorWithLogger("eventing.outbox.parallel_publisher", p.log)
-	}
 	return outboxPublisherCore[ID]{
 		repo:          p.repo,
 		bus:           p.bus,
 		cfg:           p.cfg,
 		log:           p.log,
 		metrics:       p.metrics,
-		supervisor:    p.supervisor,
+		tasks:         p.tasks,
 		eventRegistry: p.eventRegistry,
 		upgraders:     p.upgraders,
 		dlq:           p.dlq,
@@ -210,7 +214,23 @@ func (p *ParallelPublisher[ID]) PublishPending(ctx context.Context) error {
 	if ctx == nil {
 		return errors.NewCode(errors.InvalidInput, "ctx is nil")
 	}
+	if err := p.tasks.checkActive(); err != nil {
+		return err
+	}
+	return p.tasks.registry.Run(ctx, p.tasks.prefix+"publish_pending")
+}
+
+func (p *ParallelPublisher[ID]) publishPending(ctx context.Context) error {
+	if p == nil {
+		return errors.NewCode(errors.InvalidInput, "publisher cannot be nil")
+	}
+	if ctx == nil {
+		return errors.NewCode(errors.InvalidInput, "ctx is nil")
+	}
 	if err := validatePublisherDependencies(p.repo, p.bus); err != nil {
+		return err
+	}
+	if err := p.tasks.checkActive(); err != nil {
 		return err
 	}
 

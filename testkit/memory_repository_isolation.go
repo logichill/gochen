@@ -18,10 +18,9 @@ import (
 //   - 隔离键来源可换（默认 contextx.TenantID），解析不到即 fail-closed；
 //   - Create 标记归属；读/写路径按归属过滤；
 //   - 归属不匹配时按 NotFound 处理（防探测），而不是泄露"存在但无权"；
-//   - 实体未实现 ITenantEntity 时构造期 fail-fast。
+//   - 隔离字段无法绑定或无法转换隔离键时，构造返回错误。
 //
-// 与 SQL 侧的唯一形态差异：内存仓储没有"列"的概念，归属槽位固定是
-// ITenantEntity，因此没有 Column 参数——可换的只有取值来源。
+// 内存仓储通过 Ref 绑定实体字段，SQL 仓储通过 Column 绑定同一字段。
 //
 // 两侧按同一组语义断言编写特征测试（见 memory_repository_isolation_test.go 与
 // runtime 的 isolation_test.go），保证跨存储语义一致。
@@ -37,8 +36,7 @@ type IsolationResolveFunc func(ctx context.Context) (string, error)
 
 // WithMemoryIsolation 显式启用 L2 空间隔离，隔离键取自 contextx.TenantID。
 //
-// 实体必须实现 domain/crud.ITenantEntity，否则 NewMemoryRepository panic
-// （测试替身的 fail-fast 等价于生产侧构造期报错）。
+// 构造期要求实体绑定 tenant 维度，失败时 NewMemoryRepository 返回错误。
 func WithMemoryIsolation[T domain.IEntity[ID], ID comparable]() MemoryOption[T, ID] {
 	return withMemoryIsolation[T, ID](nil)
 }
@@ -46,8 +44,7 @@ func WithMemoryIsolation[T domain.IEntity[ID], ID comparable]() MemoryOption[T, 
 // WithMemoryIsolationResolver 启用 L2 空间隔离并自定义隔离键来源。
 //
 // 对应 SQL 侧的 ormrepo.WithIsolation(IsolationCols{Column: ..., Resolve: ...})：
-// 内存仓储没有"列"的概念，归属槽位固定是 ITenantEntity，可换的只有**取值来源**
-// （分片键、派生隔离键、非租户语义的隔离空间）。
+// 默认绑定 tenant 维度，可通过 WithMemoryIsolationField 指定其他字段或维度。
 func WithMemoryIsolationResolver[T domain.IEntity[ID], ID comparable](resolve IsolationResolveFunc) MemoryOption[T, ID] {
 	return withMemoryIsolation[T, ID](resolve)
 }

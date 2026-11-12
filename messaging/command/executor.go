@@ -7,6 +7,7 @@ import (
 	"gochen/errors"
 	"gochen/messaging"
 	"runtime/debug"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -25,9 +26,11 @@ type ICommandExecutor interface {
 //
 // 它持有本地 handler registry，并在当前调用栈内执行命令与执行侧中间件。
 type CommandExecutor struct {
-	mu          sync.RWMutex
-	handlers    map[string]CommandHandlerFunc
-	middlewares []messaging.IMiddleware
+	mu            sync.RWMutex
+	handlers      map[string]CommandHandlerFunc
+	middlewares   []messaging.IMiddleware
+	registrations map[string]int
+	sealed        bool
 }
 
 // NewCommandExecutor 创建本地命令执行器。
@@ -52,9 +55,16 @@ func (e *CommandExecutor) RegisterHandler(commandType string, handler CommandHan
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if e.sealed {
+		return errors.NewCode(errors.FailedPrecondition, "command registrations are sealed")
+	}
 	if e.handlers == nil {
 		e.handlers = make(map[string]CommandHandlerFunc)
 	}
+	if e.registrations == nil {
+		e.registrations = make(map[string]int)
+	}
+	e.registrations[commandType]++
 	e.handlers[commandType] = handler
 	return nil
 }
@@ -76,14 +86,43 @@ func (e *CommandExecutor) HasHandler(commandType string) bool {
 }
 
 // Use 注册执行侧中间件。
-func (e *CommandExecutor) Use(middleware messaging.IMiddleware) {
+func (e *CommandExecutor) Use(middleware messaging.IMiddleware) error {
 	if e == nil || middleware == nil {
-		return
+		return errors.NewCode(errors.InvalidInput, "command executor and middleware are required")
 	}
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if e.sealed {
+		return errors.NewCode(errors.FailedPrecondition, "command registrations are sealed")
+	}
 	e.middlewares = append(e.middlewares, middleware)
+	return nil
+}
+
+// RegisteredHandlers 从真实处理器注册源枚举名称，重复登记保留计数用于启动诊断。
+func (e *CommandExecutor) RegisteredHandlers() []string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	var names []string
+	for name, count := range e.registrations {
+		for i := 0; i < count; i++ {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+// SealHandlers 冻结处理器与执行中间件；修改通过新实例重新装配和校验。
+func (e *CommandExecutor) SealHandlers() error {
+	if e == nil {
+		return errors.NewCode(errors.InvalidInput, "command executor is nil")
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.sealed = true
+	return nil
 }
 
 // Execute 同步执行命令并返回真实处理结果。

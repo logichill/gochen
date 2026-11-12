@@ -184,7 +184,7 @@ func TestCreateValidatesDomainBeforeApplicationPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new application: %v", err)
 	}
-	entity := &validatingEntity{Name: "ok", order: &order}
+	entity := &validatingEntity{Name: "ok", Order: &order}
 	if err := app.Create(context.Background(), entity); err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
@@ -211,7 +211,7 @@ func TestCreateStopsAfterDomainInvariantFailure(t *testing.T) {
 		t.Fatalf("new application: %v", err)
 	}
 	domainErr := errors.New("domain invariant failed")
-	entity := &validatingEntity{Name: "bad", order: &order, domainErr: domainErr}
+	entity := &validatingEntity{Name: "bad", Order: &order, domainErr: domainErr}
 	if err := app.Create(context.Background(), entity); !errors.Is(err, domainErr) {
 		t.Fatalf("Create() error = %v, want domain error", err)
 	}

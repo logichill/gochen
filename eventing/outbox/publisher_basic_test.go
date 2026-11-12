@@ -21,7 +21,7 @@ func TestNewPublisher(t *testing.T) {
 	reg := newTestRegistry(t)
 	upgraders := newTestUpgraders()
 
-	publisher, err := NewPublisher(repo, eventBus, cfg, nil, reg, upgraders)
+	publisher, err := newTestPublisher(repo, eventBus, cfg, nil, reg, upgraders)
 	assert.NoError(t, err)
 	assert.NotNil(t, publisher)
 	assert.NotNil(t, publisher.log)
@@ -43,7 +43,7 @@ func TestPublisher_PublishPending(t *testing.T) {
 
 	reg := newTestRegistry(t)
 	upgraders := newTestUpgraders()
-	publisher, err := NewPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), reg, upgraders)
+	publisher, err := newTestPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), reg, upgraders)
 	assert.NoError(t, err)
 
 	err = publisher.PublishPending(ctx)
@@ -62,7 +62,7 @@ func TestPublisher_PublishPending_EmptyQueue(t *testing.T) {
 
 	reg := newTestRegistry(t)
 	upgraders := newTestUpgraders()
-	publisher, err := NewPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), reg, upgraders)
+	publisher, err := newTestPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), reg, upgraders)
 	assert.NoError(t, err)
 
 	ctx := context.Background()
@@ -95,7 +95,7 @@ func TestPublisher_PublishPending_InvalidEventData(t *testing.T) {
 
 	reg := newTestRegistry(t)
 	upgraders := newTestUpgraders()
-	publisher, err := NewPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), reg, upgraders)
+	publisher, err := newTestPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), reg, upgraders)
 	assert.NoError(t, err)
 
 	ctx := context.Background()
@@ -122,7 +122,7 @@ func TestPublisher_PublishPending_PublishError(t *testing.T) {
 
 	reg := newTestRegistry(t)
 	upgraders := newTestUpgraders()
-	publisher, err := NewPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), reg, upgraders)
+	publisher, err := newTestPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), reg, upgraders)
 	assert.NoError(t, err)
 
 	err = publisher.PublishPending(ctx)
@@ -149,7 +149,7 @@ func TestPublisher_MarkPublishedError(t *testing.T) {
 
 	reg := newTestRegistry(t)
 	upgraders := newTestUpgraders()
-	publisher, err := NewPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), reg, upgraders)
+	publisher, err := newTestPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), reg, upgraders)
 	assert.NoError(t, err)
 
 	err = publisher.PublishPending(ctx)
@@ -176,7 +176,7 @@ func TestPublisher_PublishPending_DeletesPublishedAfterSuccessfulBatch(t *testin
 	ctx := context.Background()
 	_ = repo.SaveWithEvents(ctx, 1, []eventing.Event[int64]{evt})
 
-	publisher, err := NewPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), newTestRegistry(t), newTestUpgraders())
+	publisher, err := newTestPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), newTestRegistry(t), newTestUpgraders())
 	assert.NoError(t, err)
 
 	err = publisher.PublishPending(ctx)
@@ -214,7 +214,7 @@ func TestPublisher_PublishPending_RenewsClaimDuringSlowPublish(t *testing.T) {
 
 	reg := newTestRegistry(t)
 	upgraders := newTestUpgraders()
-	publisher, err := NewPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), reg, upgraders)
+	publisher, err := newTestPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), reg, upgraders)
 	assert.NoError(t, err)
 
 	done := make(chan error, 1)
@@ -263,7 +263,7 @@ func TestPublisher_PublishPending_IgnoresRenewCancellationAfterSuccessfulPublish
 
 	reg := newTestRegistry(t)
 	upgraders := newTestUpgraders()
-	publisher, err := NewPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), reg, upgraders)
+	publisher, err := newTestPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), reg, upgraders)
 	assert.NoError(t, err)
 
 	err = publisher.PublishPending(ctx)
@@ -295,7 +295,7 @@ func TestPublisher_PublishPending_RenewFailureStillMarksPublishedAfterSuccessful
 	ctx := context.Background()
 	_ = repo.SaveWithEvents(ctx, 1, []eventing.Event[int64]{evt})
 
-	publisher, err := NewPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), newTestRegistry(t), newTestUpgraders())
+	publisher, err := newTestPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), newTestRegistry(t), newTestUpgraders())
 	assert.NoError(t, err)
 
 	err = publisher.PublishPending(ctx)
@@ -323,7 +323,7 @@ func TestPublisher_PublishPending_RetriesMarkPublishedAfterContextCancellation(t
 
 	reg := newTestRegistry(t)
 	upgraders := newTestUpgraders()
-	publisher, err := NewPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), reg, upgraders)
+	publisher, err := newTestPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), reg, upgraders)
 	assert.NoError(t, err)
 
 	err = publisher.PublishPending(ctx)

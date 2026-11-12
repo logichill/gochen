@@ -10,7 +10,6 @@ import (
 	"gochen/eventing/registry"
 	"gochen/eventing/upcast"
 	"gochen/observe/logging"
-	"gochen/process/task"
 )
 
 // Publisher 负责轮询 Outbox、发布事件并回写发布结果。
@@ -45,7 +44,7 @@ type Publisher[ID comparable] struct {
 	// coreSnapshot 在 Start 后冻结；Start 前 PublishPending 仍按当前依赖即时构造。
 	coreSnapshot outboxPublisherCore[ID]
 	coreReady    atomic.Uint32
-	supervisor   *task.TaskSupervisor
+	tasks        *publisherTasks[ID]
 
 	// lastProcessPublished 记录最近一次 processOnce 是否真的发布过记录，
 	// 由 processMu 保护。空闲轮询时不得触发发布后清理。
@@ -74,7 +73,7 @@ func NewPublisher[ID comparable](
 	if err != nil {
 		return nil, err
 	}
-	return &Publisher[ID]{
+	p := &Publisher[ID]{
 		repo:          repo,
 		bus:           bus,
 		cfg:           normalizedCfg,
@@ -84,8 +83,25 @@ func NewPublisher[ID comparable](
 		stopCh:        make(chan struct{}),
 		doneCh:        make(chan struct{}),
 		stopDone:      make(chan struct{}),
-		supervisor:    task.NewTaskSupervisorWithLogger("eventing.outbox.publisher", logger),
-	}, nil
+	}
+	p.tasks, err = newPublisherTasks("eventing.outbox.serial", repo, logger)
+	if err != nil {
+		return nil, err
+	}
+	if err := p.tasks.registry.Register(p.tasks.prefix+"publish_pending", func(ctx context.Context) error {
+		return p.tasks.execute(ctx, "publish_pending", p.publishPending)
+	}); err != nil {
+		return nil, err
+	}
+	if err := p.tasks.registry.Register(p.tasks.prefix+"poll_loop", p.runPollLoop); err != nil {
+		return nil, err
+	}
+	if err := p.tasks.registry.Register(p.tasks.prefix+"cleanup_after_publish", func(ctx context.Context) error {
+		return p.tasks.execute(ctx, "cleanup_after_publish", func(ctx context.Context) error { p.cleanupPublishedAfterSuccessfulPublish(ctx); return nil })
+	}); err != nil {
+		return nil, err
+	}
+	return p, nil
 }
 
 // SetEventRegistry 配置发布时用于反序列化事件的注册表。
@@ -171,16 +187,13 @@ func (p *Publisher[ID]) core() outboxPublisherCore[ID] {
 }
 
 func (p *Publisher[ID]) snapshotCoreLocked() outboxPublisherCore[ID] {
-	if p.supervisor == nil {
-		p.supervisor = task.NewTaskSupervisorWithLogger("eventing.outbox.publisher", p.log)
-	}
 	return outboxPublisherCore[ID]{
 		repo:          p.repo,
 		bus:           p.bus,
 		cfg:           p.cfg,
 		log:           p.log,
 		metrics:       p.metrics,
-		supervisor:    p.supervisor,
+		tasks:         p.tasks,
 		eventRegistry: p.eventRegistry,
 		upgraders:     p.upgraders,
 		dlq:           p.dlq,

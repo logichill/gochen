@@ -37,7 +37,7 @@ func TestDomainStoreAndHistoryUseAggregateOnlyBackend(t *testing.T) {
 	if aggregate.Value != 42 || result.Version != 1 || !result.Exists {
 		t.Fatalf("restore = %+v, value=%d", result, aggregate.Value)
 	}
-	page, err := esstore.LoadEventHistoryPage(ctx, opts.EventStore, "TestAggregate", 1, 1, 20, nil)
+	page, err := esapp.LoadEventHistoryPage(ctx, opts.EventStore, "TestAggregate", 1, 1, 20, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

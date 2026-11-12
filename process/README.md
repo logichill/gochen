@@ -7,7 +7,7 @@
 | [saga](saga/README.md) | 顺序执行步骤，失败时逆序补偿，保存进度以恢复 | `SagaOrchestrator` |
 | [workflow](workflow/README.md) | 定义、实例、条件分支、汇聚、驳回与生命周期 | `Engine` |
 | `lock` | 按业务 key 串行化，支持可替换锁提供者 | `ILockProvider` |
-| `task` | 受控 goroutine、失败记录、取消与停止等待 | `TaskSupervisor` |
+| `task` | 受控 goroutine、失败记录、取消与停止等待；实际处理函数分阶段登记和启用 | `TaskSupervisor`、`Registry` |
 
 写入口结果和 accepted / processing / settled 状态由 [app/operation](../app/operation/README.md) 表达。重试、限流与熔断由 [policy](../policy/README.md) 提供，消息传递由 [messaging](../messaging/README.md) 承担。
 

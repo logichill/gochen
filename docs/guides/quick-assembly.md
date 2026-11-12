@@ -9,12 +9,15 @@
 | `quick.IsolatedRepo[T, ID](orm, table, opts...)` | 注入 `WithIsolation(IsolationCols{})`，启用 L2 租户隔离 |
 | `quick.AuditedRepo[T, ID](orm, table, opts...)` | 注入 `WithAudited`，声明审计字段和软删除能力 |
 | `quick.App[T, ID](repository, options)` | 返回基础 `*crud.Application[T, ID]`；授权器由 `options.Authorizer` 提供 |
+| `quick.DeclaredApp[T, ID](repository, options, rules, dependencies)` | 使用仓储元数据编译强类型规则，自动构造并绑定授权器 |
 
-上述构造函数均返回 error。授权通过 `crud.Options.Authorizer` 显式传入：`auth.Allow()`、`action.RBAC(checker)`、`scoped.New(checker, resolver)` 或业务自实现。`AuditedRepo` 不会创建审计 Store 或审计 Application，完整审计链路仍需 `app/audited`。
+上述构造函数均返回 error。声明式应用使用 `DeclaredApp`，动作来自 `crud.Describe`，字段来自仓储有效契约。复杂装配可通过 `auth.Compile` 或 `auth.New` 构造授权器，再注入 `crud.Options.Authorizer`。`AuditedRepo` 独立声明仓储能力，完整审计链路使用 `app/audited`。
 
-权限码来自 `auth.Descriptor`，默认为 `<resource>:api:<action>`；Action 检查从 ctx 中的 Principal 读取权限集合。`scoped.New` 先校验权限码，再由 `ISpecResolver` 产出 `spec.Spec` 与服务端赋值；系统主体得到 `spec.All()`。写规约随仓储调用传入，仓储在最终 SQL 中执行 `WITH CHECK` 与 `WHERE`。
+权限码来自 `auth.Descriptor`，默认为 `<resource>:api:<action>`；Action 检查从 ctx 中的 Principal 读取权限集合。声明的 `ScopeRule` 在动作权限成功后由 `auth.ISpecResolver` 产出范围条件与服务端赋值；系统行为通过规则的 `System` 字段明确配置。Application 自动把条件交给仓储，在最终 SQL 中执行 `WITH CHECK` 与 `WHERE`。
 
-所需查询、批量、审计和永久删除分别构造 Application，并分别传入同一授权器。基础 CRUD 外壳不自动获得其他能力；`audited.NewApplication` 在构造期要求 restore / deleted-query / purge 端口。REST 使用 WithQueryApplication/WithQueryableApplication/WithBatchWriter/WithAuditOperations/WithPurger 显式注入，注入本身不改变路由开关。
+基础 CRUD Application 提供查询和批量用例；`audited.NewApplication` 在构造期进一步要求恢复、已删除查询、永久删除和审计存储。REST 从 Application 的 Descriptor 推导路由，声明了生命周期动作时校验对应能力，见 `gochen-runtime` 仓库 `api/rest/README.md`。
+
+租户隔离和数据范围按 [L0–L4](../architecture/layered-authz.md)组合；字段保护、服务端赋值和 Transfer 通过 [资源契约](../architecture/resource-contracts.md)配置。
 
 ## 事件溯源
 

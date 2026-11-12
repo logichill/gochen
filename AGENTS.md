@@ -50,7 +50,7 @@
    | 包                               | 允许依赖（gochen 内部）                                                                               |
    | -------------------------------- | ----------------------------------------------------------------------------------------------------- |
    | app                              | auth（仅根契约）, clock, codec, contextx, domain, errors, eventing, gen, internal, messaging, observe, policy, validate |
-   | auth（能力子包见 `auth/doc.go`） | clock, contextx, domain, errors, gen, internal, observe                                               |
+   | auth（声明编译、策略、统一授权与治理；子包见 `auth/doc.go`） | clock, contextx, domain, errors, gen, internal, observe                                               |
    | cache                            | clock                                                                                                 |
    | clock / codec / gen / validate   | errors（基础叶子，彼此禁止互相 import，协作用最小结构接口注入）                                       |
    | contextx                         | errors, gen                                                                                           |
@@ -71,6 +71,8 @@
 3. **依赖地板**：`domain` 非测试代码只依赖标准库与 `gochen/errors`（及自身子树）；基础叶子（clock/codec/gen/validate）只依赖标准库、`gochen/errors` 与本包子树。
 4. **应用授权契约依赖**：按 D15，`app/crud` / `app/audited` / `app/eventsourced` 通过 `auth` 根包的 `IAuthorizer` 编排授权。依赖严格单向；`auth` 禁止 import `app`，基础应用禁止依赖 `auth/action`、`auth/scoped`、`auth/governance`。`domain/meta`、`domain/crud` 的元数据和仓储能力接口沿用 domain 子树依赖地板。
 5. **安全能力落点**：Application 在用例入口执行授权，把 `spec.Spec` 显式交给 Repository；Repository 构造期用 `WithIsolation` / `WithResourceKind` 声明隔离与资源。可选能力由仓储本体提供，禁止包装 `IRepository`。具体契约见[分层授权](docs/architecture/layered-authz.md)。
+
+   授权声明与治理编排集中于 `auth` 根包，组合根编译强类型声明并注入 `IAuthorizer`；根包可以依赖纯权限码工具子包 `auth/action`。`auth/scoped` 保留 DataScope 值对象与绑定，依赖根契约；范围资料由提供方投影到根包范围契约。此组织将声明校验和执行语义集中到同一模块，保持 Core 零第三方依赖及 `app → auth` 单向消费。
 
 6. **具体协作边**：`eventing → process` 仅允许 `eventing/outbox → process/task`；`process → eventing` 仅允许 `process/saga → eventing` / `eventing/bus`。任务监督不反向依赖事件能力。
 7. **默认适配分包**：`app/eventsourced` 保留领域仓储与命令用例；`app/eventsourced/eventstore` 承载事件持久化/快照/历史适配，`app/eventsourced/subscriber` 承载事件处理/投影/注册。核心模板禁止反向依赖这两个可选子包，组合根负责装配。

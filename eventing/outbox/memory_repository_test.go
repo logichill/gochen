@@ -329,7 +329,7 @@ func TestMemoryOutboxRepositoryPublishesEndToEnd(t *testing.T) {
 	require.NoError(t, repo.SaveWithEvents(context.Background(), 1, []eventing.Event[int64]{evt}))
 
 	eventBus := &MockEventBus{}
-	publisher, err := NewPublisher(repo, eventBus, DefaultOutboxConfig(), logging.NewNoopLogger(), newTestRegistry(t), newTestUpgraders())
+	publisher, err := newTestPublisher(repo, eventBus, DefaultOutboxConfig(), logging.NewNoopLogger(), newTestRegistry(t), newTestUpgraders())
 	require.NoError(t, err)
 	require.NoError(t, publisher.PublishPending(context.Background()))
 	require.Equal(t, 1, eventBus.PublishedEventsLen())

@@ -3,6 +3,8 @@ package scoped
 import (
 	"context"
 
+	"gochen/auth"
+	"gochen/contextx"
 	"gochen/errors"
 )
 
@@ -29,12 +31,21 @@ func (f DataScopeResolverFunc) ResolveDataScope(ctx context.Context) (DataScope,
 
 type dataScopeContextKey struct{}
 
+type dataScopeBinding struct {
+	bound context.Context
+	scope DataScope
+}
+
 // WithDataScope 将数据范围绑定到 context。
 func WithDataScope(ctx context.Context, scope DataScope) (context.Context, error) {
 	if ctx == nil {
 		return nil, errors.NewCode(errors.InvalidInput, "ctx is nil")
 	}
-	return context.WithValue(ctx, dataScopeContextKey{}, scope.Normalize()), nil
+	scope = scope.Normalize()
+	if scope.TenantID != "" && scope.TenantID != contextx.TenantID(ctx) {
+		return nil, errors.NewCode(errors.Forbidden, "data scope tenant does not match the current tenant")
+	}
+	return context.WithValue(ctx, dataScopeContextKey{}, dataScopeBinding{bound: ctx, scope: scope}), nil
 }
 
 // DataScopeFromContext 从 context 读取数据范围。
@@ -42,11 +53,19 @@ func DataScopeFromContext(ctx context.Context) (DataScope, bool) {
 	if ctx == nil {
 		return DenyAll(), false
 	}
-	scope, ok := ctx.Value(dataScopeContextKey{}).(DataScope)
+	binding, ok := ctx.Value(dataScopeContextKey{}).(dataScopeBinding)
 	if !ok {
 		return DenyAll(), false
 	}
-	return scope, true
+	current, currentOK := auth.PrincipalFromContext(ctx)
+	bound, boundOK := auth.PrincipalFromContext(binding.bound)
+	if currentOK != boundOK || !contextx.HasSameTenantBinding(ctx, binding.bound) {
+		return DenyAll(), false
+	}
+	if currentOK && (!auth.HasSamePrincipalBinding(ctx, binding.bound) || current.System != bound.System) {
+		return DenyAll(), false
+	}
+	return binding.scope.Normalize(), true
 }
 
 // ResolveDataScope 优先读取已绑定范围，否则委托 resolver 计算。
@@ -63,5 +82,9 @@ func ResolveDataScope(ctx context.Context, resolver IDataScopeResolver) (DataSco
 	if err != nil {
 		return DenyAll(), err
 	}
-	return scope.Normalize(), nil
+	scope = scope.Normalize()
+	if scope.TenantID != "" && scope.TenantID != contextx.TenantID(ctx) {
+		return DenyAll(), errors.NewCode(errors.Forbidden, "data scope tenant does not match the current tenant")
+	}
+	return scope, nil
 }

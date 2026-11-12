@@ -1,7 +1,5 @@
 # Gochen
 
-领域维度通过 `dim:"..."` 声明，条件使用 `meta.Ref`。资源契约统一隔离、普通更新保护、赋值与独立迁移；审计按写入时完整快照查询。接入方式见[分层授权](docs/architecture/layered-authz.md)。
-
 Gochen 是面向企业业务系统的 Go 框架，提供领域建模、应用服务、事件与消息、授权、流程和基础设施契约。本仓库是 Core，module path 为 `gochen`，使用 Go 1.27，生产代码、测试和示例均无第三方依赖。
 
 ## 仓库边界
@@ -20,7 +18,7 @@ Gochen 是面向企业业务系统的 Go 框架，提供领域建模、应用服
 | --- | --- |
 | 领域建模与应用模板 | `domain`、`app/crud`、`app/audited`、`app/eventsourced` |
 | 查询与写操作协议 | `app/query`、`app/operation` |
-| 授权契约与应用层保护 | `auth/action`、`auth/scoped`、`auth/governance` |
+| 授权声明、策略执行与治理 | `auth`；权限码工具 `auth/action`、范围资料 `auth/scoped` |
 | 事件驱动 | `eventing/store`、`eventing/bus`、`eventing/outbox`、`eventing/projection` |
 | 消息通信 | `messaging`、`messaging/command`、同步和内存异步 Transport |
 | 过程与控制策略 | `process/saga`、`process/workflow`、`process/lock`、`process/task`、`policy` |
@@ -54,6 +52,8 @@ Host、REST、SQL 和安全装配示例位于 `gochen-runtime` 仓库 `examples/
 - [文档索引](docs/README.md)：模块说明与专题导航。
 - [下游接入指南](docs/guides/downstream-guide.md)：依赖接入、能力选择与组合根。
 - [框架架构](docs/architecture/framework-design.md)：职责边界与运行约定。
+- [分层授权](docs/architecture/layered-authz.md)：L0–L4、租户隔离与数据范围。
+- [资源契约](docs/architecture/resource-contracts.md)：字段保护、归属迁移与历史审计。
 - [开发规范](SPEC.md)与[仓库约定](AGENTS.md)：贡献者规则。
 - [示例索引](examples/README.md)。
 

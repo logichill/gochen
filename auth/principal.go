@@ -38,7 +38,7 @@ func WithPrincipal(ctx context.Context, principal Principal) (context.Context, e
 	}
 	current, ok := PrincipalFromContext(ctx)
 	if !ok || ctx.Value(principalBindingKey{}) == nil || current.SubjectID != principal.SubjectID ||
-		current.TenantID != principal.TenantID || current.ScopeID != principal.ScopeID {
+		current.TenantID != principal.TenantID || current.ScopeID != principal.ScopeID || current.System != principal.System {
 		// 标记属于当前派生链；身份回切也会建立新绑定，原 context 保持不变。
 		ctx = context.WithValue(ctx, principalBindingKey{}, new(uint8))
 	}
@@ -57,7 +57,8 @@ func PrincipalFromContext(ctx context.Context) (Principal, bool) {
 }
 
 // HasSamePrincipalBinding 判断两个上下文是否沿用同一次主体与当前租户绑定。
-// 主体、租户或范围回切会产生新绑定；AsSystem 保留现有绑定。
+// WithPrincipal 改变主体、租户、范围或系统身份时产生新绑定；回切保持旧绑定失效。
+// AsSystem 保留现有根绑定。
 // 缺少主体绑定或上下文为空时返回 false。
 func HasSamePrincipalBinding(ctx, bound context.Context) bool {
 	if ctx == nil || bound == nil {

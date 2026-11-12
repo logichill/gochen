@@ -382,7 +382,7 @@ func TestParallelPublisher_BatchMarking_PrefersBatchOps(t *testing.T) {
 
 	reg := newTestRegistry(t)
 	upgraders := newTestUpgraders()
-	p, err := NewParallelPublisher(repo, bus, cfg, logging.NewNoopLogger(), workerCount, reg, upgraders)
+	p, err := newTestParallelPublisher(repo, bus, cfg, logging.NewNoopLogger(), workerCount, reg, upgraders)
 	require.NoError(t, err)
 	require.NoError(t, p.SetBatchOperations(batchOps))
 

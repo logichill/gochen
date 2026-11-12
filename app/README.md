@@ -8,17 +8,21 @@
 | --- | --- |
 | `app/crud` | CRUD、校验、查询分页、批量操作与 Hooks |
 | `app/audited` | 审计轨迹、软删除、恢复与已删除查询 |
-| `app/eventsourced` | 事件溯源仓储与命令服务；默认持久化位于 eventstore 子包，事件订阅辅助位于 subscriber 子包 |
+| `app/eventsourced` | 事件溯源仓储、命令用例与历史查询；持久化适配位于 eventstore 子包，订阅辅助位于 subscriber 子包 |
 | `app/query` | Filter、QuerySchema、分页、排序与字段选择协议 |
 | `app/operation` | 写操作结果、状态跟踪；SSE 适配位于 Runtime |
 
 `crud`、`audited`、`eventsourced` 通过 `Options.Authorizer` 接收 `auth.IAuthorizer`；授权决策中的 `spec.Spec` 交给仓储执行，详见[分层授权](../docs/architecture/layered-authz.md)。
 
+## 授权与资源契约
+
+读取仓储组合接口显式包含 `app.IExecutionDescriptorProvider`，由仓储本体暴露已绑定的只读资源契约。Application 构造继续校验实体类型、Vocabulary.Refs / Assignable 及审计数据源。全部维度默认受普通更新保护，mutable 分类支持业务编辑。授权条件采用类型化 Ref，Named 用于仓储业务读查询。
+
+CRUD / Audited 的 `Transfer` 接收调用方版本和目标归属，分别授权转出与接收，再在同一事务中写入、回读实际状态并保存两侧审计。迁移钩子支持 After / PostCommit。字段配置和完整执行规则见 [资源契约](../docs/architecture/resource-contracts.md)。
+
+通过 `Options.CommandGrant` 绑定到命令的应用在 `Transfer` 入口返回 `FailedPrecondition`。两阶段迁移使用独立应用；命令内的单资源判定复用范围见[强类型授权接入](../docs/guides/declarative-authorization.md#多资源命令)。
+
 ## CRUD 与审计实现的文件组织
-
-仓储通过 `app.IExecutionDescriptorProvider` 暴露已绑定的只读资源契约，Application 构造校验 Vocabulary.Refs / Assignable。全部维度默认受普通更新保护，mutable 分类支持业务编辑。授权条件采用类型化 Ref，Named 用于仓储业务读查询。
-
-CRUD / Audited 的 `Transfer` 由 KindTransfer、ReceiveAction 和 Dimensions 声明，接收调用方版本与目标意图。入口在事务外完成两阶段授权，再在同源事务中执行维度写入、实际后像回读和双记录审计；已有事务中的调用返回 FailedPrecondition。迁移钩子支持 After / PostCommit，并使用独立展示副本。外部 REST / 命令迁移入口共用 `operation.Runner.ExecuteTransfer`，要求幂等键与原调用方版本。
 
 `crud` 与 `audited` 在各自的 `application.go` 定义应用和构造器，共享 `app/internal/execution` 的读写、批量、生命周期和审计执行骨架。`crud/application_read.go` 与 `application_write.go` 提供公共入口；`interfaces.go`、`options.go`、`hooks.go` 承载契约与配置。
 
@@ -82,13 +86,19 @@ Hooks 以动作名为键，标准写动作使用 `create` / `update` / `delete`�
 
 `PostCommit` 要求仓储实现 `app/crud.ITransactional`。通知、外部同步等副作用应在提交后执行；需要回滚保证的 Hook 应使用事务仓储。
 
-`Before` 接收待写实体。审计 `Projector`、`After` 与 `PostCommit` 各自接收独立副本；展示或通知逻辑的输入修改与持久化实体、返回实体、审计维度事实相互隔离。
+版本由 CRUD/Audited 仓储根据写入前版本统一推进；审计信息设置保持版本。单次 Update 写入失败时恢复进入时的对象版本。批量或外层事务回滚后，调用方应重新读取实体，再发起后续操作；数据库回滚与调用方内存对象的恢复分别遵循具体仓储契约。
+
+`Before` 接收待写实体。审计 `Projector`、`After` 与 `PostCommit` 各自接收独立副本；展示或通知逻辑的输入修改与持久化实体、返回实体、审计维度事实相互隔离。无法安全复制的状态在消费前返回 `Unsupported`，支持的状态形状见 [实体状态复制](../domain/README.md#实体状态复制)。
 
 `Execute` / `ExecuteNew` / 批量命令及 `Restore` 在提交后回调失败时返回已提交实体与 `contextx.AfterCommitError`。实体的 ID、版本与业务状态保持有效，调用方可据此返回降级成功或补偿失败的提交后阶段。
 
+资源专属命令通过 `CommandIdentityCall` 绑定全局 ID 服务能力。服务返回错误时，能力保留安全复制的部分结果和原错误（包含 AfterCommitError）；结果复制失败时清空输出并合并服务错误与复制错误。授权拒绝仍返回零结果，执行结束撤销能力。
+
+聚合读取通过 `CommandReader` 接收授权条件；装备切换等专属原子写入通过 `CommandWriter` 接收条件及冻结 ID 意图。专属写入要求写动作、同一资源实例且没有权威 Assign，装配回调负责实际仓储的条件、归属、版本和事务保护；通用实体写入继续通过 `CommandRepository`。这些能力均在命令结束后撤销，专属写入失败时保留安全复制的部分结果。
+
 `Purge` 的业务校验应使用 `GetWithDeleted` 读取记录，避免已软删除的实体被普通 `Get` 遮蔽。`Purge` / `Restore` 只执行各自显式配置的 Stage；空 Stage 不执行钩子，不回退到 `Delete` / `Update`。
 
-`Execute` / `ExecuteBulk` 先运行命令函数，再执行 `Before`，保证写前业务校验看到最终目标状态。更新是否有业务变化由完整业务字段判断；审计 `Projector` 只控制记录的字段，隐藏字段的修改仍会持久化。
+`Execute` / `ExecuteBulk` 先运行命令函数，再执行 `Before`，保证写前业务校验看到最终目标状态。更新按独立复制后的真实业务字段判断变化；字段 MarshalJSON 与审计 Projector 控制展示，隐藏字段的修改仍会持久化。无变化更新同样核对版本，合法 no-op 保持版本和审计记录数量。
 
 `Restore` 在事务内装载已删除实体并清除删除标记，再执行 `Restore.Before`、实体验证与仓储写入；写入后执行 `Restore.After`，提交后执行 `Restore.PostCommit`。清除内存实体的删除标记不等于恢复已持久化；任一提交前步骤失败都会回滚事务。
 

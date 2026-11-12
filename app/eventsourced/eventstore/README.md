@@ -2,7 +2,7 @@
 
 本包把领域事件端口连接到 EventStore、Outbox、Schema 升级和快照能力。只使用自定义 `domain/eventsourced.IDomainEventStore` 的调用方无需导入本包。
 
-组合根创建 `NewDomainEventStore(DomainEventStoreOptions[ID])`，把返回的领域存储端口注入 `app/eventsourced.NewEventSourcedRepository`。存储适配只接收聚合 ID 类型参数；聚合类型参数 T 留在领域仓储。`EventHistory*` 类型与查询函数也在本包。
+组合根创建 `NewDomainEventStore(DomainEventStoreOptions[ID])`，把返回的领域存储端口注入 `app/eventsourced.NewEventSourcedRepository`。存储适配只接收聚合 ID 类型参数；聚合类型参数 T 留在领域仓储。`EventHistory*` 类型与查询函数归 `app/eventsourced`。
 
 使用 Runtime 的常规装配可直接调用 `quick.EventSourced` / `quick.AtomicEventSourced`，只声明一次 AggregateType，见 [Quick 装配](../../../docs/guides/quick-assembly.md#事件溯源)。
 
@@ -10,7 +10,7 @@
 
 `DomainEventStoreOptions[ID].EventStore` 只要求本包 `IAggregateEventStore[ID]` 的三个方法：`AppendEvents`、`GetAggregateVersion`、`StreamAggregate`。自定义后端不必实现全局扫描或一次性加载历史。
 
-普通历史查询依赖 `store.IEventReader`；分页历史依赖 `IEventHistoryStore`，仅包含聚合版本与分页读取；投影回放依赖 `store.IEventStreamReader`。SQL Outbox 的 `AppendEventsWithDB` 协作接口由 Runtime 消费侧定义。完整存储仍可直接传入上述端口，无需包装。
+普通历史查询依赖 `store.IEventReader`；分页历史依赖 `store.IAggregateEventReader`，包含聚合版本与分页读取；投影回放依赖 `store.IEventStreamReader`。SQL Outbox 的 `AppendEventsWithDB` 协作接口由 Runtime 消费侧定义。完整存储可以直接传入上述端口。
 
 迁移时将 `DomainEventStoreOptions[T, ID]`、`NewDomainEventStore[T, ID]`、`NewAtomicDomainEventStore[T, ID]` 的类型参数改为 `[ID]`，同步收窄自定义后端和测试替身；不保留旧泛型签名。
 

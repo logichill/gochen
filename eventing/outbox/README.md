@@ -45,6 +45,10 @@ Repository 应支持并发调用，多 Publisher 可通过 claim 协调；仍需
 
 Publisher 的 `Start(ctx)` / `Stop(ctx)` 可并发且幂等。启动前 Stop 不影响后续启动；启动后进入停止流程即为终止态，需要重新运行时创建新实例。Stop 成功后才关闭共享总线与存储。
 
+发布器构造时固定实际任务函数，`TaskRegistry()` 提供同一执行来源。消费方先通过 `SetTaskExecutor` 连接受保护资源命令，再封存注册源、交叉核对入口绑定并启用；执行器缺失、仅封存或尚未启用时，Start / PublishPending 返回 FailedPrecondition。执行器在封存后固定，处理函数只能在一次执行期间进入一次。Runtime Host 通过 HandlerEntries 收集该注册源；独立 Core 消费方显式执行 SealHandlers / ActivateHandlers，并负责其授权装配。
+
+串行来源包括 poll_loop、publish_pending、renew_claim 与 cleanup_after_publish；并行来源包括固定 worker 分片、fetch_loop、publish_pending、renew_claim、cleanup_loop、可选批量写回使用的 mark_loop，以及仅协调取消与收尾的 context_watcher / finalize_stop。这些函数通过 task.Registry 执行。串行发布后清理保留原身份与取消传播，参与 Stop 等待；并行收尾中已领取记录和最终写回保留发布身份，停止调用提供等待上限。续租授权完成后才开始事件发布，拒绝和 panic 释放等待调用。
+
 串行 Publisher 会串行化后台循环与手动 PublishPending。ParallelPublisher 需要先 Start 才能 PublishPending；按 aggregate type + ID 分片有助于同聚合顺序，但不提供跨实例或全局严格顺序保证。
 
 ## 批量标记与文件组织

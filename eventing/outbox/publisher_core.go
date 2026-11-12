@@ -11,16 +11,15 @@ import (
 	"gochen/eventing/registry"
 	"gochen/eventing/upcast"
 	"gochen/observe/logging"
-	"gochen/process/task"
 )
 
 type outboxPublisherCore[ID comparable] struct {
-	repo       IOutboxRepository[ID]
-	bus        bus.IEventBus
-	cfg        OutboxConfig
-	log        logging.ILogger
-	metrics    IPublisherMetricsRecorder
-	supervisor *task.TaskSupervisor
+	repo    IOutboxRepository[ID]
+	bus     bus.IEventBus
+	cfg     OutboxConfig
+	log     logging.ILogger
+	metrics IPublisherMetricsRecorder
+	tasks   *publisherTasks[ID]
 
 	eventRegistry *registry.Registry
 	upgraders     *upcast.UpgraderRegistry
@@ -128,7 +127,7 @@ func (c outboxPublisherCore[ID]) publishClaimed(ctx context.Context, entry Outbo
 
 	var evt eventing.Event[ID]
 	var published bool
-	err := runWithClaimKeepalive(ctx, c.supervisor, c.repo, entry, c.cfg.ClaimLease, c.cfg.ClaimRenewInterval, func(processCtx context.Context) error {
+	err := runWithClaimKeepalive(ctx, c.tasks, c.repo, entry, c.cfg.ClaimLease, c.cfg.ClaimRenewInterval, func(processCtx context.Context) error {
 		decodeStart := time.Now()
 		var decodeErr error
 		evt, decodeErr = entry.toEventWithContext(processCtx, c.eventRegistry, c.upgraders)

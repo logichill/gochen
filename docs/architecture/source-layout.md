@@ -8,15 +8,15 @@
 
 | 包 | 主体与实现文件 |
 | --- | --- |
-| `app/crud`、`app/audited` | `application.go` 与 `application_*.go` 承载 CRUD、钩子、审计和生命周期；`query_application.go`、`queryable_application.go`、`batch_application.go`、`purge_application.go` 承载独立能力，具体分工见 [app](../../app/README.md#crud-与审计实现的文件组织) |
-| `app/eventsourced` | `command_service.go` 及 `command_service_hooks.go`、`command_service_operation.go`；`command_hooks.go` 和 `command_operation.go` 保留钩子与 resolver 契约；`repository_read.go`、`repository_write.go` 承载普通仓储读写 |
+| `app/crud`、`app/audited` | `application.go` 定义应用与构造器，CRUD 的 `application_read.go`、`application_write.go` 提供公共入口；两种应用共享 `app/internal/execution` 的读写、钩子、批量、生命周期与审计骨架，见 [app](../../app/README.md#crud-与审计实现的文件组织) |
+| `app/eventsourced` | `application.go`、`application_command.go`、`application_actions.go` 编排用例，`command_message_handler.go` 接入命令消息；`repository_read.go`、`repository_write.go` 承载仓储读写，`history.go` 提供历史读模型与查询 |
 | `app/operation` | `runner_execute.go`、`runner_idempotency.go`、`runner_result.go` 承载执行、幂等和结果构建；`context.go` 定义操作 ID 上下文；`memory_store_*.go` 承载存储扩展 |
 | `app/operation/internal/singleflight` | `registry.go` 管理进行中的调用，`call.go` 承载等待与结果，`singleflight.go` 编排 owner 执行与异常收尾 |
 | `app/query` | `schema.go`、`schema_validate.go` 管理查询结构与校验；`field.go`、`field_value.go` 定义字段与值转换；`filter_builder.go`、`query_filters.go` 承载条件构建与集合；`range_parse.go`、`range_convert.go` 承载区间解析与类型转换 |
 | `app/query/querybind` | `bind.go` 遍历查询目标并选择解码器，`bind_value.go` 承载默认值绑定与类型赋值 |
-| `auth/action` | `action.go` 定义动作码与通配匹配，`checker.go` 承载 `IActionChecker`，`rbac.go` 组合纯动作授权器 |
-| `auth/governance` | `decorator.go` 固定治理组合顺序，`decorator_snapshot.go`、`decorator_audit.go`、`decorator_metrics.go` 分别实现快照、审计、指标；契约与配置位于 `snapshot.go`、`audit.go`、`audit_sanitize.go`、`metrics.go`、`options.go` |
-| `auth/scoped` | `decision.go` 表达判定结果，`authorizer.go` 承载授权执行，`full.go` 组合权限码与规约解析；`scope_context.go` 承载范围上下文与解析；`resource_registry.go` 承载资源解析器注册表 |
+| `auth` | `authorizer.go` 定义端口、意图与决策；`checker.go`、`policy.go`、`kernel.go` 统一动作、策略和治理执行；`declaration.go` 编译冻结计划，`facts.go` 管理可信投影，`entries.go` 核对独立入口；`governance_*.go` 承载治理契约与实现 |
+| `auth/action` | `action.go` 定义权限码与按段通配工具 |
+| `auth/scoped` | `scope.go` 定义 DataScope，`scope_context.go` 绑定身份与范围，`full.go` 提供纯范围条件构造 |
 | `cache` | `cache.go` 保留缓存对象与基本读写，`cache_eviction.go` 管理过期、淘汰与回调，`cache_stats.go` 承载统计，`config.go` 定义配置 |
 | `clock` | `manual_clock.go` 承载手动时钟与时间推进，`manual_clock_timer.go` 实现其 Timer / Ticker，继续共享时钟锁 |
 | `contextx` | `tx_callback.go` 管理事务链路的提交后回调，`after_commit_dispatcher.go` 实现可挂接到事务会话的独立分发器 |
@@ -37,7 +37,7 @@
 | `messaging/transport/memory` | `transport.go` 及 `transport_publish.go`、`transport_subscription.go`、`transport_dispatch.go`、`transport_lifecycle.go`、`transport_worker.go` |
 | `messaging/transport/direct` | `sync.go` 定义同步传输，`sync_publish.go` 承载发布，`sync_lifecycle.go` 承载启停与停止快照 |
 | `messaging/command/middleware` | `idempotency.go`、`idempotency_batch.go`、`idempotency_state.go`；聚合锁使用 `aggregate_lock.go`、`aggregate_lock_handles.go`、`aggregate_lock_cleanup.go` |
-| `testkit` | `memory_repository_*.go` 承载读写、批量、事务、内部状态及隔离与授权扩展；`audited_repository_read.go`、`audited_repository_audit.go`、`audited_repository_tx.go` 承载审计仓储的查询、审计记录和事务；`recording_router.go`、`recording_server.go` 分别实现路由记录与服务器 |
+| `testkit` | `memory_repository_*.go` 承载读写、批量、事务、内部状态及隔离与授权扩展；`audited_repository.go`、`audited_repository_audit.go`、`audited_repository_tx.go` 承载审计仓储、审计记录和事务；`recording_router.go`、`recording_server.go` 分别实现路由记录与服务器 |
 | `testkit/assert`、`testkit/require` | 保持对应的 `assert_*.go` / `require_*.go` 文件族，按错误、相等性、值状态、集合、数值比较、执行行为组织断言 |
 | `observe` | `tracer_noop.go` 与 `tracer_simple.go` 分别定义空实现和本地实现；`tracer_simple_span.go`、`tracer_propagation.go` 承载 Span 与上下文传播 |
 | `observe/logging` | `logger.go` 定义日志接口；`config.go` 定义级别与格式；`field.go`、`field_normalize.go` 承载字段构造与规范化；`logger_write.go` 承载共享输出辅助逻辑 |

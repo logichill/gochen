@@ -28,8 +28,8 @@ Runtime Repo 的 `FilterOpLike` 表示包含字面文本，会转义 `%`、`_` �
 
 ## 仓储约束
 
-租户与范围通过 Runtime Repo 的 `WithIsolation`、`WithResourceKind`、`WithScope` 等显式选项声明。扩展读取从 `ScopedQuery`、`GetWith`、`FindOneWith` 等受限入口继续构造，避免绕过隔离或软删条件。
+Runtime Repo 用 `WithIsolation` 声明隔离字段，用 `WithResourceKind` 指定资源，用 `WithResourceContract` 配置字段保护、赋值和迁移能力。数据范围由授权器返回的 `spec.Spec` 随仓储调用执行。扩展读取从 `ScopedQuery`、`GetWith`、`FindOneWith` 等受限入口继续构造，保持隔离和软删条件。
 
-列名优先级见 [Quick 装配](../../docs/guides/quick-assembly.md#列名约定)，授权链路见[分层授权](../../docs/architecture/layered-authz.md)。事务回调和审计的同事务要求见 [app](../../app/README.md)。
+列名优先级见 [Quick 装配](../../docs/guides/quick-assembly.md#列名约定)，授权链路见 [分层授权](../../docs/architecture/layered-authz.md)，字段执行规则见 [资源契约](../../docs/architecture/resource-contracts.md)。事务回调和审计的同事务要求见 [app](../../app/README.md)。
 
 数据库连接、DDL、schema 检查与迁移执行由 Runtime 提供，见[数据库 Schema 与迁移](../../docs/guides/db-schema-migration-guide.md)。

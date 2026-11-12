@@ -94,20 +94,22 @@ func (l Limits) Normalize() Limits {
 
 // ReadRepository 是执行骨架要求的读端口：按 ID 读取 + 统一查询端口。
 type ReadRepository[T domain.IEntity[ID], ID comparable] interface {
+	app.IExecutionDescriptorProvider
 	Get(ctx context.Context, id ID, s spec.Spec) (T, error)
 	query.IQueryableRepository[T]
 }
 
 // Options 是构造期配置；所有字段在构造时冻结。
 type Options[T domain.IEntity[ID], ID comparable] struct {
-	Resource   string
-	Authorizer auth.IAuthorizer
-	Actions    []auth.Action
-	Defaults   []auth.Action
-	Hooks      Hooks[T]
-	Validator  validate.IValidator
-	Limits     Limits
-	Projector  Projector[T]
+	CommandGrant *app.CommandGrant
+	Resource     string
+	Authorizer   auth.IAuthorizer
+	Actions      []auth.Action
+	Defaults     []auth.Action
+	Hooks        Hooks[T]
+	Validator    validate.IValidator
+	Limits       Limits
+	Projector    Projector[T]
 
 	Repo   domcrud.IRepository[T, ID]
 	Read   ReadRepository[T, ID]
@@ -124,17 +126,18 @@ type Options[T domain.IEntity[ID], ID comparable] struct {
 
 // Core 编排授权、事务、钩子与审计。构造完成后只读，可并发复用。
 type Core[T domain.IEntity[ID], ID comparable] struct {
-	resource   string
-	authorizer auth.IAuthorizer
-	vocabulary auth.Vocabulary
-	descriptor auth.Descriptor
-	actions    map[string]auth.Action
-	hooks      Hooks[T]
-	validator  validate.IValidator
-	limits     Limits
-	projector  Projector[T]
-	metadata   *meta.Metadata
-	execution  app.ExecutionDescriptor
+	commandGrant *app.CommandGrant
+	resource     string
+	authorizer   auth.IAuthorizer
+	vocabulary   auth.Vocabulary
+	descriptor   auth.Descriptor
+	actions      map[string]auth.Action
+	hooks        Hooks[T]
+	validator    validate.IValidator
+	limits       Limits
+	projector    Projector[T]
+	metadata     *meta.Metadata
+	execution    app.ExecutionDescriptor
 
 	repo   domcrud.IRepository[T, ID]
 	read   ReadRepository[T, ID]
@@ -167,6 +170,14 @@ func New[T domain.IEntity[ID], ID comparable](opts Options[T, ID]) (*Core[T, ID]
 	if err != nil {
 		return nil, err
 	}
+	if err := auth.ValidatePlanBinding(opts.Authorizer, descriptor, auth.ResourceAccessData); err != nil {
+		return nil, err
+	}
+	if opts.CommandGrant != nil {
+		if err := opts.CommandGrant.BindExecution(opts.Read, opts.Authorizer, descriptor); err != nil {
+			return nil, err
+		}
+	}
 	needsWrite := false
 	for _, action := range descriptor.Actions {
 		switch action.Kind {
@@ -180,6 +191,15 @@ func New[T domain.IEntity[ID], ID comparable](opts Options[T, ID]) (*Core[T, ID]
 		}
 		if depcheck.IsNil(opts.Tx) {
 			return nil, errors.NewCode(errors.InvalidInput, "repository must implement ITransactional for write actions")
+		}
+		if opts.CommandGrant != nil {
+			provider, ok := opts.Repo.(app.IExecutionDescriptorProvider)
+			if !ok {
+				return nil, errors.NewCode(errors.InvalidInput, "command write repository must declare its execution descriptor")
+			}
+			if err := opts.CommandGrant.BindExecution(provider, opts.Authorizer, descriptor); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if needsWrite && opts.SoftDelete {
@@ -202,7 +222,7 @@ func New[T domain.IEntity[ID], ID comparable](opts Options[T, ID]) (*Core[T, ID]
 	if err := ValidateVocabulary(vocabulary, metadata, opts.Read); err != nil {
 		return nil, err
 	}
-	effective := opts.Read.(app.IExecutionDescriptorProvider).ExecutionDescriptor()
+	effective := opts.Read.ExecutionDescriptor()
 	for _, action := range descriptor.Actions {
 		if action.Kind != auth.KindTransfer {
 			continue
@@ -236,26 +256,27 @@ func New[T domain.IEntity[ID], ID comparable](opts Options[T, ID]) (*Core[T, ID]
 		}
 	}
 	return &Core[T, ID]{
-		resource:   descriptor.Resource,
-		authorizer: opts.Authorizer,
-		vocabulary: vocabulary,
-		descriptor: descriptor,
-		actions:    actions,
-		hooks:      freezeHooks(opts.Hooks),
-		validator:  opts.Validator,
-		limits:     opts.Limits.Normalize(),
-		projector:  opts.Projector,
-		metadata:   metadata,
-		execution:  opts.Read.(app.IExecutionDescriptorProvider).ExecutionDescriptor(),
-		repo:       opts.Repo,
-		read:       opts.Read,
-		tx:         opts.Tx,
-		audit:      opts.Audit,
-		audits:     opts.Audits,
-		softDelete: opts.SoftDelete,
-		restore:    opts.Restore,
-		deleted:    opts.Deleted,
-		purge:      opts.Purge,
+		commandGrant: opts.CommandGrant,
+		resource:     descriptor.Resource,
+		authorizer:   opts.Authorizer,
+		vocabulary:   vocabulary,
+		descriptor:   descriptor,
+		actions:      actions,
+		hooks:        freezeHooks(opts.Hooks),
+		validator:    opts.Validator,
+		limits:       opts.Limits.Normalize(),
+		projector:    opts.Projector,
+		metadata:     metadata,
+		execution:    effective,
+		repo:         opts.Repo,
+		read:         opts.Read,
+		tx:           opts.Tx,
+		audit:        opts.Audit,
+		audits:       opts.Audits,
+		softDelete:   opts.SoftDelete,
+		restore:      opts.Restore,
+		deleted:      opts.Deleted,
+		purge:        opts.Purge,
 	}, nil
 }
 
@@ -277,6 +298,19 @@ func (c *Core[T, ID]) MaxBulkSize() int { return c.limits.MaxBulkSize }
 
 // UsesAllowAuthorizer 报告当前应用是否使用一律放行的授权器（D17 启动清单）。
 func (c *Core[T, ID]) UsesAllowAuthorizer() bool { return auth.IsAllow(c.authorizer) }
+
+// AuthorizationPlan 返回执行入口的声明计划。
+func (c *Core[T, ID]) AuthorizationPlan() (auth.Plan, bool) { return auth.PlanOf(c.authorizer) }
+
+// AuthorizationBinding 记录已在构造期验证的资源与条件执行契约。
+func (c *Core[T, ID]) AuthorizationBinding(action, source string) (auth.EntryBinding, error) {
+	return auth.BindExecution(c.authorizer, c.descriptor, auth.ResourceAccessData, source, "Application -> Repository(spec, assignments, version)", action)
+}
+
+// FastDeny 执行声明计划提供的安全提前拒绝。
+func (c *Core[T, ID]) FastDeny(ctx context.Context, action string) error {
+	return auth.CheckFastDeny(ctx, c.authorizer, action)
+}
 
 // BuildDescriptor 构造并校验资源动作清单；defaults 与 custom 合并后按名称去重。
 func BuildDescriptor(resource string, defaults, custom []auth.Action) (auth.Descriptor, map[string]auth.Action, error) {
@@ -367,9 +401,8 @@ func validateAuditDataSource[T domain.IEntity[ID], ID comparable](
 }
 
 // ValidateVocabulary 校验授权词汇只引用实体已知字段与仓储已注册的命名条件。
-func ValidateVocabulary(vocabulary auth.Vocabulary, metadata *meta.Metadata, read any) error {
-	provider, ok := read.(app.IExecutionDescriptorProvider)
-	if !ok || depcheck.IsNil(provider) {
+func ValidateVocabulary(vocabulary auth.Vocabulary, metadata *meta.Metadata, provider app.IExecutionDescriptorProvider) error {
+	if depcheck.IsNil(provider) {
 		return errors.NewCode(errors.InvalidInput, "repository must expose its effective execution contract")
 	}
 	d := provider.ExecutionDescriptor()
@@ -417,10 +450,28 @@ func (c *Core[T, ID]) canonicalIDs(ids []ID) []string {
 }
 
 func (c *Core[T, ID]) authorize(ctx context.Context, action string, ids []ID) (spec.Spec, auth.Decision, error) {
+	if c.commandGrant != nil {
+		decision, err := c.commandGrant.ExecutionDecision(ctx, c.resource, action, c.canonicalIDs(ids))
+		if err != nil {
+			return spec.Spec{}, auth.Decision{}, err
+		}
+		return decision.Spec, decision, nil
+	}
 	return AuthorizeAction(ctx, c.resource, c.authorizer, c.descriptor, c.actions, c.vocabulary, c.metadata, action, c.canonicalIDs(ids))
 }
 
 func (c *Core[T, ID]) authorizeKind(ctx context.Context, action string, ids []ID, kinds ...auth.Kind) (spec.Spec, auth.Decision, error) {
+	if c.commandGrant != nil {
+		declared, ok := c.actions[action]
+		if ok {
+			for _, kind := range kinds {
+				if kind == declared.Kind {
+					return c.authorize(ctx, action, ids)
+				}
+			}
+		}
+		return spec.Spec{}, auth.Decision{}, errors.NewCode(errors.Forbidden, "action kind is outside the command execution")
+	}
 	return AuthorizeKind(ctx, c.resource, c.authorizer, c.descriptor, c.actions, c.vocabulary, c.metadata, action, c.canonicalIDs(ids), kinds...)
 }
 
@@ -508,42 +559,7 @@ func AuthorizeKind(
 }
 
 func (c *Core[T, ID]) applyAssignments(entity T, assignments []auth.Assignment) error {
-	for _, assignment := range assignments {
-		if err := assignment.Validate(); err != nil {
-			return err
-		}
-		field, ok := c.metadata.DimensionField(assignment.Dimension)
-		if !ok {
-			return errors.NewCode(errors.Internal, "entity does not expose the assigned role").
-				WithContext("role", string(assignment.Dimension))
-		}
-		converted, err := field.Convert(assignment.Value)
-		if err != nil {
-			return errors.Wrap(err, errors.InvalidInput, "assignment value conversion failed").
-				WithContext("role", string(assignment.Dimension))
-		}
-		if !c.execution.CanAssign(assignment.Dimension) {
-			return errors.NewCode(errors.Internal, "create assignment lacks resource capability")
-		}
-		current, ok := field.Value(entity)
-		if !ok {
-			return errors.NewCode(errors.Internal, "assignment target field cannot be read").
-				WithContext("role", string(assignment.Dimension))
-		}
-		if !current.CanSet() {
-			return errors.NewCode(errors.Internal, "assignment target field cannot be set").
-				WithContext("role", string(assignment.Dimension))
-		}
-		if current.IsZero() {
-			current.Set(converted)
-			continue
-		}
-		if !reflect.DeepEqual(current.Interface(), converted.Interface()) {
-			return errors.NewCode(errors.Forbidden, "assignment conflicts with an existing field value").
-				WithContext("role", string(assignment.Dimension))
-		}
-	}
-	return nil
+	return app.ApplyAssignments(entity, assignments, c.execution)
 }
 
 // ValidateAssignments 校验实体已满足服务端权威赋值，不修改实体。
@@ -609,6 +625,9 @@ func (c *Core[T, ID]) normalizePage(offset, limit int) (int, int) {
 func (c *Core[T, ID]) invokeBefore(ctx context.Context, stage Stage[T], entity T) error {
 	if stage.Before == nil {
 		return nil
+	}
+	if _, err := meta.Clone(entity); err != nil {
+		return err
 	}
 	return stage.Before(ctx, entity)
 }

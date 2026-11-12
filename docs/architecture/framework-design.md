@@ -31,7 +31,7 @@ Gochen 通过接口和组合根组织领域建模、应用编排与基础设施�
 
 ## 领域与应用
 
-`domain/crud.IRepository` 只要求 `Create`、`Update`、`Delete`、`Get`。查询、批量、物理删除等由独立 Application 在构造期要求对应仓储能力，传输层显式注入。Repository 通过构造选项表达隔离与范围约束；包装窄仓储接口会丢失可选能力或假冒能力，因此禁止用仓储装饰器承载安全策略。
+`domain/crud.IRepository` 要求 `Create`、`Update`、`Delete`、`Get`。Application 按用例要求查询、事务等附加仓储能力；审计应用进一步要求恢复、已删除查询和永久删除。Repository 在构造期声明隔离与资源契约，授权条件由 Application 显式传入每次调用。
 
 - CRUD：领域实体 → `app/crud.Application` → Runtime REST。
 - 审计型 CRUD：增加 `domain/audited`、审计 Store 和事务能力，业务写与审计写同事务提交。
@@ -45,7 +45,7 @@ Gochen 通过接口和组合根组织领域建模、应用编排与基础设施�
 
 身份认证在传输边界完成，授权主体、当前范围与系统标记统一读取根 `auth.Principal`；Runtime 权限资料绑定到该身份及当前租户。tenant / operator / user / session / trace / request 通过 `contextx` 传播。Application 层是 HTTP、Worker、CLI 共同调用的授权边界，HTTP Action 中间件只负责提前拒绝。
 
-Application 通过 `auth.IAuthorizer` 在每个用例入口完成一次判定，返回的 `spec.Spec` 随仓储调用执行：仓储在最终写操作中原子合并隔离、规约与版本条件，写入前做 `WITH CHECK`。治理能力装饰根 `auth.IAuthorizer`，负责策略版本留痕、决策审计与指标；实际评估绑定由策略接入方保证。具体契约见[分层授权](layered-authz.md)。
+普通用例通过 `auth.IAuthorizer` 在入口授权一次，Transfer 在事务外分别授权转出和接收。返回的 `spec.Spec` 随仓储调用执行，SQL 写入同时约束隔离、授权与版本，并校验目标状态。L0–L4 的职责见 [分层授权](layered-authz.md)，字段保护和 Transfer 见 [资源契约](resource-contracts.md)。
 
 ## 事件与消息链路
 
@@ -75,7 +75,7 @@ Application 通过 `auth.IAuthorizer` 在每个用例入口完成一次判定，
 | 进程主循环 | `Run(ctx)` 阻塞运行，`Shutdown(ctx)` 请求终止 |
 | 资源句柄 | `Open` / `Close` 或 `Close` |
 
-上述是命名约定；入口的具体阻塞行为以其契约为准，例如 `quick.Run` 调用的生命周期引擎 `Start(ctx)` 会等待运行结束。计时器的 `Stop()` 沿用标准库语义。
+上述是命名约定；入口的具体阻塞行为以其契约为准，例如 `quick.New(...).Run(ctx)` 调用的生命周期引擎 `Start(ctx)` 会等待运行结束。计时器的 `Stop()` 沿用标准库语义。
 
 常规停止使用 `messaging.StopTransport`；需要保存或重投 pending 时，直接调用 `ITransportStopSnapshot.StopWithSnapshot` 并接收快照。超时快照可能包含尚未确认完成的消息，重投需按消息 ID 去重，详见 [messaging](../../messaging/README.md#停止与处理失败)。关闭共享依赖前，先等待依赖它的发布器、消费者和后台任务退出。
 
@@ -97,12 +97,10 @@ Application 通过 `auth.IAuthorizer` 在每个用例入口完成一次判定，
 
 ## 可选适配与提交结果
 
-事件溯源核心模板位于 `app/eventsourced`；默认存储/快照/历史适配位于 `app/eventsourced/eventstore`，订阅/投影辅助位于 `app/eventsourced/subscriber`。架构目标是由组合根按需装配；当前核心模板仍引用 eventstore 的历史查询接口与类型，依赖方向整改保留为独立批次（D04）。
+事件溯源核心模板及历史读模型位于 `app/eventsourced`；默认存储/快照适配位于 `app/eventsourced/eventstore`，订阅/投影辅助位于 `app/eventsourced/subscriber`。组合根按需装配，核心模板直接消费 `store.IAggregateEventReader`。
 
 Operation SSE 位于 Runtime `http/operation`；监控端点策略及公开响应整形位于 Runtime `eventing/monitoring`。Core 监控包保留指标、健康与快照模型。方言接口和值类型仍在 Core `db/dialect`，标准方言与 SQL 词法实现分别位于 Runtime `db/dialect` 和 `db/sqlscan`。Outbox 表名与 SQL 映射由 Runtime SQL 仓储负责，Core DTO 不携带 GORM 标签。
 
 `contextx.AfterCommitError` 统一表示主操作成功、后续步骤失败。ES 仓储据此更新提交基线，命令重试排除该类错误，Operation 使用 degraded 表达 handler 的提交后失败。若业务成功但 Operation 结果记录失败，则保留幂等预占并返回原结果供核对和补存。
 
-`app/crud.IApplication` 只包含 CRUD 读写用例。配置、校验器与 Hooks 通过 `crud.Options` 在构造时确定，REST 注册不修改应用。各能力分别构造和保护，基础 CRUD 不暴露查询/批量；安全外壳不向外转发裸仓储或配置。L3 显式接收由实际仓储与规范化配置构造的 Dependencies。Application 本身承担应用服务职责，不另设 Service 聚合层。
-
-审计运行能力以 `app/audited.IAuditOperations` 为方法集，永久删除独立使用 `IPurger`。REST 显式注入各能力，并用 EnableAudit/EnablePurge 控制扩展端点；审计实体写路由的依赖校验不受 EnableAudit 影响。HTTP 的批量/分页限制与应用业务限制分别配置，传输层不能放宽业务限制。
+`app/crud.IApplication` 提供读写、查询、批量执行与动作描述。配置、授权器、校验器和 Hooks 在构造时确定；审计应用增加生命周期能力。Runtime REST 根据 Descriptor 注册路由，在装配期校验动作所需能力。应用与 HTTP 分别配置业务和传输配额，HTTP 上限受应用上限约束。用例与装配细节见 [应用模板](../../app/README.md)及 [Quick 装配](../guides/quick-assembly.md)。

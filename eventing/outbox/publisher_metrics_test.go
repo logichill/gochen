@@ -72,7 +72,7 @@ func TestPublisher_MetricsRecorder_IsCalled(t *testing.T) {
 	rec := &recordingPublisherMetrics{}
 	reg := newTestRegistry(t)
 	upgraders := newTestUpgraders()
-	publisher, err := NewPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), reg, upgraders)
+	publisher, err := newTestPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), reg, upgraders)
 	require.NoError(t, err)
 	require.NoError(t, publisher.SetMetricsRecorder(rec))
 
@@ -102,7 +102,7 @@ func TestPublisher_MetricsRecorder_RecordsPublishError(t *testing.T) {
 	rec := &recordingPublisherMetrics{}
 	reg := newTestRegistry(t)
 	upgraders := newTestUpgraders()
-	publisher, err := NewPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), reg, upgraders)
+	publisher, err := newTestPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), reg, upgraders)
 	require.NoError(t, err)
 	require.NoError(t, publisher.SetMetricsRecorder(rec))
 

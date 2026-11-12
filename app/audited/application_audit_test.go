@@ -361,7 +361,7 @@ func TestUpdateRejectsUnmarshalableSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get(): %v", err)
 	}
-	loaded.Extra = make(chan int)
+	loaded.Extra = failingAuditValue("unserializable")
 	if err := app.Update(ctx, loaded); !errors.Is(err, errors.Internal) {
 		t.Fatalf("Update() = %v, want Internal", err)
 	}

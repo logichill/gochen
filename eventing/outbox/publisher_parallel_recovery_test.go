@@ -25,7 +25,7 @@ func TestParallelPublisher_MarkFailed_MovesToDLQWhenMaxRetriesExceeded(t *testin
 
 	reg := newTestRegistry(t)
 	upgraders := newTestUpgraders()
-	p, err := NewParallelPublisher(repo, bus, cfg, logging.NewNoopLogger(), 1, reg, upgraders)
+	p, err := newTestParallelPublisher(repo, bus, cfg, logging.NewNoopLogger(), 1, reg, upgraders)
 	require.NoError(t, err)
 	dlq := &dlqRecordingDLQ{}
 	require.NoError(t, p.SetDLQRepository(dlq))
@@ -70,6 +70,10 @@ func TestParallelPublisher_MarkPublishedRetriesWithFreshContextAfterSuccessfulPu
 		upgraders:     newTestUpgraders(),
 	}
 
+	var err error
+	p.tasks, err = newTestClaimTasks[int64](repo)
+	require.NoError(t, err)
+	defer p.tasks.registry.Stop(t.Context())
 	p.processEntry(ctx, entry)
 
 	require.Equal(t, int32(1), atomic.LoadInt32(&published))
@@ -92,6 +96,10 @@ func TestParallelPublisher_ProcessEntryPublishedMarkFailureRecoversClaim(t *test
 		upgraders:     newTestUpgraders(),
 	}
 
+	var err error
+	p.tasks, err = newTestClaimTasks[int64](repo)
+	require.NoError(t, err)
+	defer p.tasks.registry.Stop(t.Context())
 	p.processEntry(context.Background(), entry)
 
 	require.Equal(t, 1, bus.PublishedEventsLen())
@@ -123,6 +131,10 @@ func TestParallelPublisher_ProcessEntryRenewFailureStillMarksPublishedAfterSucce
 		upgraders:     newTestUpgraders(),
 	}
 
+	var err error
+	p.tasks, err = newTestClaimTasks[int64](repo)
+	require.NoError(t, err)
+	defer p.tasks.registry.Stop(t.Context())
 	p.processEntry(context.Background(), entry)
 
 	// 发布成功即便续租失败也必须 markPublished，避免重复投递；且不得误标为 failed。

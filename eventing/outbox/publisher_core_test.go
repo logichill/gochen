@@ -8,8 +8,6 @@ import (
 
 	"gochen/testkit/require"
 
-	"gochen/process/task"
-
 	"gochen/eventing"
 )
 
@@ -181,8 +179,10 @@ func TestRunWithClaimKeepaliveReturnsRenewErrorEvenWhenRunSucceeds(t *testing.T)
 	leaseUntil := time.Now().Add(time.Minute)
 	entry.LeaseUntil = &leaseUntil
 
-	supervisor := task.NewTaskSupervisor("eventing.outbox.claim_keepalive.test")
-	err := runWithClaimKeepalive(context.Background(), supervisor, repo, entry, time.Hour, time.Millisecond, func(ctx context.Context) error {
+	tasks, err := newTestClaimTasks[int64](repo)
+	require.NoError(t, err)
+	defer tasks.registry.Stop(t.Context())
+	err = runWithClaimKeepalive(context.Background(), tasks, repo, entry, time.Hour, time.Millisecond, func(ctx context.Context) error {
 		select {
 		case <-renewCalled:
 			return nil

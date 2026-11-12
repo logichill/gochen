@@ -40,7 +40,7 @@ func TestPublisher_DeserializeError_MoveToDLQWhenMaxRetriesExceeded(t *testing.T
 
 	reg := newTestRegistry(t)
 	upgraders := newTestUpgraders()
-	publisher, err := NewPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), reg, upgraders)
+	publisher, err := newTestPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), reg, upgraders)
 	assert.NoError(t, err)
 	dlq := &MockDLQRepository{}
 	assert.NoError(t, publisher.SetDLQRepository(dlq))
@@ -87,7 +87,7 @@ func TestPublisher_DeserializeError_DoesNotMoveToDLQWhenMarkFailedFails(t *testi
 
 	reg := newTestRegistry(t)
 	upgraders := newTestUpgraders()
-	publisher, err := NewPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), reg, upgraders)
+	publisher, err := newTestPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), reg, upgraders)
 	assert.NoError(t, err)
 	dlq := &MockDLQRepository{}
 	assert.NoError(t, publisher.SetDLQRepository(dlq))
@@ -127,7 +127,7 @@ func TestPublisher_DeserializeError_NotMovedToDLQBelowMaxRetries(t *testing.T) {
 
 	reg := newTestRegistry(t)
 	upgraders := newTestUpgraders()
-	publisher, err := NewPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), reg, upgraders)
+	publisher, err := newTestPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), reg, upgraders)
 	assert.NoError(t, err)
 	dlq := &MockDLQRepository{}
 	assert.NoError(t, publisher.SetDLQRepository(dlq))
@@ -178,7 +178,7 @@ func TestPublisher_DeserializeError_FallsBackWhenAtomicDLQFails(t *testing.T) {
 
 	reg := newTestRegistry(t)
 	upgraders := newTestUpgraders()
-	publisher, err := NewPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), reg, upgraders)
+	publisher, err := newTestPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), reg, upgraders)
 	assert.NoError(t, err)
 	assert.NoError(t, publisher.SetDLQRepository(&failingAtomicDLQRepository{
 		err: errors.NewCode(errors.Database, "atomic dlq failed"),
@@ -221,7 +221,7 @@ func TestPublisher_DeserializeError_NoMaxRetries_NeverMovesToDLQ(t *testing.T) {
 
 	reg := newTestRegistry(t)
 	upgraders := newTestUpgraders()
-	publisher, err := NewPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), reg, upgraders)
+	publisher, err := newTestPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), reg, upgraders)
 	assert.NoError(t, err)
 	dlq := &MockDLQRepository{}
 	assert.NoError(t, publisher.SetDLQRepository(dlq))
@@ -265,7 +265,7 @@ func TestPublisher_MarkPublishedError_MovesToDLQWhenRetriesExhausted(t *testing.
 
 	reg := newTestRegistry(t)
 	upgraders := newTestUpgraders()
-	publisher, err := NewPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), reg, upgraders)
+	publisher, err := newTestPublisher(repo, eventBus, cfg, logging.NewNoopLogger(), reg, upgraders)
 	assert.NoError(t, err)
 	dlq := &MockDLQRepository{}
 	assert.NoError(t, publisher.SetDLQRepository(dlq))

@@ -45,7 +45,7 @@ func TestParallelPublisher_CtxDone_IsTerminal(t *testing.T) {
 
 	reg := newTestRegistry(t)
 	upgraders := newTestUpgraders()
-	p, err := NewParallelPublisher(repo, bus, cfg, logging.NewNoopLogger(), 1, reg, upgraders)
+	p, err := newTestParallelPublisher(repo, bus, cfg, logging.NewNoopLogger(), 1, reg, upgraders)
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -116,7 +116,7 @@ func TestParallelPublisher_StartStopWithBatchOperationsDoesNotLeakMarkLoop(t *te
 		MaxRetries:      3,
 		CleanupInterval: 10 * time.Millisecond,
 	}
-	p, err := NewParallelPublisher(repo, bus, cfg, logging.NewNoopLogger(), 1, newTestRegistry(t), newTestUpgraders())
+	p, err := newTestParallelPublisher(repo, bus, cfg, logging.NewNoopLogger(), 1, newTestRegistry(t), newTestUpgraders())
 	require.NoError(t, err)
 	require.NoError(t, p.SetBatchOperations(&recordingBatchOps{}))
 
@@ -165,7 +165,7 @@ func TestParallelPublisher_ConcurrentStopWaitsForManualPublish(t *testing.T) {
 		release:           make(chan struct{}),
 	}
 	cfg := OutboxConfig{PublishInterval: time.Hour, CleanupInterval: time.Hour, BatchSize: 1, RetryInterval: time.Second, RetentionPeriod: time.Hour}
-	p, err := NewParallelPublisher(repo, &concurrentEventBus{}, cfg, logging.NewNoopLogger(), 1, newTestRegistry(t), newTestUpgraders())
+	p, err := newTestParallelPublisher(repo, &concurrentEventBus{}, cfg, logging.NewNoopLogger(), 1, newTestRegistry(t), newTestUpgraders())
 	require.NoError(t, err)
 	ctx := context.Background()
 	require.NoError(t, p.Start(ctx))

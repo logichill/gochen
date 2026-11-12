@@ -26,12 +26,12 @@ type testEntity struct {
 type validatingEntity struct {
 	domaincrud.Entity[int64]
 	Name      string `json:"name"`
-	order     *[]string
+	Order     *[]string
 	domainErr error
 }
 
 func (e *validatingEntity) Validate() error {
-	*e.order = append(*e.order, "domain")
+	*e.Order = append(*e.Order, "domain")
 	return e.domainErr
 }
 

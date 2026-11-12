@@ -6,6 +6,13 @@ type routeRegistryGroup struct {
 	prefix string
 }
 
+func (g *routeRegistryGroup) RoutePath(relative string) string {
+	if location, ok := g.inner.(IRouteLocation); ok {
+		return location.RoutePath(relative)
+	}
+	return JoinRoutePath(g.prefix, relative)
+}
+
 // GET 注册 GET 路由并记录注册信息（用于启动期冲突检测）。
 func (g *routeRegistryGroup) GET(path string, handler Handler) IRouteGroup {
 	g.reg.add("GET", JoinRoutePath(g.prefix, path))

@@ -436,7 +436,7 @@ func TestParallelPublisher_ConcurrentWorkers_SinglePublishPerEntry(t *testing.T)
 
 	reg := newTestRegistry(t)
 	upgraders := newTestUpgraders()
-	p, err := NewParallelPublisher(repo, bus, cfg, logging.NewNoopLogger(), workerCount, reg, upgraders)
+	p, err := newTestParallelPublisher(repo, bus, cfg, logging.NewNoopLogger(), workerCount, reg, upgraders)
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -576,7 +576,7 @@ func TestParallelPublisher_PreservesOrderWithinAggregate(t *testing.T) {
 
 	reg := newTestRegistry(t)
 	upgraders := newTestUpgraders()
-	p, err := NewParallelPublisher(repo, bus, cfg, logging.NewNoopLogger(), 2, reg, upgraders)
+	p, err := newTestParallelPublisher(repo, bus, cfg, logging.NewNoopLogger(), 2, reg, upgraders)
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())

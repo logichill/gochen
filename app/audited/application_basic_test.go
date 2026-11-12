@@ -260,7 +260,7 @@ func TestCreateRollsBackWhenAuditStoreFails(t *testing.T) {
 func TestCreateRejectsUnmarshalableSnapshot(t *testing.T) {
 	app, _ := newAuditedApplication(t, Options[*auditDoc, int64]{})
 	ctx := operatorContext(t, "alice")
-	entity := &auditDoc{Name: "a", Extra: make(chan int)}
+	entity := &auditDoc{Name: "a", Extra: failingAuditValue("unserializable")}
 
 	err := app.Create(ctx, entity)
 	requireErrorCode(t, err, errors.Internal)
@@ -268,4 +268,10 @@ func TestCreateRejectsUnmarshalableSnapshot(t *testing.T) {
 	if err != nil || count != 0 {
 		t.Fatalf("entity survived snapshot failure, Count() = %d, %v", count, err)
 	}
+}
+
+type failingAuditValue string
+
+func (failingAuditValue) MarshalJSON() ([]byte, error) {
+	return nil, errors.NewCode(errors.Internal, "audit serialization failed")
 }

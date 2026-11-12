@@ -17,8 +17,8 @@ import (
 
 // MemoryRepository 是支持 CRUD、查询、批量操作和内存事务的泛型测试仓储。
 //
-// 实体写入和读取时会对“指向 struct 的指针”做一层浅拷贝；包含 map、slice、指针字段的实体若需
-// 完全隔离，应在测试模型中自行复制这些引用字段。本实现通过插入顺序提供稳定的 List 结果。
+// 实体写入、读取和事务快照通过 meta.Clone 隔离可变状态；无法安全复制的状态
+// 在写入前返回 Unsupported。本实现通过插入顺序提供稳定的 List 结果。
 type MemoryRepository[T domain.IEntity[ID], ID comparable] struct {
 	mu        sync.RWMutex
 	state     memoryState[T, ID]

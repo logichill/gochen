@@ -41,7 +41,7 @@ func TestPublisher_ConcurrentStartStopAndPublishPending_NoRace(t *testing.T) {
 
 	reg := newTestRegistry(t)
 	upgraders := newTestUpgraders()
-	p, err := NewPublisher(repo, bus, cfg, logging.NewNoopLogger(), reg, upgraders)
+	p, err := newTestPublisher(repo, bus, cfg, logging.NewNoopLogger(), reg, upgraders)
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -102,7 +102,7 @@ func TestPublisher_ConcurrentStartStopAndPublishPending_NoRace(t *testing.T) {
 }
 
 func TestPublisher_ConcurrentRuntimeConfiguration_NoRace(t *testing.T) {
-	p, err := NewPublisher(
+	p, err := newTestPublisher(
 		&MockOutboxRepository{},
 		&MockEventBus{},
 		DefaultOutboxConfig(),
@@ -157,7 +157,7 @@ func TestPublisher_RuntimeConfigurationWaitsForPublishPending(t *testing.T) {
 		<-releasePublish
 		return nil
 	}}
-	p, err := NewPublisher(
+	p, err := newTestPublisher(
 		&MockOutboxRepository{entries: []OutboxEntry[int64]{*entry}},
 		eventBus,
 		DefaultOutboxConfig(),

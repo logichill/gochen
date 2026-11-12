@@ -3,10 +3,12 @@ package execution
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 
 	"gochen/app/operation"
 	"gochen/auth"
 	domaudited "gochen/domain/audited"
+	"gochen/domain/meta"
 	"gochen/domain/spec"
 	"gochen/errors"
 	"gochen/internal/depcheck"
@@ -172,6 +174,11 @@ func (c *Core[T, ID]) createOne(
 	entity T,
 ) (domaudited.AuditRecord, bool, error) {
 	stage := c.hooks.For(action)
+	if !depcheck.IsNil(c.audit) || stage.After != nil || stage.PostCommit != nil {
+		if _, err := meta.Clone(entity); err != nil {
+			return domaudited.AuditRecord{}, false, err
+		}
+	}
 	if err := c.invokeBefore(txCtx, stage, entity); err != nil {
 		return domaudited.AuditRecord{}, false, err
 	}
@@ -217,6 +224,10 @@ func (c *Core[T, ID]) updateLoaded(
 	entity T,
 	fn func(context.Context, T) error,
 ) (T, domaudited.AuditRecord, bool, error) {
+	if expected, actual := entity.GetVersion(), before.GetVersion(); expected != actual {
+		return entity, domaudited.AuditRecord{}, false, errors.NewCode(errors.Concurrency, "entity version mismatch").
+			WithContext("expected_version", expected).WithContext("actual_version", actual)
+	}
 	stage := c.hooks.For(action)
 	protected, err := c.execution.CaptureProtected(before)
 	if err != nil {
@@ -255,11 +266,7 @@ func (c *Core[T, ID]) updateLoaded(
 	if err != nil {
 		return entity, domaudited.AuditRecord{}, false, err
 	}
-	businessChanges, err := c.diffSnapshots(beforeState, afterState)
-	if err != nil {
-		return entity, domaudited.AuditRecord{}, false, err
-	}
-	if businessChanges == nil {
+	if reflect.DeepEqual(beforeState, afterState) {
 		// 无业务变更：不写库、不写审计，版本保持不变。
 		return entity, domaudited.AuditRecord{}, false, nil
 	}
@@ -290,21 +297,24 @@ func (c *Core[T, ID]) updateLoaded(
 	return entity, record, true, err
 }
 
-// businessSnapshot 捕获全部业务字段，独立于审计投影与 JSON 输出字段选择。
-// 序列化立即冻结指针字段的当前值，供命令修改前后比较。
-func (c *Core[T, ID]) businessSnapshot(entity T) (json.RawMessage, error) {
+// businessSnapshot 冻结实际业务字段，供命令修改前后比较。
+func (c *Core[T, ID]) businessSnapshot(entity T) (map[string]any, error) {
+	cloned, err := meta.Clone(entity)
+	if err != nil {
+		return nil, err
+	}
 	state := make(map[string]any)
 	for _, field := range c.metadata.Fields() {
 		if field.Identity || field.Managed {
 			continue
 		}
-		value, ok := field.Value(entity)
+		value, ok := field.Value(cloned)
 		if !ok {
 			return nil, errors.NewCode(errors.InvalidInput, "business field cannot be read").WithContext("field", field.Name)
 		}
 		state[field.Name] = value.Interface()
 	}
-	return marshalJSON(state, "marshal business state")
+	return state, nil
 }
 
 // deleteOne 在已开启的事务中删除实体，返回待写入的审计记录。

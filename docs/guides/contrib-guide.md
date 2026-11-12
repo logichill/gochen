@@ -21,6 +21,8 @@ Contrib 当前使用单一 `go.mod`，业务按包导入所需适配器。Core �
 
 包装已有 GORM 连接使用 `gormdb.New`；显式注入 Dialector 使用 `gormdb.Open`；按配置选择驱动使用 `gormfactory.NewFromConfig` / `NewFromDSN`。只有最后一种入口会引入全部受支持驱动。
 
+ORM 使用 `gormorm.New(gormDB)` 包装已有连接，或用 `gormorm.NewFromDatabase(database)` 保留已配置的数据库适配器。两个入口均提供 `Database`、同源事务和审计 Store 装配能力；显式 database 可携带自定义参数预算。
+
 ## 装配方式
 
 1. 在组合根创建具体 driver / client 及适配器，处理构造错误。

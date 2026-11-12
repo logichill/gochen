@@ -40,7 +40,7 @@ func (r *leaseAwareMockRepo) GetClaimLease() time.Duration {
 
 func TestNewPublisher_AdoptsRepositoryClaimLeaseWhenConfigUnset(t *testing.T) {
 	repo := &leaseAwareMockRepo{claimLease: 2 * time.Minute}
-	publisher, err := NewPublisher[int64](repo, &MockEventBus{}, OutboxConfig{}, nil, newTestRegistry(t), newTestUpgraders())
+	publisher, err := newTestPublisher[int64](repo, &MockEventBus{}, OutboxConfig{}, nil, newTestRegistry(t), newTestUpgraders())
 
 	if !assert.NoError(t, err) || !assert.NotNil(t, publisher) {
 		return
@@ -50,28 +50,28 @@ func TestNewPublisher_AdoptsRepositoryClaimLeaseWhenConfigUnset(t *testing.T) {
 }
 
 func TestNewPublisher_RejectsNilRepository(t *testing.T) {
-	publisher, err := NewPublisher[int64](nil, &MockEventBus{}, OutboxConfig{}, nil, newTestRegistry(t), newTestUpgraders())
+	publisher, err := newTestPublisher[int64](nil, &MockEventBus{}, OutboxConfig{}, nil, newTestRegistry(t), newTestUpgraders())
 
 	assert.Nil(t, publisher)
 	assert.Truef(t, errors.Is(err, errors.InvalidInput), "expected InvalidInput, got %v", err)
 }
 
 func TestNewPublisher_RejectsNilEventBus(t *testing.T) {
-	publisher, err := NewPublisher[int64](&MockOutboxRepository{}, nil, OutboxConfig{}, nil, newTestRegistry(t), newTestUpgraders())
+	publisher, err := newTestPublisher[int64](&MockOutboxRepository{}, nil, OutboxConfig{}, nil, newTestRegistry(t), newTestUpgraders())
 
 	assert.Nil(t, publisher)
 	assert.Truef(t, errors.Is(err, errors.InvalidInput), "expected InvalidInput, got %v", err)
 }
 
 func TestNewParallelPublisher_RejectsNilRepository(t *testing.T) {
-	publisher, err := NewParallelPublisher[int64](nil, &MockEventBus{}, OutboxConfig{}, nil, 2, newTestRegistry(t), newTestUpgraders())
+	publisher, err := newTestParallelPublisher[int64](nil, &MockEventBus{}, OutboxConfig{}, nil, 2, newTestRegistry(t), newTestUpgraders())
 
 	assert.Nil(t, publisher)
 	assert.Truef(t, errors.Is(err, errors.InvalidInput), "expected InvalidInput, got %v", err)
 }
 
 func TestNewParallelPublisher_RejectsNilEventBus(t *testing.T) {
-	publisher, err := NewParallelPublisher[int64](&MockOutboxRepository{}, nil, OutboxConfig{}, nil, 2, newTestRegistry(t), newTestUpgraders())
+	publisher, err := newTestParallelPublisher[int64](&MockOutboxRepository{}, nil, OutboxConfig{}, nil, 2, newTestRegistry(t), newTestUpgraders())
 
 	assert.Nil(t, publisher)
 	assert.Truef(t, errors.Is(err, errors.InvalidInput), "expected InvalidInput, got %v", err)
@@ -81,7 +81,7 @@ func TestNewPublisher_RejectsClaimLeaseMismatch(t *testing.T) {
 	repo := &leaseAwareMockRepo{claimLease: 2 * time.Minute}
 	cfg := OutboxConfig{ClaimLease: time.Minute}
 
-	publisher, err := NewPublisher[int64](repo, &MockEventBus{}, cfg, nil, newTestRegistry(t), newTestUpgraders())
+	publisher, err := newTestPublisher[int64](repo, &MockEventBus{}, cfg, nil, newTestRegistry(t), newTestUpgraders())
 
 	assert.Nil(t, publisher)
 	assert.Truef(t, errors.Is(err, errors.InvalidInput), "expected InvalidInput, got %v", err)
@@ -91,7 +91,7 @@ func TestNewParallelPublisher_RejectsClaimLeaseMismatch(t *testing.T) {
 	repo := &leaseAwareMockRepo{claimLease: 2 * time.Minute}
 	cfg := OutboxConfig{ClaimLease: time.Minute}
 
-	publisher, err := NewParallelPublisher[int64](repo, &MockEventBus{}, cfg, nil, 2, newTestRegistry(t), newTestUpgraders())
+	publisher, err := newTestParallelPublisher[int64](repo, &MockEventBus{}, cfg, nil, 2, newTestRegistry(t), newTestUpgraders())
 
 	assert.Nil(t, publisher)
 	assert.Truef(t, errors.Is(err, errors.InvalidInput), "expected InvalidInput, got %v", err)
@@ -101,7 +101,7 @@ func TestNewPublisher_AllowsExplicitRenewIntervalWithRepositoryLease(t *testing.
 	repo := &leaseAwareMockRepo{claimLease: 2 * time.Minute}
 	cfg := OutboxConfig{ClaimRenewInterval: 30 * time.Second}
 
-	publisher, err := NewPublisher[int64](repo, &MockEventBus{}, cfg, nil, newTestRegistry(t), newTestUpgraders())
+	publisher, err := newTestPublisher[int64](repo, &MockEventBus{}, cfg, nil, newTestRegistry(t), newTestUpgraders())
 
 	if !assert.NoError(t, err) || !assert.NotNil(t, publisher) {
 		return
@@ -127,7 +127,7 @@ func TestNewPublisher_PropagatesNoMaxRetriesToMemoryRepository(t *testing.T) {
 	cfg := DefaultOutboxConfig()
 	cfg.MaxRetries = NoMaxRetries
 
-	publisher, err := NewPublisher[int64](repo, &MockEventBus{}, cfg, nil, newTestRegistry(t), newTestUpgraders())
+	publisher, err := newTestPublisher[int64](repo, &MockEventBus{}, cfg, nil, newTestRegistry(t), newTestUpgraders())
 	if !assert.NoError(t, err) || !assert.NotNil(t, publisher) {
 		return
 	}
@@ -151,7 +151,7 @@ func TestNewPublisher_AdoptsExplicitRepositoryMaxRetries(t *testing.T) {
 	repo := newMemoryOutboxRepository(t)
 	repo.WithMaxRetries(3)
 
-	publisher, err := NewPublisher[int64](repo, &MockEventBus{}, DefaultOutboxConfig(), nil, newTestRegistry(t), newTestUpgraders())
+	publisher, err := newTestPublisher[int64](repo, &MockEventBus{}, DefaultOutboxConfig(), nil, newTestRegistry(t), newTestUpgraders())
 	if !assert.NoError(t, err) || !assert.NotNil(t, publisher) {
 		return
 	}
@@ -167,7 +167,7 @@ func TestNewPublisher_SecondPublisherAdoptsAppliedRepositoryMaxRetries(t *testin
 
 	cfg1 := DefaultOutboxConfig()
 	cfg1.MaxRetries = 7
-	_, err := NewPublisher(repo, &MockEventBus{}, cfg1, logging.NewNoopLogger(), newTestRegistry(t), newTestUpgraders())
+	_, err := newTestPublisher(repo, &MockEventBus{}, cfg1, logging.NewNoopLogger(), newTestRegistry(t), newTestUpgraders())
 	require.NoError(t, err)
 
 	maxRetries, configured := repo.ConfiguredMaxRetries()
@@ -176,7 +176,7 @@ func TestNewPublisher_SecondPublisherAdoptsAppliedRepositoryMaxRetries(t *testin
 
 	cfg2 := DefaultOutboxConfig()
 	cfg2.MaxRetries = 3
-	p2, err := NewPublisher(repo, &MockEventBus{}, cfg2, logging.NewNoopLogger(), newTestRegistry(t), newTestUpgraders())
+	p2, err := newTestPublisher(repo, &MockEventBus{}, cfg2, logging.NewNoopLogger(), newTestRegistry(t), newTestUpgraders())
 	require.NoError(t, err)
 	require.Equal(t, 7, p2.cfg.MaxRetries)
 
