@@ -8,14 +8,14 @@
 | --- | --- | --- |
 | `domain/crud` | `Entity`、条件仓储、迁移与批量 / 清洗接口 | 一般管理数据 |
 | `domain/meta` / `domain/spec` | 开放维度、类型化引用、转换和条件解释器 | 实体与历史快照共用的条件 |
-| `domain/audited` | 审计字段、软删除、恢复和审计存储端口 | 需要审计轨迹的管理数据 |
+| `domain.ChangeInfo` / `domain.DeletionState` | 独立修改归因与删除状态组件 | 按需组合，不要求审计存储 |
 | `domain/eventsourced` | 聚合基类、metadata、领域事件存储与仓储端口 | 通过事件流重建业务状态 |
 
 ## 实体与仓储
 
 - `IEntity[ID]` 要求 `GetID()` 和 `GetVersion()`；`ISettableID` 提供可选 ID 回填能力。
 - `IValidatable.Validate()` 表达不依赖外部资源的领域不变量。需要数据库或上下文的校验通过应用层注入。
-- `ITimestamps` 与 `ISoftDeletable` 是独立能力；带 operator 的软删除由 `domain/audited` 补充。
+- `ITimestamps` 与 `ISoftDeletable` 是独立能力；带 operator 的软删除由独立 `domain.ISoftDeletableBy` 补充。
 - `domain/crud.IRepository` 只有 `Create`、`Update`、`Delete`、`Get`。`IBulkOperations`、`IPurgeRepository` 等按需实现；列表与计数走 `app/query.IQueryableRepository`，只读应用入口为 `app/crud.IReadRepository`。
 
 仓储错误通过 `gochen/errors` 表达；基础仓储的 Delete 可采用幂等或严格未命中语义，具体实现须明确。领域查询优先使用有业务含义的方法；`app/query` 是适配器查询协议，不属于领域层依赖。
@@ -32,15 +32,17 @@
 
 ## 审计与软删除
 
-`AuditedEntity` 包含 ID、Version、创建 / 更新 / 删除时间及操作人。`SetUpdatedInfo` 设置更新人和时间，保留当前版本；`SoftDeleteBy` 要求非空 operator，`Restore` 清除删除信息。CRUD/Audited 仓储依据写入前版本统一计算下一版本，覆盖普通更新、软删、恢复、Transfer 与批量更新。物理 Delete/Purge 校验旧版本。普通实体显式使用 `WithoutVersioning` 时沿用退出版本保护的规则；审计实体保持版本保护。创建时审计实体初始版本归零，普通实体保留既有初始版本规则。
+`domain/crud.TrackedEntity` 包含 ID、Version、创建 / 更新 / 删除时间及操作人。`SetUpdatedInfo` 设置更新人和时间，保留当前版本；`SoftDeleteBy` 要求非空 operator，`Restore` 清除删除信息。条件仓储依据写入前版本统一计算下一版本，覆盖普通更新、软删、恢复、Transfer 与批量更新。物理 Delete/Purge 校验旧版本。普通实体显式使用 `WithoutVersioning` 时沿用退出版本保护的规则；带 IChangeInfo 的实体不可退出版本保护，纯删除状态沿用仓储显式 WithoutVersioning 的既有规则。创建时带 IChangeInfo 的实体初始版本归零，普通实体保留既有初始版本规则。
 
-`IAuditStore` 定义审计记录存取。包含已删读取与已删除列表分别由 `IRestoreRepository`、`IDeletedQueryRepository` 表达。事务、operator 注入和审计持久化由 [app/audited](../app/README.md#审计型-crud)及具体仓储负责。
+`audit.IAuditStore` 和 `audit.IAuditQueryStore` 定义独立写入与查询契约，位于 gochen/audit，不是领域实体的必要能力。包含已删读取与已删除列表由 domain/crud 的 IRestoreRepository、IDeletedQueryRepository 表达。事务审计由 CRUD 的可选 Audit 配置参与，历史读取由 app/audit.Reader 提供，删除生命周期由 app/deletion 提供。
 
 `AuditRecord.Dimensions` 保存全部维度的不可变标量快照，`OperationID` 关联一次逻辑操作。审计读取通过同一解释器对历史事实求值，缺键明确失败，实体物理删除后仍可查询。迁移两侧各保存自己的前后像快照。
 
 ## 事件溯源
 
-`IDomainEvent` 只要求稳定的 `EventType()`。`EventSourcedAggregate` 管理版本与未提交事件，`ApplyAndRecord` 应用并记录事件，仓储以 `GetExpectedVersion()` 作为保存基线。
+`IDomainEvent` 只要求稳定的 `EventType()`。显式 `Model[S,E]` 由 Initial、Clone、Reduce 组成，Replay 不需要 registry 或聚合基类。Clone 必须对可变引用做真正隔离，事件按不可变输入使用。应用 StateRepository 持有 ID 与版本，复用原事件存储和 codec。
+
+可选便利路径：`EventSourcedAggregate` 管理版本与未提交事件，`ApplyAndRecord` 应用并记录事件，仓储以 `GetExpectedVersion()` 作为保存基线。
 
 组合根显式创建 `MetadataRegistry`，可通过 `RegisterSet`、`Aggregate`、`RegisterModuleAggregates` 预热；`InitAggregate` / `New` 构造时也可按该 registry 确保 metadata 已就绪。
 

@@ -3,8 +3,8 @@ package app
 import (
 	"context"
 
+	audited "gochen/audit"
 	"gochen/auth"
-	"gochen/domain/audited"
 	"gochen/domain/crud"
 )
 
@@ -21,12 +21,11 @@ type ITransactionRunner interface {
 	WithinTx(ctx context.Context, fn func(txCtx context.Context) error) error
 }
 
-// IAuditRepository 组合应用审计必需的读写及数据源声明。
+// IAuditRepository 组合事务化审计写入及数据源声明，不要求历史查询。
 // 写入必须参与业务仓储通过 txCtx 传播的同源事务；数据源标识相等不能替代事务参与。
 // 历史读取按记录的维度快照过滤，不依赖实体仍然存在。
 type IAuditRepository interface {
 	audited.IAuditStore
-	audited.IAuditQueryStore
 	crud.IDataSourceProvider
 }
 

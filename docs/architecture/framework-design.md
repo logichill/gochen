@@ -1,6 +1,6 @@
 # Gochen 框架架构
 
-Gochen 通过接口和组合根组织领域建模、应用编排与基础设施。CRUD、审计型 CRUD、Event Sourcing 是可按业务选择的建模方式；采用消息总线或 CQRS 不要求所有写入都使用事件溯源。
+Gochen 通过接口和组合根组织领域建模、应用编排与基础设施。CRUD 是当前状态资源操作，审计与删除是可选能力，Event Sourcing 是事件权威及恢复路径；采用消息总线或 CQRS 不要求所有写入都使用事件溯源。
 
 ## 仓库与依赖
 
@@ -31,11 +31,13 @@ Gochen 通过接口和组合根组织领域建模、应用编排与基础设施�
 
 ## 领域与应用
 
-`domain/crud.IRepository` 要求 `Create`、`Update`、`Delete`、`Get`。Application 按用例要求查询、事务等附加仓储能力；审计应用进一步要求恢复、已删除查询和永久删除。Repository 在构造期声明隔离与资源契约，授权条件由 Application 显式传入每次调用。
+`domain/crud.IRepository` 要求 `Create`、`Update`、`Delete`、`Get`。Application 按用例要求查询、事务等附加仓储能力；只有删除生命周期要求恢复、已删除查询和永久删除。Repository 在构造期声明隔离与资源契约，授权条件由 Application 显式传入每次调用。
 
 - CRUD：领域实体 → `app/crud.Application` → Runtime REST。
-- 审计型 CRUD：增加 `domain/audited`、审计 Store 和事务能力，业务写与审计写同事务提交。
-- 事件溯源：领域聚合 → `app/eventsourced` 仓储与命令服务 → EventStore；读侧可由投影维护。
+- 审计：独立 `audit` 记录与存储契约，CRUD 可选同事务写入；`app/audit.Reader` 独立读取历史。
+- 删除生命周期：`app/deletion` 提供软删、恢复、永久删与回收站，不要求审计或修改人字段。
+- 显式事件溯源：Model/Reducer → StateRepository → 原有 EventStore；不依赖反射聚合。
+- 可选聚合便利路径：领域聚合 → `app/eventsourced` 仓储与命令服务 → EventStore；读侧可由投影维护。
 
 `app/query` 定义适配器查询协议，业务领域查询可另设有明确业务含义的仓储方法。`app/operation` 表达一次写入的结果与可见状态；Saga / Workflow 表达多步骤过程。
 
@@ -103,4 +105,4 @@ Operation SSE 位于 Runtime `http/operation`；监控端点策略及公开响�
 
 `contextx.AfterCommitError` 统一表示主操作成功、后续步骤失败。ES 仓储据此更新提交基线，命令重试排除该类错误，Operation 使用 degraded 表达 handler 的提交后失败。若业务成功但 Operation 结果记录失败，则保留幂等预占并返回原结果供核对和补存。
 
-`app/crud.IApplication` 提供读写、查询、批量执行与动作描述。配置、授权器、校验器和 Hooks 在构造时确定；审计应用增加生命周期能力。Runtime REST 根据 Descriptor 注册路由，在装配期校验动作所需能力。应用与 HTTP 分别配置业务和传输配额，HTTP 上限受应用上限约束。用例与装配细节见 [应用模板](../../app/README.md)及 [Quick 装配](../guides/quick-assembly.md)。
+`app/crud.IApplication` 提供读写、查询、批量执行与动作描述。配置、授权器、校验器和 Hooks 在构造时确定；审计读取与删除生命周期独立构造。Runtime REST 根据 Descriptor 注册路由，在装配期校验动作所需能力。应用与 HTTP 分别配置业务和传输配额，HTTP 上限受应用上限约束。用例与装配细节见 [应用模板](../../app/README.md)及 [Quick 装配](../guides/quick-assembly.md)。

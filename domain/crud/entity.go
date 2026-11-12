@@ -7,7 +7,7 @@ import "gochen/domain"
 // 说明：
 // - 仅包含必需的 ID 与乐观锁版本字段，适用于不需要审计/软删除/时间戳的简单场景；
 // - 若需要生命周期时间戳（CreatedAt/UpdatedAt），请组合 `domain.Timestamps`；
-// - 若需要审计/软删除能力，请使用 `domain/audited.AuditedEntity`（或业务自定义实现）。
+// - 若需要审计/软删除能力，请使用 可选的 domain.ChangeInfo、domain.DeletionState（或业务自定义实现）。
 //
 // 用法示例：
 //

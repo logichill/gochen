@@ -47,7 +47,7 @@ func TestNewApplicationRejectsInvalidOptions(t *testing.T) {
 			options: Options[*testEntity, int64]{
 				Resource:   "doc",
 				Authorizer: auth.Allow(),
-				Actions:    []auth.Action{{Name: ActionAuditRead, Kind: auth.KindRead}},
+				Actions:    []auth.Action{{Name: "audit_read", Kind: auth.KindRead}},
 			},
 		},
 	}
@@ -89,7 +89,7 @@ func TestNewApplicationBuildsStandardDescriptor(t *testing.T) {
 	if got := strings.Join(names, ","); got != "read,list,create,update,delete" {
 		t.Fatalf("actions = %q", got)
 	}
-	if _, ok := descriptor.Action(ActionAuditRead); ok {
+	if _, ok := descriptor.Action("audit_read"); ok {
 		t.Fatal("audit_read must not be declared without an audit store")
 	}
 	permission, ok := descriptor.PermissionFor(ActionRead)
@@ -242,8 +242,8 @@ func TestApplicationValidatorFailureLeavesNothingPersisted(t *testing.T) {
 }
 
 // 不完整的审计实现不能再进入公开构造参数；组合端口在编译期要求全部能力。
-func TestAuditRepositoryRequiresQueryPort(t *testing.T) {
-	if _, ok := any(saveOnlyAuditStore{}).(app.IAuditRepository); ok {
-		t.Fatal("save-only store unexpectedly implements the complete audit contract")
+func TestAuditWriterDoesNotRequireQueryPort(t *testing.T) {
+	if _, ok := any(saveOnlyAuditStore{}).(app.IAuditRepository); !ok {
+		t.Fatal("write-only store must implement the transactional audit writer")
 	}
 }

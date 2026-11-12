@@ -20,7 +20,7 @@ import (
 // Options 是事件溯源应用的构造期配置；构造完成后全部冻结。
 //
 // Actions 只声明自定义动作；标准动作 read / create / update 由构造函数
-// 自动加入，配置 History 时另加 audit_read。
+// 自动加入，配置 History 时另加 event_history_read。
 type Options[T esdomain.IEventSourcedAggregate[ID], ID comparable] struct {
 	Resource          string
 	Authorizer        auth.IAuthorizer
@@ -37,7 +37,7 @@ type Options[T esdomain.IEventSourcedAggregate[ID], ID comparable] struct {
 	// IsConcurrencyError 自定义并发冲突判断；默认按 errors.Concurrency 判断。
 	IsConcurrencyError IsConcurrencyError
 
-	// History 提供事件历史读取能力；配置后提供 AuditTrail 并声明 audit_read。
+	// History 提供事件历史读取能力；配置后提供 EventHistory 并声明 event_history_read。
 	History store.IAggregateEventReader[ID]
 
 	// HistoryMapper 将事件映射为业务可读历史条目；为 nil 时使用默认映射。
@@ -84,8 +84,8 @@ func NewApplication[T esdomain.IEventSourcedAggregate[ID], ID comparable](
 	if err := execution.ValidateIDType[ID](); err != nil {
 		return nil, err
 	}
-	withAudit := !depcheck.IsNil(options.History)
-	defaults, err := standardActions(options.Resource, actionPermissions(options.ActionPermissions), withAudit)
+	withHistory := !depcheck.IsNil(options.History)
+	defaults, err := standardActions(options.Resource, actionPermissions(options.ActionPermissions), withHistory)
 	if err != nil {
 		return nil, err
 	}
@@ -247,10 +247,10 @@ func (a *Application[T, ID]) ExecuteNew(
 	return aggregate, nil
 }
 
-// AuditTrail 读取聚合的事件历史视图。
+// EventHistory 读取聚合的事件历史视图。
 //
-// 读取前先回放并按 audit_read 规约校验当前状态；事件元数据不携带边界。
-func (a *Application[T, ID]) AuditTrail(
+// 读取前先回放并按 event_history_read 规约校验当前状态；事件元数据不携带边界。
+func (a *Application[T, ID]) EventHistory(
 	ctx context.Context,
 	id ID,
 	offset int,
@@ -262,7 +262,7 @@ func (a *Application[T, ID]) AuditTrail(
 	if depcheck.IsNil(a.history) {
 		return nil, errors.NewCode(errors.Unsupported, "event history is not configured")
 	}
-	spec, _, err := a.authorizeKind(ctx, ActionAuditRead, []ID{id}, auth.KindRead)
+	spec, _, err := a.authorizeKind(ctx, ActionEventHistoryRead, []ID{id}, auth.KindRead)
 	if err != nil {
 		return nil, err
 	}

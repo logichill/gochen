@@ -4,12 +4,17 @@ import (
 	"gochen/app/internal/execution"
 	"gochen/auth"
 	"gochen/domain"
-	"gochen/internal/depcheck"
+	"gochen/errors"
 )
 
 // Describe 在 Application 构造前取得同源动作描述，供组合根编译授权声明。
 func Describe[T domain.IEntity[ID], ID comparable](options Options[T, ID], writable bool) (auth.Descriptor, error) {
-	defaults, err := standardActions(options.Resource, options.ActionPermissions, writable, !depcheck.IsNil(options.Audit))
+	for _, action := range options.Actions {
+		if action.Name == execution.ActionAuditRead {
+			return auth.Descriptor{}, errors.NewCode(errors.InvalidInput, "audit_read belongs to the independent audit reader")
+		}
+	}
+	defaults, err := standardActions(options.Resource, options.ActionPermissions, writable, canDelete[T, ID]())
 	if err != nil {
 		return auth.Descriptor{}, err
 	}

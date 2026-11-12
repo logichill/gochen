@@ -1,6 +1,12 @@
 # 事件溯源聚合的业务使用约束
 
-聚合的状态必须能够仅由历史事件重建。推荐使用 `aggregate` tag、`New` 和 `ApplyXxx` 处理器；完整可执行用法见 [ExampleNew](example_test.go)，仓储装配见 [DDD / ES 速查](../../docs/reference/ddd-eventsourcing-quick-reference.md)。
+聚合的状态必须能够仅由历史事件重建。默认可使用显式 `Model[S,E]` / `Reducer[S,E]` 与应用层 `StateRepository`；反射便利路径可使用 `aggregate` tag、`New` 和 `ApplyXxx` 处理器；完整可执行用法见 [ExampleNew](example_test.go)，仓储装配见 [DDD / ES 速查](../../docs/reference/ddd-eventsourcing-quick-reference.md)。
+
+## 显式模型
+
+`Model` 只需要 Initial、Clone、Reduce，不需要嵌入基类、self 绑定或方法命名。`Replay` 从隔离副本按事件顺序归约，未知事件必须失败。`Clone` 是必填契约：含 map、slice、pointer 的状态必须深拷贝，值传递不自动隔离别名；接入测试必须验证失败决定、失败 reducer 与外部读取副本不会污染基线。回调不得保留可变参数或修改事件。
+
+版本、事件编解码、升级与持久化由 [StateRepository](../../app/eventsourced/README.md#显式状态路径) 负责。反射路径仍支持既有聚合和快照，以下约束专用于该便利路径。
 
 ## 构造与启动校验
 

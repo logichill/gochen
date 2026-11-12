@@ -5,7 +5,7 @@ import (
 
 	"gochen/auth"
 	"gochen/domain"
-	domaudited "gochen/domain/audited"
+
 	domcrud "gochen/domain/crud"
 	"gochen/errors"
 	"gochen/internal/depcheck"
@@ -20,7 +20,7 @@ func (r *CommandRepository[T, ID]) GetWithDeleted(ctx context.Context, id ID) (T
 	if err := r.checkID(id); err != nil {
 		return zero, err
 	}
-	reader, ok := r.repo.(domaudited.IRestoreRepository[T, ID])
+	reader, ok := r.repo.(domcrud.IRestoreRepository[T, ID])
 	if !ok {
 		return zero, errors.NewCode(errors.Unsupported, "command repository does not support deleted reads")
 	}
@@ -45,7 +45,7 @@ func (r *CommandRepository[T, ID]) Restore(ctx context.Context, entity T) error 
 	if err := r.checkWrite(entity); err != nil {
 		return err
 	}
-	restorer, ok := r.repo.(domaudited.IRestoreRepository[T, ID])
+	restorer, ok := r.repo.(domcrud.IRestoreRepository[T, ID])
 	if !ok {
 		return errors.NewCode(errors.Unsupported, "command repository does not support restore")
 	}

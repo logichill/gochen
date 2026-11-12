@@ -3,10 +3,11 @@ package testkit_test
 import (
 	"context"
 	"encoding/json"
+	domcrud "gochen/domain/crud"
 	"testing"
 
+	audited "gochen/audit"
 	"gochen/contextx"
-	"gochen/domain/audited"
 	"gochen/domain/meta"
 	"gochen/domain/spec"
 	"gochen/errors"
@@ -15,7 +16,7 @@ import (
 )
 
 type auditDocument struct {
-	audited.AuditedEntity[int64]
+	domcrud.TrackedEntity[int64]
 	TenantID   string
 	Department int64 `dim:"department"`
 }

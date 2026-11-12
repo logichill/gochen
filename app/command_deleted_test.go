@@ -3,12 +3,13 @@ package app_test
 import (
 	"context"
 	"fmt"
+
 	"testing"
 	"time"
 
 	"gochen/app"
 	"gochen/auth"
-	domaudited "gochen/domain/audited"
+
 	domcrud "gochen/domain/crud"
 	"gochen/domain/spec"
 	"gochen/errors"
@@ -16,7 +17,7 @@ import (
 )
 
 type deletedCommandEntity struct {
-	domaudited.AuditedEntity[int64]
+	domcrud.TrackedEntity[int64]
 	Department int64 `dim:"department"`
 }
 
@@ -26,7 +27,7 @@ func TestCommandDeletedLifecyclePreservesScopeVersionAndRevocation(t *testing.T)
 		t.Fatal(err)
 	}
 	for id, department := range map[int64]int64{1: 10, 2: 20} {
-		entity := &deletedCommandEntity{AuditedEntity: domaudited.AuditedEntity[int64]{Entity: domcrud.Entity[int64]{ID: id}}, Department: department}
+		entity := &deletedCommandEntity{TrackedEntity: domcrud.TrackedEntity[int64]{Entity: domcrud.Entity[int64]{ID: id}}, Department: department}
 		if err := repository.Create(t.Context(), entity, spec.All()); err != nil {
 			t.Fatal(err)
 		}

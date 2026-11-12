@@ -18,7 +18,7 @@ type IEntity[T comparable] interface {
 //
 // 说明：
 // - 该接口仅表达“删除态 + 删除时间 + 状态机”，不强制要求记录操作人；
-// - 若业务需要记录删除操作人（DeletedBy），请使用 `domain/audited.IAuditable`。
+// - 若业务需要记录删除操作人（DeletedBy），请使用 `domain.ISoftDeletableBy`。
 type ISoftDeletable interface {
 	GetDeletedAt() *time.Time
 	IsDeleted() bool
@@ -26,7 +26,7 @@ type ISoftDeletable interface {
 	// SoftDelete 将实体标记为软删除。
 	// 说明：
 	// - 该接口表达的是“最小软删语义”，不包含操作者（by/operator）归因；
-	// - 若业务需要记录删除操作人（DeletedBy）等审计信息，请使用 `domain/audited` 的能力（例如 SoftDeleteBy）。
+	// - 若业务需要记录删除操作人（DeletedBy）等审计信息，请使用 `domain.ISoftDeletableBy` 能力。
 	SoftDelete(at time.Time) error
 
 	// Restore 恢复被软删除的实体。

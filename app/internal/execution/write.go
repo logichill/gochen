@@ -3,11 +3,12 @@ package execution
 import (
 	"context"
 	"encoding/json"
+	domain "gochen/domain"
 	"reflect"
 
 	"gochen/app/operation"
+	domaudited "gochen/audit"
 	"gochen/auth"
-	domaudited "gochen/domain/audited"
 	"gochen/domain/meta"
 	"gochen/domain/spec"
 	"gochen/errors"
@@ -90,7 +91,7 @@ func (c *Core[T, ID]) Update(ctx context.Context, entity T) error {
 	})
 }
 
-// Delete 删除单个实体。audited 构造下为软删，其余为物理删。
+// Delete 删除单个实体。删除应用执行软删，普通资源执行物理删。
 func (c *Core[T, ID]) Delete(ctx context.Context, id ID) error {
 	ctx = operation.EnsureOperationID(ctx)
 	if err := checkContext(ctx); err != nil {
@@ -335,16 +336,24 @@ func (c *Core[T, ID]) deleteOne(
 		return domaudited.AuditRecord{}, false, err
 	}
 	if c.softDelete {
-		audited, ok := any(entity).(domaudited.IAuditedEntity[ID])
+		audited, ok := any(entity).(domain.ISoftDeletable)
 		if !ok {
-			return domaudited.AuditRecord{}, false, errors.NewCode(errors.Internal, "entity does not implement audited.IAuditedEntity")
+			return domaudited.AuditRecord{}, false, errors.NewCode(errors.Internal, "entity does not implement domain.ISoftDeletable")
 		}
-		if err := audited.SoftDeleteBy(act.Operator, nowUTC()); err != nil {
+		var deleteErr error
+		if attributed, ok := any(entity).(domain.ISoftDeletableBy); ok && act.Operator != "" {
+			deleteErr = attributed.SoftDeleteBy(act.Operator, nowUTC())
+		} else {
+			deleteErr = audited.SoftDelete(nowUTC())
+		}
+		if err := deleteErr; err != nil {
 			return domaudited.AuditRecord{}, false, err
 		}
 		if err := c.repo.Update(txCtx, entity, spec); err != nil {
 			return domaudited.AuditRecord{}, false, err
 		}
+	} else if _, ok := any(entity).(domain.ISoftDeletable); ok {
+		return domaudited.AuditRecord{}, false, errors.NewCode(errors.FailedPrecondition, "soft-deletable entities require the deletion application")
 	} else if err := c.repo.Delete(txCtx, entity, spec); err != nil {
 		return domaudited.AuditRecord{}, false, err
 	}

@@ -9,7 +9,7 @@ import (
 // AuthzLogEntryType 区分审计日志的种类。
 //
 // 目前只有决策日志一种：约束写不单独留痕，写侧的「谁改了哪条」由
-// `gochen/app/audited` 的业务审计覆盖，此处只记授权判定本身。
+// 应用事务写入协议的业务审计覆盖，此处只记授权判定本身。
 type AuthzLogEntryType string
 
 const (

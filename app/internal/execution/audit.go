@@ -8,9 +8,9 @@ import (
 	"strings"
 
 	"gochen/app/operation"
+	domaudited "gochen/audit"
 	"gochen/auth"
 	"gochen/contextx"
-	domaudited "gochen/domain/audited"
 	"gochen/domain/meta"
 	"gochen/domain/spec"
 	"gochen/errors"
@@ -84,12 +84,9 @@ func ResolveActor(ctx context.Context, opts []ExecOption, requireOperator bool) 
 	return resolved, nil
 }
 
-// auditActor 在配置审计时解析执行者，否则返回零值。
+// auditActor 始终保留可用的执行者归因；只有写审计记录时才强制要求操作人。
 func (c *Core[T, ID]) auditActor(ctx context.Context, opts []ExecOption) (Actor, error) {
-	if depcheck.IsNil(c.audit) {
-		return Actor{}, nil
-	}
-	return ResolveActor(ctx, opts, true)
+	return ResolveActor(ctx, opts, !depcheck.IsNil(c.audit))
 }
 
 func (c *Core[T, ID]) project(entity T) (any, error) {
@@ -241,26 +238,6 @@ func unmarshalSnapshot(data json.RawMessage) (map[string]any, error) {
 		out = map[string]any{}
 	}
 	return out, nil
-}
-
-// AuditTrail 按资源、实体标识和写入时维度快照返回审计轨迹。
-func (c *Core[T, ID]) AuditTrail(ctx context.Context, id ID, offset, limit int) ([]domaudited.AuditRecord, error) {
-	if err := checkContext(ctx); err != nil {
-		return nil, err
-	}
-	if depcheck.IsNil(c.audit) {
-		return nil, errors.NewCode(errors.Unsupported, "audit query store is not configured")
-	}
-	s, _, err := c.authorizeKind(ctx, ActionAuditRead, []ID{id}, auth.KindRead)
-	if err != nil {
-		return nil, err
-	}
-	if err := ValidateAuditSpec(s, c.metadata); err != nil {
-		return nil, err
-	}
-	s = spec.And(s, spec.Eq(meta.ID(), FormatID(id)))
-	offset, limit = c.normalizePage(offset, limit)
-	return c.audit.ListAuditRecords(domaudited.WithAuditResourceKind(ctx, c.resource), FormatID(id), offset, limit, s)
 }
 
 // ValidateAuditSpec 校验审计规约引用实体标识或维度字段。

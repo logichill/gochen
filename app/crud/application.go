@@ -9,7 +9,7 @@ import (
 	"gochen/app/internal/execution"
 	"gochen/auth"
 	"gochen/domain"
-	domaudited "gochen/domain/audited"
+
 	"gochen/errors"
 	"gochen/internal/depcheck"
 )
@@ -22,7 +22,7 @@ type Application[T domain.IEntity[ID], ID comparable] struct {
 // NewApplication 创建可读写的 CRUD 应用。
 //
 // 标准动作：read / list / create / update / delete；配置 Options.Audit 时
-// 另加 audit_read，并提供 AuditTrail。
+// 只参与写入协议；历史查询由 app/audit.Reader 提供。
 func NewApplication[T domain.IEntity[ID], ID comparable](
 	repo Repository[T, ID],
 	options Options[T, ID],
@@ -30,11 +30,12 @@ func NewApplication[T domain.IEntity[ID], ID comparable](
 	if depcheck.IsNil(repo) {
 		return nil, errors.NewCode(errors.InvalidInput, "repository cannot be nil")
 	}
-	audits := options.Audit
-	if err := rejectUndeclaredAudit(options.Actions, audits); err != nil {
-		return nil, err
+	for _, action := range options.Actions {
+		if action.Name == execution.ActionAuditRead {
+			return nil, errors.NewCode(errors.InvalidInput, "audit_read belongs to the independent audit reader")
+		}
 	}
-	defaults, err := standardActions(options.Resource, options.ActionPermissions, true, !depcheck.IsNil(audits))
+	defaults, err := standardActions(options.Resource, options.ActionPermissions, true, canDelete[T, ID]())
 	if err != nil {
 		return nil, err
 	}
@@ -51,6 +52,7 @@ func NewApplication[T domain.IEntity[ID], ID comparable](
 		Read:         repo,
 		Tx:           repo,
 		Audit:        options.Audit,
+		Projector:    options.Projector,
 	})
 	if err != nil {
 		return nil, err
@@ -59,14 +61,14 @@ func NewApplication[T domain.IEntity[ID], ID comparable](
 }
 
 // standardActions 构造标准动作清单；permissions 按动作名覆盖默认权限码。
-func standardActions(resource string, permissions map[string]string, writable, withAudit bool) ([]auth.Action, error) {
+func standardActions(resource string, permissions map[string]string, writable, deletable bool) ([]auth.Action, error) {
 	resource = strings.TrimSpace(resource)
 	names := []string{ActionRead, ActionList}
 	if writable {
-		names = append(names, ActionCreate, ActionUpdate, ActionDelete)
-	}
-	if withAudit {
-		names = append(names, ActionAuditRead)
+		names = append(names, ActionCreate, ActionUpdate)
+		if deletable {
+			names = append(names, ActionDelete)
+		}
 	}
 	known := make(map[string]struct{}, len(names))
 	for _, name := range names {
@@ -111,16 +113,10 @@ func standardActions(resource string, permissions map[string]string, writable, w
 	return actions, nil
 }
 
-func rejectUndeclaredAudit(actions []auth.Action, store domaudited.IAuditQueryStore) error {
-	if !depcheck.IsNil(store) {
-		return nil
-	}
-	for _, action := range actions {
-		if action.Name == ActionAuditRead {
-			return errors.NewCode(errors.InvalidInput, "audit_read requires an audit store")
-		}
-	}
-	return nil
+func canDelete[T domain.IEntity[ID], ID comparable]() bool {
+	var zero T
+	_, ok := any(zero).(domain.ISoftDeletable)
+	return !ok
 }
 
 // MaxBulkSize 返回批量上限。

@@ -2,15 +2,16 @@ package testkit
 
 import (
 	"context"
+	domain "gochen/domain"
 	"sync"
 
 	"gochen/contextx"
 	"gochen/db/tx"
-	"gochen/domain/audited"
+
 	"gochen/errors"
 )
 
-type auditedTransaction[T audited.IAuditedEntity[ID], ID comparable] struct {
+type auditedTransaction[T domain.IEntity[ID], ID comparable] struct {
 	mu                sync.Mutex
 	repository        *AuditedMemoryRepository[T, ID]
 	entityTransaction *memoryTransaction[T, ID]
@@ -24,12 +25,12 @@ type auditedTransaction[T audited.IAuditedEntity[ID], ID comparable] struct {
 	chainHost bool
 }
 
-type auditedTransactionContext[T audited.IAuditedEntity[ID], ID comparable] struct {
+type auditedTransactionContext[T domain.IEntity[ID], ID comparable] struct {
 	transaction *auditedTransaction[T, ID]
 	owned       bool
 }
 
-type auditedTransactionKey[T audited.IAuditedEntity[ID], ID comparable] struct{}
+type auditedTransactionKey[T domain.IEntity[ID], ID comparable] struct{}
 
 // WithinTx 在同一个内存事务中执行实体与审计写入。
 func (r *AuditedMemoryRepository[T, ID]) WithinTx(ctx context.Context, fn func(context.Context) error) error {

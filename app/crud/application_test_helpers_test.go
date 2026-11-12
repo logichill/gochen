@@ -2,14 +2,15 @@ package crud
 
 import (
 	"context"
+	domcrud "gochen/domain/crud"
 	"testing"
 
 	"gochen/app"
 	"gochen/app/query"
+	domaudited "gochen/audit"
 	"gochen/auth"
 	"gochen/contextx"
-	domaudited "gochen/domain/audited"
-	domaincrud "gochen/domain/crud"
+
 	"gochen/domain/meta"
 	"gochen/errors"
 	"gochen/testkit"
@@ -17,14 +18,14 @@ import (
 )
 
 type testEntity struct {
-	domaincrud.Entity[int64]
+	domcrud.Entity[int64]
 	Owner  string `json:"owner" dim:"owner"`
 	Name   string `json:"name"`
 	Active bool   `json:"active"`
 }
 
 type validatingEntity struct {
-	domaincrud.Entity[int64]
+	domcrud.Entity[int64]
 	Name      string `json:"name"`
 	Order     *[]string
 	domainErr error
@@ -36,7 +37,7 @@ func (e *validatingEntity) Validate() error {
 }
 
 type auditEntity struct {
-	domaudited.AuditedEntity[int64]
+	domcrud.TrackedEntity[int64]
 	Name string `json:"name"`
 }
 
@@ -98,8 +99,8 @@ func (saveOnlyAuditStore) SaveAuditRecord(context.Context, domaudited.AuditRecor
 
 func (saveOnlyAuditStore) DataSourceID() string { return testkit.MemoryDataSourceID }
 
-func domaincrudEntity(id int64) domaincrud.Entity[int64] {
-	return domaincrud.Entity[int64]{ID: id}
+func domaincrudEntity(id int64) domcrud.Entity[int64] {
+	return domcrud.Entity[int64]{ID: id}
 }
 
 func newTestRepo() *testkit.MemoryRepository[*testEntity, int64] {

@@ -1,7 +1,5 @@
-// Package execution 提供 crud / audited 应用共用的私有执行骨架。
-//
-// 公开入口只有 app/crud 与 app/audited 的 Application；本包负责授权、事务、
-// 钩子、审计与批量语义，保证两种构造在读写路径上遵循同一套规则。
+// Package execution 提供资源写入和可选删除能力共用的私有执行协议。
+// 授权、条件写入、事务、归因、审计与钩子保持统一语义。
 package execution
 
 import (
@@ -9,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"gochen/app"
+	domcrud "gochen/domain/crud"
 	"gochen/domain/spec"
 	"reflect"
 	"sort"
@@ -20,8 +19,7 @@ import (
 	"gochen/auth"
 	"gochen/contextx"
 	"gochen/domain"
-	domaudited "gochen/domain/audited"
-	domcrud "gochen/domain/crud"
+
 	"gochen/domain/meta"
 	"gochen/errors"
 	"gochen/internal/depcheck"
@@ -88,8 +86,8 @@ type Options[T domain.IEntity[ID], ID comparable] struct {
 
 	// 以下端口只在软删/生命周期构造中使用。
 	SoftDelete bool
-	Restore    domaudited.IRestoreRepository[T, ID]
-	Deleted    domaudited.IDeletedQueryRepository[T, ID]
+	Restore    domcrud.IRestoreRepository[T, ID]
+	Deleted    domcrud.IDeletedQueryRepository[T, ID]
 	Purge      domcrud.IPurgeRepository[T, ID]
 }
 
@@ -114,8 +112,8 @@ type Core[T domain.IEntity[ID], ID comparable] struct {
 	audit app.IAuditRepository
 
 	softDelete bool
-	restore    domaudited.IRestoreRepository[T, ID]
-	deleted    domaudited.IDeletedQueryRepository[T, ID]
+	restore    domcrud.IRestoreRepository[T, ID]
+	deleted    domcrud.IDeletedQueryRepository[T, ID]
 	purge      domcrud.IPurgeRepository[T, ID]
 }
 
@@ -174,9 +172,6 @@ func New[T domain.IEntity[ID], ID comparable](opts Options[T, ID]) (*Core[T, ID]
 		if depcheck.IsNil(opts.Restore) || depcheck.IsNil(opts.Deleted) || depcheck.IsNil(opts.Purge) {
 			return nil, errors.NewCode(errors.InvalidInput, "soft-delete application requires restore, deleted-query and purge ports")
 		}
-	}
-	if opts.SoftDelete && depcheck.IsNil(opts.Audit) {
-		return nil, errors.NewCode(errors.InvalidInput, "soft-delete application requires an audit store")
 	}
 	if !depcheck.IsNil(opts.Audit) {
 		if err := validateAuditDataSource(opts.Audit, opts.Repo, opts.Read); err != nil {

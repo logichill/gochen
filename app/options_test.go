@@ -5,11 +5,11 @@ import (
 	"testing"
 
 	"gochen/app"
-	"gochen/app/audited"
+	"gochen/app/audit"
 	"gochen/app/crud"
 	"gochen/app/eventsourced"
 	"gochen/auth"
-	domaudited "gochen/domain/audited"
+
 	domcrud "gochen/domain/crud"
 	domes "gochen/domain/eventsourced"
 	"gochen/errors"
@@ -53,9 +53,9 @@ func ExampleIDescriptorProvider() {
 
 var (
 	_ app.ITransactionRunner  = (*testkit.MemoryRepository[*note, int64])(nil)
-	_ app.IAuditRepository    = (*testkit.AuditedMemoryRepository[*domaudited.AuditedEntity[int64], int64])(nil)
+	_ app.IAuditRepository    = (*testkit.AuditedMemoryRepository[*domcrud.TrackedEntity[int64], int64])(nil)
 	_ app.IDescriptorProvider = (*crud.Application[*note, int64])(nil)
-	_                         = audited.Options[*domaudited.AuditedEntity[int64], int64]{Projector: app.Projector[*domaudited.AuditedEntity[int64]](nil)}
+	_                         = crud.Options[*domcrud.TrackedEntity[int64], int64]{Projector: app.Projector[*domcrud.TrackedEntity[int64]](nil)}
 	_                         = eventsourced.Options[*domes.EventSourcedAggregate[int64], int64]{Limits: app.Limits{MaxBulkSize: 10}}
 )
 
@@ -68,14 +68,14 @@ type auditSource struct {
 func (s auditSource) DataSourceID() string { return s.source }
 
 func TestAuditSourceValidationThroughPublicOptions(t *testing.T) {
-	repository, err := testkit.NewAuditedMemoryRepository[*domaudited.AuditedEntity[int64], int64](nil)
+	repository, err := testkit.NewAuditedMemoryRepository[*domcrud.TrackedEntity[int64], int64](nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, source := range []string{"", "other"} {
 		t.Run(source, func(t *testing.T) {
 			store := auditSource{IAuditRepository: repository, source: source}
-			options := crud.Options[*domaudited.AuditedEntity[int64], int64]{Resource: "note", Authorizer: auth.Allow(), Audit: store}
+			options := crud.Options[*domcrud.TrackedEntity[int64], int64]{Resource: "note", Authorizer: auth.Allow(), Audit: store}
 			if _, err := crud.NewApplication(repository, options); !errors.Is(err, errors.InvalidInput) {
 				t.Fatalf("write application accepted invalid audit source: %v", err)
 			}
@@ -84,8 +84,8 @@ func TestAuditSourceValidationThroughPublicOptions(t *testing.T) {
 			}
 		})
 	}
-	var nilStore *testkit.AuditedMemoryRepository[*domaudited.AuditedEntity[int64], int64]
-	if _, err := audited.NewApplication(repository, nilStore, audited.Options[*domaudited.AuditedEntity[int64], int64]{Resource: "note", Authorizer: auth.Allow()}); !errors.Is(err, errors.InvalidInput) {
+	var nilStore *testkit.AuditedMemoryRepository[*domcrud.TrackedEntity[int64], int64]
+	if _, err := audit.NewReader[int64](nilStore, repository, audit.Options{Resource: "note", Authorizer: auth.Allow()}); !errors.Is(err, errors.InvalidInput) {
 		t.Fatalf("audited application accepted typed nil audit store: %v", err)
 	}
 }

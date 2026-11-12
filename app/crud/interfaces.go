@@ -7,7 +7,7 @@ import (
 
 	"gochen/app/query"
 	"gochen/domain"
-	domaudited "gochen/domain/audited"
+
 	domcrud "gochen/domain/crud"
 )
 
@@ -43,12 +43,6 @@ type IReadApplication[T domain.IEntity[ID], ID comparable] interface {
 	Count(ctx context.Context) (int64, error)
 }
 
-// IAuditReader 声明独立的审计读取能力；资源查询不要求实现此接口。
-// 是否提供审计路由还须由 Descriptor 显式声明 audit_read。
-type IAuditReader[ID comparable] interface {
-	AuditTrail(ctx context.Context, id ID, offset, limit int) ([]domaudited.AuditRecord, error)
-}
-
 // IWriteApplication 声明标准写入用例端口。
 type IWriteApplication[T domain.IEntity[ID], ID comparable] interface {
 	Create(ctx context.Context, entity T) error
@@ -78,4 +72,3 @@ type IApplication[T domain.IEntity[ID], ID comparable] interface {
 var _ IApplication[domain.IEntity[int64], int64] = (*Application[domain.IEntity[int64], int64])(nil)
 
 var _ IReadApplication[domain.IEntity[int64], int64] = (*ReadApplication[domain.IEntity[int64], int64])(nil)
-var _ IAuditReader[int64] = (*ReadApplication[domain.IEntity[int64], int64])(nil)

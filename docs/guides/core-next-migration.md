@@ -6,10 +6,10 @@
 
 | 原入口/写法 | 候选入口 | 核心三仓内消费者 |
 | --- | --- | --- |
-| 公共 Options 暴露 execution.Limits | `app.Limits` | CRUD、audited、ES 与外部配置示例 |
-| CRUD 仓储嵌入 internal 事务端口 | `app.ITransactionRunner` | CRUD、audited、Runtime Repo、Contrib GORM 契约测试 |
+| 公共 Options 暴露 execution.Limits | `app.Limits` | CRUD、deletion、ES 与外部配置示例 |
+| CRUD 仓储嵌入 internal 事务端口 | `app.ITransactionRunner` | CRUD、deletion、Runtime Repo、Contrib GORM 契约测试 |
 | audited Projector 使用 internal 类型 | `app.Projector[T]` | audited 及共享执行实现 |
-| 审计只声明写接口、构造时另断言读接口 | `app.IAuditRepository`，组合读、写及数据源身份 | CRUD 可选审计、audited 必需审计；业务仓储同源检查保留 |
+| 审计只声明写接口、构造时另断言读接口 | `app.IAuditRepository`，只组合写入及数据源身份；独立查询使用 `audit.IAuditQueryStore` | CRUD 与 deletion 可选审计；业务仓储同源检查保留 |
 | `host.IDescriptorProvider` | `app.IDescriptorProvider` | Module、应用目录、REST |
 | `RouteRegistrar(func() *Routes)` | `RouteRegistrar(routes)` 或 `module.RouteRegistrarFunc(fn)` | Host、HTTP 共同契约测试、示例 |
 | `EventHandler(func() *Handler)` | `EventHandler(handler)` | typed Module 与冻结订阅清单 |
@@ -32,13 +32,13 @@
 
 ## 数据与执行语义不变
 
-没有表/列、ID 编码、版本初值、审计字段、权限码、事件 type/schema/payload、snapshot/checkpoint/outbox 的迁移。
+没有表/列、ID 编码、审计字段、事件 type/schema/payload、snapshot/checkpoint/outbox 的迁移。ES 事件历史动作由 audit_read 改为 event_history_read，默认权限同步变化；部署端必须显式迁移原 ES 历史授权，不修改 CRUD 审计权限。详见[能力拆分迁移](business-capabilities-next.md)。
 
-CRUD 与 audited 继续共用私有执行骨架；业务审计仍在同一个事务回调中写入，失败回滚，提交后失败仍为 `AfterCommitError`。审计查询使用历史 Dimensions 快照。ES 继续使用独立授权、回放、重试和事件保存流程；原子 SaveAll 及快照装饰器边界不变。Transfer、多资源 Command、条件下推、租户与受保护维度没有改写。
+CRUD 与 deletion 共用私有执行骨架；业务审计仍在同一个事务回调中写入，失败回滚，提交后失败仍为 `AfterCommitError`。审计查询使用历史 Dimensions 快照。ES 继续使用独立授权、回放、重试和事件保存流程；原子 SaveAll 及快照装饰器边界不变。Transfer、多资源 Command、条件下推、租户与受保护维度没有改写。
 
 ## 下游影响清单
 
-本轮不修改 gochen-iam、gochen-llm、gochen-workflow、alife、ems、erp。它们切换候选前应只读检索上述旧符号、角色构造器以及自定义审计/事务实现。直接引用旧 assembly/Registry、传入角色工厂、使用值类型 Worker、审计存储缺读或数据源接口的消费者需要迁移。未使用这些入口的调用方也必须用匹配的三个仓库重新编译和跑契约测试。
+本轮不修改 gochen-iam、gochen-llm、gochen-workflow、alife、ems、erp。它们切换候选前应只读检索上述旧符号、角色构造器以及自定义审计/事务实现。直接引用旧 assembly/Registry、传入角色工厂、使用值类型 Worker、审计存储缺数据源接口的消费者需要迁移。未使用这些入口的调用方也必须用匹配的三个仓库重新编译和跑契约测试。
 
 本次只读读取三个下游 main 固定提交的全部 Go 文件（IAM 255、LLM 94、Workflow 34，共 383 文件），确认以下具体接入点：
 

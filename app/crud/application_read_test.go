@@ -3,6 +3,7 @@ package crud
 import (
 	"context"
 	"gochen/app"
+	appaudit "gochen/app/audit"
 	"gochen/app/query"
 	"gochen/auth"
 	"gochen/domain/meta"
@@ -308,10 +309,10 @@ func TestReadApplicationServesListAndQuery(t *testing.T) {
 	}
 }
 
-func TestAuditTrailRequiresAuditStore(t *testing.T) {
-	app, _ := newTestApplication(t, Options[*testEntity, int64]{})
-	if _, err := app.AuditTrail(context.Background(), 1, 0, 10); !errors.Is(err, errors.Unsupported) {
-		t.Fatalf("AuditTrail() error = %v, want Unsupported", err)
+func TestResourceHasNoOptionalAuditSurface(t *testing.T) {
+	application, _ := newTestApplication(t, Options[*testEntity, int64]{})
+	if _, ok := any(application).(appaudit.IAuditReader[int64]); ok {
+		t.Fatal("resource unexpectedly exposes audit reads")
 	}
 }
 
@@ -333,7 +334,11 @@ func TestApplicationWithAuditStoreWritesTrail(t *testing.T) {
 	if err := app.Create(ctx, entity); err != nil {
 		t.Fatalf("Create(): %v", err)
 	}
-	records, err := app.AuditTrail(ctx, entity.GetID(), 0, 10)
+	reader, err := appaudit.NewReader[int64](repo, repo, appaudit.Options{Resource: "doc", Authorizer: auth.Allow()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	records, err := reader.AuditTrail(ctx, entity.GetID(), 0, 10)
 	if err != nil {
 		t.Fatalf("AuditTrail(): %v", err)
 	}

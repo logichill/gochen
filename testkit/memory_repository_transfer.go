@@ -2,13 +2,13 @@ package testkit
 
 import (
 	"context"
+	"gochen/domain"
 	"math"
 	"reflect"
 	"time"
 
 	"gochen/contextx"
-	"gochen/domain"
-	"gochen/domain/audited"
+
 	"gochen/domain/crud"
 	"gochen/domain/meta"
 	"gochen/domain/spec"
@@ -104,7 +104,7 @@ func (r *MemoryRepository[T, ID]) Transfer(ctx context.Context, id ID, expectedV
 		if len(actualChanges) == 0 {
 			return errors.NewCode(errors.InvalidInput, "transfer has no actual dimension change")
 		}
-		if actor, ok := any(after).(audited.IAuditable); ok {
+		if actor, ok := any(after).(domain.IChangeInfo); ok {
 			actor.SetUpdatedInfo(contextx.Operator(ctx), time.Now())
 		}
 		setter, ok := any(after).(domain.ISettableVersion)

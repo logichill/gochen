@@ -17,7 +17,7 @@
 // # 子包。
 //
 //   - [domain/crud] — 简单 CRUD 实体与仓储 ports
-//   - [domain/audited] — 审计/软删除能力与仓储 ports
+//   - 可选的 ChangeInfo / DeletionState 字段组件；审计记录由独立 audit 包提供。
 //   - [domain/eventsourced] — 事件溯源聚合根与仓储 ports
 //
 // # 分层边界。

@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"gochen/app/query"
-	domaudited "gochen/domain/audited"
+
 	"gochen/domain/spec"
 )
 
@@ -45,13 +45,4 @@ func (a *readApplication[T, ID]) Read(
 	fn func(ctx context.Context, s spec.Spec) error,
 ) error {
 	return a.core.Read(ctx, action, fn)
-}
-
-// AuditTrail 返回实体的审计轨迹；未配置审计存储时返回 Unsupported。
-func (a *readApplication[T, ID]) AuditTrail(
-	ctx context.Context,
-	id ID,
-	offset, limit int,
-) ([]domaudited.AuditRecord, error) {
-	return a.core.AuditTrail(ctx, id, offset, limit)
 }

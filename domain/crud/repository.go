@@ -1,6 +1,6 @@
 // Package crud 提供面向简单 CRUD 场景的仓储抽象。
 // 该包承载通用 CRUD 仓储接口与查询/批量扩展，
-// audited 场景可在此基础上扩展审计与软删能力；eventsourced 与 CRUD 并行建模。
+// 可在此基础上分别选择审计记录与软删除能力；eventsourced 与 CRUD 并行建模。
 package crud
 
 import (

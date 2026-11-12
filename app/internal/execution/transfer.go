@@ -8,9 +8,9 @@ import (
 	"strings"
 
 	"gochen/app/operation"
+	domaudited "gochen/audit"
 	"gochen/auth"
 	"gochen/contextx"
-	domaudited "gochen/domain/audited"
 	domcrud "gochen/domain/crud"
 	"gochen/domain/meta"
 	"gochen/errors"

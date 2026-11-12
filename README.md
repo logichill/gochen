@@ -16,7 +16,7 @@ Gochen 是面向企业业务系统的 Go 框架，提供领域建模、应用服
 
 | 能力 | Core 包 |
 | --- | --- |
-| 领域建模与应用模板 | `domain`、`app/crud`、`app/audited`、`app/eventsourced` |
+| 领域建模与应用模板 | `domain`、`app/crud`、`audit`、`app/audit`、`app/deletion`、`app/eventsourced` |
 | 查询与写操作协议 | `app/query`、`app/operation` |
 | 授权声明、策略执行与治理 | `auth`；权限码工具 `auth/action`、范围资料 `auth/scoped` |
 | 事件驱动 | `eventing/store`、`eventing/bus`、`eventing/outbox`、`eventing/projection` |

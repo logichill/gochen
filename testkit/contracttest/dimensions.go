@@ -3,14 +3,14 @@ package contracttest
 
 import (
 	"context"
+	domcrud "gochen/domain/crud"
 	"reflect"
 	"testing"
 	"time"
 
 	"gochen/app"
 	"gochen/contextx"
-	"gochen/domain/audited"
-	"gochen/domain/crud"
+
 	"gochen/domain/meta"
 	"gochen/domain/spec"
 	"gochen/errors"
@@ -18,7 +18,7 @@ import (
 
 // Document 同时声明两个授权维度、可空值、mutable 分类与隔离。
 type Document struct {
-	audited.AuditedEntity[int64]
+	domcrud.TrackedEntity[int64]
 	Tenant     string  `json:"tenant" dim:"tenant"`
 	Department int64   `json:"department" dim:"department"`
 	Region     *string `json:"region" dim:"region"`
@@ -28,11 +28,11 @@ type Document struct {
 
 // Repository 是本契约实际消费的仓储能力。
 type Repository interface {
-	crud.IRepository[*Document, int64]
-	crud.IBulkOperations[*Document, int64]
-	crud.IPurgeRepository[*Document, int64]
-	audited.IRestoreRepository[*Document, int64]
-	crud.ITransferRepository[*Document, int64]
+	domcrud.IRepository[*Document, int64]
+	domcrud.IBulkOperations[*Document, int64]
+	domcrud.IPurgeRepository[*Document, int64]
+	domcrud.IRestoreRepository[*Document, int64]
+	domcrud.ITransferRepository[*Document, int64]
 	WithinTx(context.Context, func(context.Context) error) error
 	app.IExecutionDescriptorProvider
 }
@@ -185,10 +185,10 @@ func RunDimensions(t *testing.T, factory func(*testing.T) Repository) {
 		must(t, r.Create(ctx, entity, spec.All()))
 		using := spec.Eq(meta.ByDimension("department"), 1)
 		check := spec.And(spec.Eq(meta.ByDimension("department"), 2), spec.Eq(meta.ByDimension("region"), "north"))
-		changes := []crud.DimensionChange{{Dimension: "department", Value: "2"}, {Dimension: "region", Value: "north"}}
+		changes := []domcrud.DimensionChange{{Dimension: "department", Value: "2"}, {Dimension: "region", Value: "north"}}
 		_, err := r.Transfer(ctx, entity.ID, entity.Version, changes, using, check)
 		code(t, err, errors.FailedPrecondition)
-		var result crud.TransferResult[*Document]
+		var result domcrud.TransferResult[*Document]
 		must(t, r.WithinTx(ctx, func(txCtx context.Context) error {
 			var err error
 			result, err = r.Transfer(txCtx, entity.ID, entity.Version, changes, using, check)
@@ -212,7 +212,7 @@ func RunDimensions(t *testing.T, factory func(*testing.T) Repository) {
 			_, err := r.Transfer(txCtx, entity.ID, stored.Version, changes, spec.All(), spec.All())
 			return err
 		}), errors.InvalidInput)
-		for _, invalid := range [][]crud.DimensionChange{
+		for _, invalid := range [][]domcrud.DimensionChange{
 			{{Dimension: "tenant", Value: "tenant-b"}}, {{Dimension: "classification", Value: true}},
 			{{Dimension: "department", Value: 3}, {Dimension: "department", Value: 4}},
 		} {
@@ -222,7 +222,7 @@ func RunDimensions(t *testing.T, factory func(*testing.T) Repository) {
 			}), errors.InvalidInput)
 		}
 		code(t, r.WithinTx(ctx, func(txCtx context.Context) error {
-			_, err := r.Transfer(txCtx, entity.ID, stored.Version, []crud.DimensionChange{{Dimension: "department", Value: 3}}, spec.All(), check)
+			_, err := r.Transfer(txCtx, entity.ID, stored.Version, []domcrud.DimensionChange{{Dimension: "department", Value: 3}}, spec.All(), check)
 			return err
 		}), errors.Forbidden)
 	})
@@ -232,7 +232,7 @@ func RunDimensions(t *testing.T, factory func(*testing.T) Repository) {
 		must(t, r.Create(ctx, entity, spec.All()))
 		marker := errors.NewCode(errors.Internal, "rollback marker")
 		err := r.WithinTx(ctx, func(txCtx context.Context) error {
-			_, err := r.Transfer(txCtx, entity.ID, entity.Version, []crud.DimensionChange{{Dimension: "department", Value: 2}}, spec.All(), spec.All())
+			_, err := r.Transfer(txCtx, entity.ID, entity.Version, []domcrud.DimensionChange{{Dimension: "department", Value: 2}}, spec.All(), spec.All())
 			if err != nil {
 				return err
 			}
@@ -248,13 +248,13 @@ func RunDimensions(t *testing.T, factory func(*testing.T) Repository) {
 		}
 		for _, destination := range []int64{2, 1} {
 			must(t, r.WithinTx(ctx, func(txCtx context.Context) error {
-				result, err := r.Transfer(txCtx, entity.ID, stored.Version, []crud.DimensionChange{{Dimension: "department", Value: destination}}, spec.All(), spec.All())
+				result, err := r.Transfer(txCtx, entity.ID, stored.Version, []domcrud.DimensionChange{{Dimension: "department", Value: destination}}, spec.All(), spec.All())
 				stored = result.After
 				return err
 			}))
 		}
 		code(t, r.WithinTx(ctx, func(txCtx context.Context) error {
-			_, err := r.Transfer(txCtx, entity.ID, entity.Version, []crud.DimensionChange{{Dimension: "department", Value: 2}}, spec.All(), spec.All())
+			_, err := r.Transfer(txCtx, entity.ID, entity.Version, []domcrud.DimensionChange{{Dimension: "department", Value: 2}}, spec.All(), spec.All())
 			return err
 		}), errors.Concurrency)
 	})

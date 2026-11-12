@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"strings"
 
-	"gochen/domain/audited"
+	audited "gochen/audit"
 	"gochen/domain/spec"
 	"gochen/errors"
 )

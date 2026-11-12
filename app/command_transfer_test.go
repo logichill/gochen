@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"gochen/app"
-	"gochen/app/audited"
 	"gochen/app/crud"
 	"gochen/auth"
 	"gochen/contextx"
@@ -39,7 +38,7 @@ type commandTransferApplication interface {
 }
 
 func TestCommandExecutionRejectsTransferDuringAndAfterCommand(t *testing.T) {
-	for _, kind := range []string{"crud", "audited"} {
+	for _, kind := range []string{"crud", "with_audit"} {
 		t.Run(kind, func(t *testing.T) {
 			ctx, err := contextx.WithTenantID(t.Context(), "tenant")
 			if err != nil {
@@ -59,9 +58,7 @@ func TestCommandExecutionRejectsTransferDuringAndAfterCommand(t *testing.T) {
 			}
 			options := crud.Options[*contracttest.Document, int64]{Resource: "document", Actions: []auth.Action{{Name: "move", Kind: auth.KindTransfer, ReceiveAction: "receive", Dimensions: []meta.Dimension{"department"}}, {Name: "receive", Kind: auth.KindTransfer}}}
 			descriptor, err := crud.Describe(options, true)
-			if kind == "audited" {
-				descriptor, err = audited.Describe(audited.Options[*contracttest.Document, int64]{Options: options})
-			}
+
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -74,8 +71,8 @@ func TestCommandExecutionRejectsTransferDuringAndAfterCommand(t *testing.T) {
 			construct := func(grant *app.CommandGrant) (commandTransferApplication, error) {
 				opts := options
 				opts.CommandGrant = grant
-				if kind == "audited" {
-					return audited.NewApplication(repo, repo, audited.Options[*contracttest.Document, int64]{Options: opts})
+				if kind == "with_audit" {
+					opts.Audit = repo
 				}
 				return crud.NewApplication(repo, opts)
 			}

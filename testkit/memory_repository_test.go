@@ -4,27 +4,28 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	domcrud "gochen/domain/crud"
 	"testing"
 	"time"
 
-	"gochen/domain/audited"
-	"gochen/domain/crud"
+	audited "gochen/audit"
+
 	"gochen/domain/spec"
 	"gochen/errors"
 )
 
 type memoryEntity struct {
-	crud.Entity[int64]
+	domcrud.Entity[int64]
 	Name string
 }
 
 type stringMemoryEntity struct {
-	crud.Entity[string]
+	domcrud.Entity[string]
 	Name string
 }
 
 type auditedMemoryEntity struct {
-	audited.AuditedEntity[int64]
+	domcrud.TrackedEntity[int64]
 	Name string
 }
 
@@ -113,8 +114,8 @@ func TestMemoryRepositoryBulkUpdateIsAtomic(t *testing.T) {
 	}
 
 	err := repository.UpdateBulk(ctx, []*memoryEntity{
-		{Entity: crud.Entity[int64]{ID: first.ID}, Name: "changed"},
-		{Entity: crud.Entity[int64]{ID: 99}, Name: "missing"},
+		{Entity: domcrud.Entity[int64]{ID: first.ID}, Name: "changed"},
+		{Entity: domcrud.Entity[int64]{ID: 99}, Name: "missing"},
 	}, spec.All())
 	if !errors.Is(err, errors.NotFound) {
 		t.Fatalf("update all error = %v; want NotFound", err)

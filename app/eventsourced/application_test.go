@@ -40,7 +40,7 @@ func newApplicationRepository(t *testing.T) (*EventSourcedRepository[*testAggreg
 	return repo, events
 }
 
-func TestApplicationExecuteWritesAuditMetadataAndAuditTrail(t *testing.T) {
+func TestApplicationExecuteWritesAuditMetadataAndEventHistory(t *testing.T) {
 	ctx := context.Background()
 	repo, events := newApplicationRepository(t)
 	app, err := NewApplication[*testAggregate, int64](repo, Options[*testAggregate, int64]{
@@ -81,7 +81,7 @@ func TestApplicationExecuteWritesAuditMetadataAndAuditTrail(t *testing.T) {
 	action, _ := stored[1].GetMetadata().GetString(contextx.MetadataActionKey)
 	require.Equal(t, ActionUpdate, action)
 
-	trail, err := app.AuditTrail(ctx, 1, 0, 10)
+	trail, err := app.EventHistory(ctx, 1, 0, 10)
 	require.NoError(t, err)
 	require.Len(t, trail, 2)
 	require.Equal(t, "alice", trail[1].ActorID)
@@ -351,7 +351,7 @@ func TestApplicationRejectsNamedVocabulary(t *testing.T) {
 	require.ErrorIs(t, err, errors.Internal)
 }
 
-func TestApplicationAuditTrailRejectsNonBoundarySpec(t *testing.T) {
+func TestApplicationEventHistoryRejectsNonBoundarySpec(t *testing.T) {
 	ctx := context.Background()
 	repo, events := newApplicationRepository(t)
 	authorizer := &specAuthorizer{
@@ -364,7 +364,7 @@ func TestApplicationAuditTrailRejectsNonBoundarySpec(t *testing.T) {
 		History:    events,
 	})
 	require.NoError(t, err)
-	_, err = app.AuditTrail(ctx, 1, 0, 10)
+	_, err = app.EventHistory(ctx, 1, 0, 10)
 	require.Truef(t, errors.Is(err, errors.Internal), "audit spec must only reference boundary roles: %v", err)
 }
 

@@ -11,7 +11,7 @@ import (
 )
 
 // ReadApplication 编排只读用例，不提供写入、动作执行或归属迁移方法。
-// 配置 Options.Audit 时可通过 IAuditReader 读取审计轨迹。
+// 审计读取由独立的 app/audit.Reader 提供。
 type ReadApplication[T domain.IEntity[ID], ID comparable] struct {
 	readApplication[T, ID]
 }
@@ -23,7 +23,7 @@ type readApplication[T domain.IEntity[ID], ID comparable] struct {
 
 // NewReadApplication 创建只读 CRUD 应用。
 //
-// 标准动作只有 read / list；配置 Options.Audit 时另加 audit_read。
+// 标准动作只有 read / list。
 func NewReadApplication[T domain.IEntity[ID], ID comparable](
 	repo IReadRepository[T, ID],
 	options Options[T, ID],
@@ -31,11 +31,12 @@ func NewReadApplication[T domain.IEntity[ID], ID comparable](
 	if depcheck.IsNil(repo) {
 		return nil, errors.NewCode(errors.InvalidInput, "repository cannot be nil")
 	}
-	audits := options.Audit
-	if err := rejectUndeclaredAudit(options.Actions, audits); err != nil {
-		return nil, err
+	for _, action := range options.Actions {
+		if action.Name == execution.ActionAuditRead {
+			return nil, errors.NewCode(errors.InvalidInput, "audit_read belongs to the independent audit reader")
+		}
 	}
-	defaults, err := standardActions(options.Resource, options.ActionPermissions, false, !depcheck.IsNil(audits))
+	defaults, err := standardActions(options.Resource, options.ActionPermissions, false, canDelete[T, ID]())
 	if err != nil {
 		return nil, err
 	}
@@ -50,6 +51,7 @@ func NewReadApplication[T domain.IEntity[ID], ID comparable](
 		Limits:       options.Limits,
 		Read:         repo,
 		Audit:        options.Audit,
+		Projector:    options.Projector,
 	})
 	if err != nil {
 		return nil, err

@@ -2,11 +2,12 @@ package execution
 
 import (
 	"context"
+	domain "gochen/domain"
 
 	"gochen/app/operation"
+	domaudited "gochen/audit"
 	"gochen/auth"
 	"gochen/contextx"
-	domaudited "gochen/domain/audited"
 	"gochen/errors"
 	"gochen/internal/depcheck"
 )
@@ -266,9 +267,9 @@ func (c *Core[T, ID]) Restore(ctx context.Context, id ID, opts ...ExecOption) (T
 		if err != nil {
 			return err
 		}
-		audited, ok := any(entity).(domaudited.IAuditedEntity[ID])
+		audited, ok := any(entity).(domain.ISoftDeletable)
 		if !ok {
-			return errors.NewCode(errors.Internal, "entity does not implement audited.IAuditedEntity")
+			return errors.NewCode(errors.Internal, "entity does not implement domain.ISoftDeletable")
 		}
 		if !audited.IsDeleted() {
 			return errors.NewCode(errors.Conflict, "entity not deleted").

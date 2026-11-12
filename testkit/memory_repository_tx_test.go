@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
+	audited "gochen/audit"
 	"gochen/contextx"
-	"gochen/domain/audited"
 	"gochen/domain/spec"
 	"gochen/errors"
 )
