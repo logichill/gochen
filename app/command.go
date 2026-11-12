@@ -84,6 +84,9 @@ func NewCommand[Input, Access, Output any](options CommandOptions[Input, Access,
 // Execute 授权所有资源后运行受保护业务函数，结束时撤销访问能力。
 func (c *Command[Input, Access, Output]) Execute(ctx context.Context, input Input) (Output, error) {
 	var zero Output
+	if c == nil || len(c.options.Resources) == 0 {
+		return zero, errors.NewCode(errors.InvalidInput, "command is not initialized")
+	}
 	if ctx == nil {
 		return zero, errors.NewCode(errors.InvalidInput, "command context is required")
 	}
@@ -216,6 +219,9 @@ func (g *CommandGrant) check(ctx context.Context) error {
 
 // AuthorizationBinding 返回同一入口全部资源的执行绑定，供 HTTP、命令或 Worker 清单核对。
 func (c *Command[Input, Access, Output]) AuthorizationBinding() (auth.EntryBinding, error) {
+	if c == nil || len(c.options.Resources) == 0 {
+		return auth.EntryBinding{}, errors.NewCode(errors.InvalidInput, "command is not initialized")
+	}
 	var primary auth.EntryBinding
 	for i, resource := range c.options.Resources {
 		plan, _ := resource.Authorizer.Plan()

@@ -258,3 +258,15 @@ func TestCommandRejectsFactOutsideIntentAndEmptyWriteScopeBeforeEffects(t *testi
 		})
 	}
 }
+
+func TestCommandRejectsUninitializedReceiver(t *testing.T) {
+	var missing *app.Command[struct{}, struct{}, struct{}]
+	for _, command := range []*app.Command[struct{}, struct{}, struct{}]{missing, new(app.Command[struct{}, struct{}, struct{}])} {
+		if _, err := command.Execute(t.Context(), struct{}{}); !errors.Is(err, errors.InvalidInput) {
+			t.Fatalf("uninitialized execution must return InvalidInput: %v", err)
+		}
+		if _, err := command.AuthorizationBinding(); !errors.Is(err, errors.InvalidInput) {
+			t.Fatalf("uninitialized metadata must return InvalidInput: %v", err)
+		}
+	}
+}

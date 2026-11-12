@@ -24,13 +24,13 @@ CRUD / Audited 的 `Transfer` 接收调用方版本和目标归属，分别授�
 
 ## CRUD 与审计实现的文件组织
 
-`crud` 与 `audited` 在各自的 `application.go` 定义应用和构造器，共享 `app/internal/execution` 的读写、批量、生命周期和审计执行骨架。`crud/application_read.go` 与 `application_write.go` 提供公共入口；`interfaces.go`、`options.go`、`hooks.go` 承载契约与配置。
+`crud` 与 `audited` 在各自的 `application.go` 定义应用和构造器，共享 `app/internal/execution` 的读写、批量、生命周期和审计执行骨架。`crud/read_application.go` 定义只读应用，`read_application_read.go` 与 `application_write.go` 提供读写入口；`interfaces.go`、`options.go`、`hooks.go` 承载契约与配置。
 
 ## CRUD 装配
 
-`crud.NewApplication(repository, options)` 返回 `(*Application[T, ID], error)`。仓储须实现 `crud.Repository` 的读写、查询和事务端口；只读应用使用 `NewReadApplication` 和 `IReadRepository`。
+`crud.NewApplication(repository, options)` 返回 `(*Application[T, ID], error)`。仓储须实现 `crud.Repository` 的读写、查询和事务端口；只读应用使用 `NewReadApplication` 和 `IReadRepository`，返回 `(*ReadApplication[T, ID], error)`；公开类型不提供 Create、Update、Delete、Execute 或 Transfer 等写入口。`Application` 与 `ReadApplication` 通过非导出的读取实现复用授权与查询语义，外部不能替换已绑定的执行核心。
 
-`crud.Options[T, ID]` 以值传入，要求显式配置 `Resource` 与 `Authorizer`，并在构造时冻结动作、Hooks、校验器和配额。闭包引用对象的并发安全由调用方保证。`IApplication` 组合读写、批量执行与元数据端口；标准动作由构造器生成，自定义动作通过 `Options.Actions` 声明。
+`crud.Options[T, ID]` 以值传入，要求显式配置 `Resource` 与 `Authorizer`，并在构造时冻结动作、Hooks、校验器和配额。闭包引用对象的并发安全由调用方保证。`IApplication` 组合读写、批量执行与元数据端口；`IReadApplication` 只要求资源查询，`IAuditReader[ID]` 独立表达审计读取。具体 CRUD 应用保留可选的 `AuditTrail`，配置 `Options.Audit` 才声明 `audit_read`，没有配置时直接调用仍返回 Unsupported。标准动作由构造器生成，自定义动作通过 `Options.Actions` 声明。
 
 `List` / `Query` 按应用上限规范分页。`QueryCount` 与 `Query` 使用相同的 Filters/Advanced 和列表授权；计数忽略分页、排序和投影。`Count` 统计全部可见实体。
 
@@ -118,7 +118,7 @@ Hooks 以动作名为键，标准写动作使用 `create` / `update` / `delete`�
 
 ## 接入迁移
 
-- 查询端口统一为 `IReadApplication` 的 List/Query/Count/QueryCount；批量操作使用 `ExecuteBulk` / `ExecuteNewBulk` / `DeleteBulk`。
+- 查询端口为 `IReadApplication` 的 Get/List/Query/Count/QueryCount，审计调用方显式依赖 `IAuditReader`。`NewReadApplication` 的返回类型改为 `*ReadApplication`，不再接受将只读结果赋给 `*Application` 或 `IApplication`；批量写操作使用完整应用的 `ExecuteBulk` / `ExecuteNewBulk` / `DeleteBulk`。
 - 构造配置使用 `crud.Options` / `audited.Options`，业务批量与分页配额由 `Options.Limits` 设置。
 - Purge / Restore 的业务校验与副作用配置在各自动作的 Stage。
 - REST 使用 `Mount` / `Action`；HTTP 请求体验证和批量限制分别使用 `WithValidator`、`WithMaxBulkSize`。

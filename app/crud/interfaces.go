@@ -41,6 +41,11 @@ type IReadApplication[T domain.IEntity[ID], ID comparable] interface {
 	Query(ctx context.Context, opts query.QueryOptions) ([]T, error)
 	QueryCount(ctx context.Context, opts query.QueryOptions) (int64, error)
 	Count(ctx context.Context) (int64, error)
+}
+
+// IAuditReader 声明独立的审计读取能力；资源查询不要求实现此接口。
+// 是否提供审计路由还须由 Descriptor 显式声明 audit_read。
+type IAuditReader[ID comparable] interface {
 	AuditTrail(ctx context.Context, id ID, offset, limit int) ([]domaudited.AuditRecord, error)
 }
 
@@ -62,8 +67,7 @@ type IActionExecutor[T domain.IEntity[ID], ID comparable] interface {
 
 // IApplication 组合读写、执行与元数据，是通用 CRUD 应用的完整契约。
 //
-// 传输层（如 rest）依赖这个接口而不是自己声明一份副本：接口归 app 层所有，
-// 新增用例端口时不必逐个同步框架内的副本。
+// 调用方可以组合所需的窄接口；审计读取由独立的 IAuditReader 表达。
 type IApplication[T domain.IEntity[ID], ID comparable] interface {
 	IDescriptorProvider
 	IReadApplication[T, ID]
@@ -72,3 +76,6 @@ type IApplication[T domain.IEntity[ID], ID comparable] interface {
 }
 
 var _ IApplication[domain.IEntity[int64], int64] = (*Application[domain.IEntity[int64], int64])(nil)
+
+var _ IReadApplication[domain.IEntity[int64], int64] = (*ReadApplication[domain.IEntity[int64], int64])(nil)
+var _ IAuditReader[int64] = (*ReadApplication[domain.IEntity[int64], int64])(nil)

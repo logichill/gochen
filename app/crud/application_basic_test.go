@@ -139,12 +139,14 @@ func TestNewReadApplicationOnlyDeclaresReadActions(t *testing.T) {
 		}
 	}
 
-	ctx := context.Background()
-	if err := app.Create(ctx, &testEntity{Name: "x"}); !errors.Is(err, errors.Forbidden) {
-		t.Fatalf("read application Create() error = %v, want Forbidden", err)
+	if _, ok := any(app).(IWriteApplication[*testEntity, int64]); ok {
+		t.Fatal("read application exposes standard writes")
 	}
-	if err := app.Delete(ctx, 1); !errors.Is(err, errors.Forbidden) {
-		t.Fatalf("read application Delete() error = %v, want Forbidden", err)
+	if _, ok := any(app).(IActionExecutor[*testEntity, int64]); ok {
+		t.Fatal("read application exposes write action execution")
+	}
+	if _, ok := any(app).(ITransferApplication[*testEntity, int64]); ok {
+		t.Fatal("read application exposes transfer")
 	}
 
 	if _, err := NewReadApplication[*testEntity, int64](nil, Options[*testEntity, int64]{
