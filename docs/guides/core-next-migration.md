@@ -40,7 +40,13 @@ CRUD 与 audited 继续共用私有执行骨架；业务审计仍在同一个事
 
 本轮不修改 gochen-iam、gochen-llm、gochen-workflow、alife、ems、erp。它们切换候选前应只读检索上述旧符号、角色构造器以及自定义审计/事务实现。直接引用旧 assembly/Registry、传入角色工厂、使用值类型 Worker、审计存储缺读或数据源接口的消费者需要迁移。未使用这些入口的调用方也必须用匹配的三个仓库重新编译和跑契约测试。
 
-此清单是公开符号级影响范围，不宣称已编译或完成外部业务仓迁移。待用户决定切换范围后，另做逐仓清点、适配和验证。
+本次只读读取三个下游 main 固定提交的全部 Go 文件（IAM 255、LLM 94、Workflow 34，共 383 文件），确认以下具体接入点：
+
+- [IAM module.go:96–109](https://github.com/logichill/gochen-iam/blob/43941009b58c5ecee20615cce6322ee7e4bc96a5/module.go#L96-L109)：AuthRoutes、User/Role/Group/Tenant/Scope/Menu Routes 和 authConfigValidator 都通过旧工厂登记。
+- [LLM module.go:43–50](https://github.com/logichill/gochen-llm/blob/942f53c370c1a159c6b0c9e7ba91f4e938b78f9f/module.go#L43-L50)：路由和 ProviderManager/ChatService Worker 仍传工厂；两个测试 [module_chat_entries_test.go](https://github.com/logichill/gochen-llm/blob/942f53c370c1a159c6b0c9e7ba91f4e938b78f9f/module_chat_entries_test.go#L100-L106)、[module_provider_entries_test.go](https://github.com/logichill/gochen-llm/blob/942f53c370c1a159c6b0c9e7ba91f4e938b78f9f/module_provider_entries_test.go#L77-L87) 直接引用旧 assembly。
+- [Workflow module.go:23](https://github.com/logichill/gochen-workflow/blob/56d6051d720887deb8c1d1950702bab440f72670/module.go#L23)：RouteRegistrar 传入 httpapi.NewRegistrar 工厂。
+
+上述 Go 文件未发现旧 host.Registry/IDescriptorProvider、internal execution 配置、EventHandler/Projection 或明确 audited 接入引用；这不证明所有自定义审计实现都满足新接口。alife、ems、erp 的仓库读取返回 404，未访问，不推断其状态。没有编译或运行任何下游测试，也未盘点非 Go 文档引用。待用户决定切换范围后，另做适配和验证。
 
 ## 候选检出与验证
 
