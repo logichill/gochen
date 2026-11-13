@@ -8,12 +8,11 @@
 | --- | --- |
 | `app/crud` | CRUD、校验、查询分页、批量操作与 Hooks |
 | `app/crud/audit` | 独立的审计历史读取 |
-| `app/crud/deletion` | 可选软删除、恢复、永久删除与已删除查询 |
 | `app/eventsourced` | 事件溯源仓储、命令用例与历史查询；持久化适配位于 eventstore 子包，订阅辅助位于 subscriber 子包 |
 | `app/query` | Filter、QuerySchema、分页、排序与字段选择协议 |
 | `app/operation` | 写操作结果、状态跟踪；SSE 适配位于 Runtime |
 
-`crud`、`deletion`、`audit`、`eventsourced` 通过 `Options.Authorizer` 接收 `auth.IAuthorizer`；授权决策中的 `spec.Spec` 交给仓储执行，详见[分层授权](../docs/architecture/layered-authz.md)。
+`crud`、`audit`、`eventsourced` 通过 `Options.Authorizer` 接收 `auth.IAuthorizer`；授权决策中的 `spec.Spec` 交给仓储执行，详见[分层授权](../docs/architecture/layered-authz.md)。
 
 ## 授权与资源契约
 
@@ -25,15 +24,15 @@ CRUD 的 `Transfer` 接收调用方版本和目标归属，分别授权转出与
 
 ## CRUD 与审计实现的文件组织
 
-`crud` 与 `crud/deletion` 在各自的 `application.go` 定义应用和构造器，共享 `app/internal/execution` 的读写、批量、生命周期和审计执行骨架。`crud/read_application.go` 定义只读应用，`read_application_read.go` 与 `application_write.go` 提供读写入口；`interfaces.go`、`options.go`、`hooks.go` 承载契约与配置。`crud/audit/reader.go` 独立定义历史查询接口、配置和构造器。
+`crud/application.go` 定义统一资源应用和构造器，删除生命周期与普通写入共享 `app/internal/execution` 的读写、批量、生命周期和审计执行骨架。`crud/read_application.go` 定义只读应用，`read_application_read.go` 与 `application_write.go` 提供普通读写入口，`application_lifecycle.go` 承载删除、恢复、永久清除、回收站和冻结删除动作；`interfaces.go`、`options.go`、`hooks.go` 承载契约与配置。`crud/audit/reader.go` 独立定义历史查询接口、配置和构造器。
 
-两个可选能力归入 CRUD 子树，但仍由组合根分别构造和授权，`app/crud` 不依赖这两个子包。审计记录和存储契约仍在顶级 `gochen/audit`，执行骨架不迁出 `app/internal/execution`。
+删除生命周期由统一 CRUD Application 构造并冻结；独立审计历史由组合根单独构造和授权，`app/crud` 不依赖 `app/crud/audit`。审计记录和存储契约仍在顶级 `gochen/audit`，执行骨架不迁出 `app/internal/execution`。
 
 ## CRUD 装配
 
 `crud.NewApplication(repository, options)` 返回 `(*Application[T, ID], error)`。仓储须实现 `crud.Repository` 的读写、查询和事务端口；只读应用使用 `NewReadApplication` 和 `IReadRepository`，返回 `(*ReadApplication[T, ID], error)`；公开类型不提供 Create、Update、Delete、Execute 或 Transfer 等写入口。`Application` 与 `ReadApplication` 通过非导出的读取实现复用授权与查询语义，外部不能替换已绑定的执行核心。
 
-`crud.Options[T, ID]` 以值传入，要求显式配置 `Resource` 与 `Authorizer`，并在构造时冻结动作、Hooks、校验器和配额。闭包引用对象的并发安全由调用方保证。`IApplication` 组合读写、批量执行与元数据端口；`IReadApplication` 只要求资源查询，`IAuditReader[ID]` 独立表达审计读取。CRUD 的具体类型也不含 `AuditTrail`；`Options.Audit` 只配置同事务写入，历史读取通过独立 `app/crud/audit.Reader` 声明 `audit_read`。标准动作由构造器生成，自定义动作通过 `Options.Actions` 声明。
+`crud.Options[T, ID]` 以值传入，要求显式配置 `Resource`、`Authorizer` 与写应用的 `DeleteMode`，并在构造时冻结动作、Hooks、校验器和配额。闭包引用对象的并发安全由调用方保证。`IApplication` 组合读写、批量执行与元数据端口；`IReadApplication` 只要求资源查询，`IAuditReader[ID]` 独立表达审计读取。CRUD 的具体类型也不含 `AuditTrail`；`Options.Audit` 只配置同事务写入，历史读取通过独立 `app/crud/audit.Reader` 声明 `audit_read`。标准动作由构造器生成，自定义动作通过 `Options.Actions` 声明。
 
 `List` / `Query` 按应用上限规范分页。`QueryCount` 与 `Query` 使用相同的 Filters/Advanced 和列表授权；计数忽略分页、排序和投影。`Count` 统计全部可见实体。
 
@@ -60,6 +59,7 @@ type User struct {
 func NewUsers(repo crud.Repository[*User, int64], authorizer auth.IAuthorizer) (*crud.Application[*User, int64], error) {
     return crud.NewApplication(repo, crud.Options[*User, int64]{
         Resource: "user",
+        DeleteMode: crud.DeletePurge,
         Authorizer: authorizer,
         Hooks: crud.Hooks[*User]{
             crud.ActionCreate: crud.Stage[*User]{
@@ -79,7 +79,7 @@ func NewUsers(repo crud.Repository[*User, int64], authorizer auth.IAuthorizer) (
 
 写入扩展统一通过构造参数 `Options.Hooks` 注入。REST 注册只配置传输行为，不修改应用；HTTP、Worker 和 CLI 调用同一应用时遵循同一组校验与钩子。
 
-Hooks 以动作名为键，标准写动作使用 `create` / `update` / `delete`，删除生命周期另有 `purge` / `restore`，自定义动作使用其声明名称。单条和批量共用 `Stage[T]` 的 `Before`、`After`、`PostCommit`。`ExecuteBulk` / `ExecuteNewBulk` 一次授权、一个事务，提交前失败整批回滚。
+Hooks 以动作名为键，标准写动作使用 `create` / `update`，软删用 `delete`，物理清除用 `purge`，恢复用 `restore`，自定义动作使用其声明名称。单条和批量共用 `Stage[T]` 的 `Before`、`After`、`PostCommit`。`ExecuteBulk` / `ExecuteNewBulk` 一次授权、一个事务，提交前失败整批回滚。
 
 | 阶段 | 执行位置 | 失败语义 |
 | --- | --- | --- |
@@ -87,7 +87,7 @@ Hooks 以动作名为键，标准写动作使用 `create` / `update` / `delete`�
 | `After` | 仓储写入后、事务提交前 | 在事务边界内回滚 |
 | `PostCommit` | 事务提交之后 | 不回滚已提交写入 |
 
-`PostCommit` 要求仓储实现 `app/crud.ITransactional`。通知、外部同步等副作用应在提交后执行；需要回滚保证的 Hook 应使用事务仓储。
+`PostCommit` 要求仓储实现 `app.ITransactionRunner`。通知、外部同步等副作用应在提交后执行；需要回滚保证的 Hook 应使用事务仓储。
 
 版本由 条件仓储根据写入前版本统一推进；审计信息设置保持版本。单次 Update 写入失败时恢复进入时的对象版本。批量或外层事务回滚后，调用方应重新读取实体，再发起后续操作；数据库回滚与调用方内存对象的恢复分别遵循具体仓储契约。
 
@@ -97,21 +97,27 @@ Hooks 以动作名为键，标准写动作使用 `create` / `update` / `delete`�
 
 `Purge` 的业务校验应使用 `GetWithDeleted` 读取记录，避免已软删除的实体被普通 `Get` 遮蔽。`Purge` / `Restore` 只执行各自显式配置的 Stage；空 Stage 不执行钩子，不回退到 `Delete` / `Update`。
 
+通用 `Read(action, fn)` 与四种 `Execute` 入口均在授权和回调前拒绝 delete / restore / purge / list_deleted / audit_read 等保留动作；普通 Get/Exists 固定使用 read，List/Query/QueryCount/Count 固定使用 list，只有专用 ListDeleted 使用 list_deleted。正常 list 与自定义列表动作不变。
+
+普通 `Update` / `Execute` / `ExecuteBulk` 冻结加载态的 IsDeleted、DeletedAt 与可取得的 DeletedBy；输入、命令回调、Before 和校验器不得改变删除态；普通更新同时冻结真实加载的 ID、期望版本和资源保护字段，最后一次校验后再次核对，违反时 Forbidden，整批事务回滚。显式 mutable 维度仍遵循原资源契约。普通 Create / ExecuteNew / ExecuteNewBulk 必须产出未删除实体（删除标记和归因为空），Before 与校验后再次核对，不能以出生即删绕过生命周期权限。仅保护删除状态，不冻结其它托管时间戳或修改归因；Delete / Restore / Purge 使用专用状态迁移管线。
+
 `Execute` / `ExecuteBulk` 先运行命令函数，再执行 `Before`，保证写前业务校验看到最终目标状态。更新按独立复制后的真实业务字段判断变化；字段 MarshalJSON 与审计 Projector 控制展示，隐藏字段的修改仍会持久化。无变化更新同样核对版本，合法 no-op 保持版本和审计记录数量。
 
-`Restore` 在事务内装载已删除实体并清除删除标记，再执行 `Restore.Before`、实体验证与仓储写入；写入后执行 `Restore.After`，提交后执行 `Restore.PostCommit`。清除内存实体的删除标记不等于恢复已持久化；任一提交前步骤失败都会回滚事务。
+`Restore` 在事务内装载已删除实体并清除删除标记，再执行 `Restore.Before`、实体验证与仓储写入；Before 后和最后一次实体验证后均核对真实加载的 ID、版本、资源维度和恢复态，禁止校验器重定向目标或重新软删；写入后执行 `Restore.After`，提交后执行 `Restore.PostCommit`。清除内存实体的删除标记不等于恢复已持久化；任一提交前步骤失败都会回滚事务。
 
-## 独立审计与删除生命周期
+## 独立审计与统一删除生命周期
 
 `crud.Options.Audit` 接受 `app.IAuditRepository`（审计写入及数据源身份），不要求实体带操作者或软删除字段。构造器验证业务仓储和审计存储同源，业务与审计仍在同一事务中提交；审计失败回滚业务。`Projector` 继续只接收展示副本。
 
 `app/crud/audit.NewReader[ID](queryStore, repository, options)` 独立绑定查询端口、资源有效元数据、`audit_read` 授权和分页。历史按记录自身的维度快照过滤，实体永久删除后仍可读。启用审计写入不会自动发布历史读取权限或路由。
 
-`deletion.NewApplication(repo, deletion.Options{Options: crud.Options{...}})` 只提供 Delete/DeleteBulk/Restore/Purge/ListDeleted。实体只需身份、版本和 `domain.ISoftDeletable`，不要求操作者字段或审计。需要审计时显式配置 `Options.Audit`，仍执行同源事务协议。
+`crud.Options.DeleteMode` 是写入应用必填配置：`crud.DeleteSoft` 使 Delete/DeleteBulk 只标记软删，重复调用保持 NotFound/Conflict，不会升级为物理清除；`crud.DeletePurge` 使它们进入完整 Purge 流程。零值或未知模式构造失败。类型实现 `ISoftDeletable` 不选择模式。构造后模式冻结，`DeleteAction()` 返回实际动作 delete 或 purge。
 
-当前 `deletion.Repository` 仍组合完整的 `crud.Repository` 与恢复、已删除查询和永久删除端口；`deletion.Options` 仍嵌入 `crud.Options`，非空 Actions 在构造期拒绝。此约束来自共享执行骨架的读写端口，不表示删除用例会调用 Create、物理 Delete、Query 或 QueryCount。最小端口拆分的后续范围与验收见[业务能力迁移边界](../docs/guides/business-capabilities-next.md#删除端口拆分后续范围)。
+Purge 始终物理清除，包括旧软删行；硬模式的 Delete 使用 purge 授权、钩子和审计，描述不声明 delete。硬模式旧 delete 权限覆盖和钩子必须迁移为 purge，不能只更改权限码而保留错误动作。软模式同时声明 delete 和 purge。
 
-CRUD 对软删除实体不声明 delete，直接调用其 Delete 也不会物理删除。删除动作由 deletion 独立拥有；永久删除只经 Purge。REST 使用 `rest.Resource(resource, rest.WithDeletion(trash), rest.WithAudit(history))` 明确组合，各动作由实际能力自己的授权器执行。同资源动作重复、不同资源混装和 nil 能力在挂载前拒绝。
+`EnableRestore` 与 `EnableDeletedQuery` 分别选择恢复和回收站读取，可在任一删除模式下管理旧软删记录。未启用时即使仓储有对应方法，Descriptor 也不声明动作，入口拒绝执行。所有写应用要求真实 `IPurgeRepository`；软实体还要求独立 `IDeletedReadRepository`，物理清除不强制 Restore。只读应用没有任何生命周期写入口，也不能配置删除模式或生命周期选项。
+
+删除能力不等于 HTTP 暴露。REST 默认普通 CRUD；恢复、回收站及显式永久清除路由须经 `rest.WithRoutes` 单独选择。`DELETE /:id` 与 bulk 使用 Application 的实际删除动作；`rest.WithAudit(history)` 继续独立组合历史读取。已移除独立 deletion 包与 WithDeletion，不保留别名或转发。
 
 审计记录要求可信 operator；调用方从可信身份通过 contextx 注入，或配置 REST WithOperatorExtractor。独立修改归因字段沿用仓储的上下文 / DefaultActor 填充规则，默认仓储 actor 为 system；这不等于已认证用户。纯删除状态不要求 operator。`domain.ChangeInfo` 与 `domain.DeletionState` 可分别嵌入；`domain/crud.TrackedEntity` 只是保留原字段形状的便利组合，不是接入门槛。
 
@@ -126,7 +132,7 @@ CRUD 对软删除实体不声明 delete，直接调用其 Delete 也不会物理
 ## 接入迁移
 
 - 查询端口为 `IReadApplication` 的 Get/List/Query/Count/QueryCount，审计调用方显式依赖 `app/crud/audit.IAuditReader`。`NewReadApplication` 的返回类型改为 `*ReadApplication`，不再接受将只读结果赋给 `*Application` 或 `IApplication`；批量写操作使用完整应用的 `ExecuteBulk` / `ExecuteNewBulk` / `DeleteBulk`。
-- 构造配置使用 `crud.Options` / `deletion.Options`，业务批量与分页配额由 `Options.Limits` 设置。
+- 构造配置使用 `crud.Options`，业务批量与分页配额由 `Options.Limits` 设置。
 - Purge / Restore 的业务校验与副作用配置在各自动作的 Stage。
 - REST 使用 `Resource` / `Bind`；HTTP 请求体验证和批量限制分别使用 `WithValidator`、`WithMaxBulkSize`。
 - 仓储读取和写入显式接收 `spec.Spec`，隔离和资源由构造选项 `WithIsolation` / `WithResourceKind` 声明。

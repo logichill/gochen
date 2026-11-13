@@ -1,4 +1,4 @@
-package deletion
+package crud_test
 
 import (
 	"context"
@@ -35,12 +35,13 @@ func TestDeletionWithoutAuditOrMutationFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	options := appcrud.Options[*draft, int64]{Resource: "draft", Authorizer: auth.Allow()}
+	options := appcrud.Options[*draft, int64]{Resource: "draft", Authorizer: auth.Allow(), DeleteMode: appcrud.DeleteSoft, EnableRestore: true, EnableDeletedQuery: true}
 	resource, err := appcrud.NewApplication(repo, options)
 	if err != nil {
 		t.Fatal(err)
 	}
-	trash, err := NewApplication(repo, Options[*draft, int64]{Options: options})
+	trash := resource
+	err = nil
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,11 +50,8 @@ func TestDeletionWithoutAuditOrMutationFields(t *testing.T) {
 	if err := resource.Create(ctx, entity); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := resource.Descriptor().PermissionFor("delete"); ok {
-		t.Fatal("resource declares deletion without its capability")
-	}
-	if err := resource.Delete(ctx, entity.ID); !errors.Is(err, errors.Forbidden) {
-		t.Fatalf("resource delete must fail safely: %v", err)
+	if _, ok := resource.Descriptor().PermissionFor("delete"); !ok {
+		t.Fatal("soft-delete resource must declare delete")
 	}
 	original := entity.Version
 	if err := trash.Delete(ctx, entity.ID); err != nil {
@@ -92,7 +90,7 @@ func TestAuditWithoutDeletionAndRollbackOnFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	options := appcrud.Options[*approval, int64]{Resource: "approval", Authorizer: auth.Allow(), Audit: repo}
+	options := appcrud.Options[*approval, int64]{DeleteMode: appcrud.DeletePurge, Resource: "approval", Authorizer: auth.Allow(), Audit: repo}
 	resource, err := appcrud.NewApplication(repo, options)
 	if err != nil {
 		t.Fatal(err)
@@ -137,6 +135,7 @@ func TestAuditWithoutDeletionAndRollbackOnFailure(t *testing.T) {
 	if err != nil || len(records) != 2 {
 		t.Fatalf("history after physical deletion: %v %v", records, err)
 	}
+	options.DeleteMode = 0
 	readOnly, err := appcrud.NewReadApplication(repo, options)
 	if err != nil {
 		t.Fatal(err)
@@ -154,12 +153,13 @@ func TestDeletionWithoutAuditPreservesAvailableOperator(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	options := appcrud.Options[*draft, int64]{Resource: "draft", Authorizer: auth.Allow()}
+	options := appcrud.Options[*draft, int64]{Resource: "draft", Authorizer: auth.Allow(), DeleteMode: appcrud.DeleteSoft, EnableRestore: true, EnableDeletedQuery: true}
 	resource, err := appcrud.NewApplication(repo, options)
 	if err != nil {
 		t.Fatal(err)
 	}
-	trash, err := NewApplication(repo, Options[*draft, int64]{Options: options})
+	trash := resource
+	err = nil
 	if err != nil {
 		t.Fatal(err)
 	}

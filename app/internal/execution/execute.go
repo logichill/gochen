@@ -3,6 +3,7 @@ package execution
 import (
 	"context"
 	domain "gochen/domain"
+	"gochen/domain/spec"
 
 	"gochen/app/operation"
 	domaudited "gochen/audit"
@@ -28,6 +29,10 @@ func (c *Core[T, ID]) Execute(
 	if fn == nil {
 		return zero, errors.NewCode(errors.InvalidInput, "command function cannot be nil")
 	}
+	if err := checkGenericAction(action); err != nil {
+		return zero, err
+	}
+
 	spec, _, err := c.authorizeKind(ctx, action, []ID{id}, auth.KindUpdate)
 	if err != nil {
 		return zero, err
@@ -79,6 +84,10 @@ func (c *Core[T, ID]) ExecuteNew(
 	if fn == nil {
 		return zero, errors.NewCode(errors.InvalidInput, "command function cannot be nil")
 	}
+	if err := checkGenericAction(action); err != nil {
+		return zero, err
+	}
+
 	spec, decision, err := c.authorizeKind(ctx, action, nil, auth.KindCreate)
 	if err != nil {
 		return zero, err
@@ -133,12 +142,16 @@ func (c *Core[T, ID]) ExecuteBulk(
 	if fn == nil {
 		return nil, errors.NewCode(errors.InvalidInput, "command function cannot be nil")
 	}
+	if err := checkGenericAction(action); err != nil {
+		return nil, err
+	}
 	if err := c.validateBulkIDs(ids); err != nil {
 		return nil, err
 	}
 	if len(ids) == 0 {
 		return []T{}, nil
 	}
+
 	spec, _, err := c.authorizeKind(ctx, action, ids, auth.KindUpdate)
 	if err != nil {
 		return nil, err
@@ -192,6 +205,10 @@ func (c *Core[T, ID]) ExecuteNewBulk(
 	if fn == nil {
 		return nil, errors.NewCode(errors.InvalidInput, "command function cannot be nil")
 	}
+	if err := checkGenericAction(action); err != nil {
+		return nil, err
+	}
+
 	spec, decision, err := c.authorizeKind(ctx, action, nil, auth.KindCreate)
 	if err != nil {
 		return nil, err
@@ -247,7 +264,7 @@ func (c *Core[T, ID]) Restore(ctx context.Context, id ID, opts ...ExecOption) (T
 	if err := checkContext(ctx); err != nil {
 		return zero, err
 	}
-	if depcheck.IsNil(c.restore) || depcheck.IsNil(c.tx) {
+	if depcheck.IsNil(c.restore) || depcheck.IsNil(c.deletedRead) || depcheck.IsNil(c.tx) {
 		return zero, errors.NewCode(errors.Unsupported, "restore is not configured")
 	}
 	spec, _, err := c.authorizeKind(ctx, ActionRestore, []ID{id}, auth.KindUpdate)
@@ -263,7 +280,11 @@ func (c *Core[T, ID]) Restore(ctx context.Context, id ID, opts ...ExecOption) (T
 	}
 	var result T
 	err = c.tx.WithinTx(ctx, func(txCtx context.Context) error {
-		entity, err := c.restore.GetWithDeleted(txCtx, id, spec)
+		entity, err := c.deletedRead.GetWithDeleted(txCtx, id, spec)
+		if err != nil {
+			return err
+		}
+		guard, err := c.lifecycleGuard(entity)
 		if err != nil {
 			return err
 		}
@@ -282,8 +303,21 @@ func (c *Core[T, ID]) Restore(ctx context.Context, id ID, opts ...ExecOption) (T
 		if err := c.invokeBefore(txCtx, stage, entity); err != nil {
 			return err
 		}
+		if err := guard(); err != nil {
+			return err
+		}
+		if audited.IsDeleted() {
+			return errors.NewCode(errors.Conflict, "restore hook must preserve restored state")
+		}
 		if err := c.validate(entity); err != nil {
 			return err
+		}
+		// 校验器同样可持有可变实体；最后一次扩展之后再次核对目标与恢复态。
+		if err := guard(); err != nil {
+			return err
+		}
+		if !captureDeletionState(entity).isActive() {
+			return errors.NewCode(errors.Conflict, "restore validator must preserve restored state")
 		}
 		if err := c.restore.Restore(txCtx, entity, spec); err != nil {
 			return err
@@ -310,20 +344,35 @@ func (c *Core[T, ID]) Restore(ctx context.Context, id ID, opts ...ExecOption) (T
 	return result, err
 }
 
-// Purge 永久删除实体（含已软删记录）：授权 → 事务{ GetWithDeleted → Purge → 审计 }。
+// Purge 永久物理清除实体（含已软删记录），使用 purge 授权、钩子与审计。
 func (c *Core[T, ID]) Purge(ctx context.Context, id ID, opts ...ExecOption) error {
+	return c.purgeIDs(ctx, []ID{id}, opts)
+}
+
+// PurgeBulk 一次授权、同一事务物理清除整批实体；任一失败整批回滚。
+func (c *Core[T, ID]) PurgeBulk(ctx context.Context, ids []ID) error {
+	return c.purgeIDs(ctx, ids, nil)
+}
+
+func (c *Core[T, ID]) purgeIDs(ctx context.Context, ids []ID, opts []ExecOption) error {
 	ctx = operation.EnsureOperationID(ctx)
 	if err := checkContext(ctx); err != nil {
 		return err
 	}
-	if depcheck.IsNil(c.purge) || depcheck.IsNil(c.restore) || depcheck.IsNil(c.tx) {
+	if err := c.validateBulkIDs(ids); err != nil {
+		return err
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	if depcheck.IsNil(c.purge) || depcheck.IsNil(c.tx) {
 		return errors.NewCode(errors.Unsupported, "purge is not configured")
 	}
-	spec, _, err := c.authorizeKind(ctx, ActionPurge, []ID{id}, auth.KindDelete)
+	scope, _, err := c.authorizeKind(ctx, ActionPurge, ids, auth.KindDelete)
 	if err != nil {
 		return err
 	}
-	if err := c.execution.ValidateWriteSpec(spec, false); err != nil {
+	if err := c.execution.ValidateWriteSpec(scope, false); err != nil {
 		return err
 	}
 	act, err := c.auditActor(ctx, opts)
@@ -331,30 +380,57 @@ func (c *Core[T, ID]) Purge(ctx context.Context, id ID, opts ...ExecOption) erro
 		return err
 	}
 	return c.tx.WithinTx(ctx, func(txCtx context.Context) error {
-		entity, err := c.restore.GetWithDeleted(txCtx, id, spec)
-		if err != nil {
-			return err
+		records := make([]domaudited.AuditRecord, 0, len(ids))
+		for _, id := range ids {
+			record, hasAudit, err := c.purgeOne(ctx, txCtx, act, scope, id)
+			if err != nil {
+				return err
+			}
+			if hasAudit {
+				records = append(records, record)
+			}
 		}
-		stage := c.hooks.For(ActionPurge)
-		if err := c.invokeBefore(txCtx, stage, entity); err != nil {
-			return err
+		if len(ids) == 1 && len(records) == 1 {
+			return c.saveAudit(txCtx, records[0])
 		}
-		if err := c.purge.Purge(txCtx, entity, spec); err != nil {
-			return err
-		}
-		if err := c.invokeAfter(txCtx, stage, entity); err != nil {
-			return err
-		}
-		if err := c.schedulePostCommit(txCtx, ctx, stage, entity); err != nil {
-			return err
-		}
-		if depcheck.IsNil(c.audit) {
-			return nil
-		}
-		record, err := c.record(txCtx, act, ActionPurge, entity, nil)
-		if err != nil {
-			return err
-		}
-		return c.saveAudit(txCtx, record)
+		return c.saveAudits(txCtx, records)
 	})
+}
+
+func (c *Core[T, ID]) purgeOne(ctx, txCtx context.Context, act Actor, scope spec.Spec, id ID) (domaudited.AuditRecord, bool, error) {
+	var entity T
+	var err error
+	if !depcheck.IsNil(c.deletedRead) {
+		entity, err = c.deletedRead.GetWithDeleted(txCtx, id, scope)
+	} else {
+		entity, err = c.repo.Get(txCtx, id, scope)
+	}
+	if err != nil {
+		return domaudited.AuditRecord{}, false, err
+	}
+	guard, err := c.lifecycleGuard(entity)
+	if err != nil {
+		return domaudited.AuditRecord{}, false, err
+	}
+	stage := c.hooks.For(ActionPurge)
+	if err := c.invokeBefore(txCtx, stage, entity); err != nil {
+		return domaudited.AuditRecord{}, false, err
+	}
+	if err := guard(); err != nil {
+		return domaudited.AuditRecord{}, false, err
+	}
+	if err := c.purge.Purge(txCtx, entity, scope); err != nil {
+		return domaudited.AuditRecord{}, false, err
+	}
+	if err := c.invokeAfter(txCtx, stage, entity); err != nil {
+		return domaudited.AuditRecord{}, false, err
+	}
+	if err := c.schedulePostCommit(txCtx, ctx, stage, entity); err != nil {
+		return domaudited.AuditRecord{}, false, err
+	}
+	if depcheck.IsNil(c.audit) {
+		return domaudited.AuditRecord{}, false, nil
+	}
+	record, err := c.record(txCtx, act, ActionPurge, entity, nil)
+	return record, true, err
 }

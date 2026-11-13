@@ -1,4 +1,4 @@
-package deletion
+package crud_test
 
 import (
 	"testing"

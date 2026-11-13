@@ -32,6 +32,7 @@ type Repository interface {
 	domcrud.IBulkOperations[*Document, int64]
 	domcrud.IPurgeRepository[*Document, int64]
 	domcrud.IRestoreRepository[*Document, int64]
+	domcrud.IDeletedReadRepository[*Document, int64]
 	domcrud.ITransferRepository[*Document, int64]
 	WithinTx(context.Context, func(context.Context) error) error
 	app.IExecutionDescriptorProvider

@@ -16,7 +16,7 @@ func TestProtectedUpdateRejectsInputBeforeHooks(t *testing.T) {
 	for _, command := range []bool{false, true} {
 		t.Run(map[bool]string{false: "update", true: "execute"}[command], func(t *testing.T) {
 			hookCalls := 0
-			application, repo := newTestApplication(t, Options[*testEntity, int64]{Hooks: Hooks[*testEntity]{
+			application, repo := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge, Hooks: Hooks[*testEntity]{
 				ActionUpdate: Stage[*testEntity]{Before: func(_ context.Context, entity *testEntity) error {
 					hookCalls++
 					entity.Owner = "alice"
@@ -62,7 +62,7 @@ func (a failingAuthorizer) Authorize(context.Context, auth.Request) (auth.Decisi
 
 func TestAuthorizationPreservesFaultCodes(t *testing.T) {
 	for _, code := range []errors.ErrorCode{errors.Internal, errors.Database, errors.Unauthorized, errors.Forbidden} {
-		application, _ := newTestApplication(t, Options[*testEntity, int64]{Authorizer: failingAuthorizer{errors.NewCode(code, "authorization failure")}})
+		application, _ := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge, Authorizer: failingAuthorizer{errors.NewCode(code, "authorization failure")}})
 		_, err := application.Get(context.Background(), 1)
 		if errors.Code(err) != code {
 			t.Fatalf("err=%v, want=%v", err, code)
@@ -80,7 +80,7 @@ func TestResourceContractsBindIndependentlyAndRejectMutableAuthorization(t *test
 	// 组合根修改原声明时，已构造的契约保持冻结。
 	contract.Mutable[0] = "missing"
 	for _, reference := range []meta.Ref{meta.ByDimension("owner"), meta.ByField("Owner")} {
-		_, err = NewApplication(mutable, Options[*testEntity, int64]{Resource: "mutable", Authorizer: fixedAuthorizer{vocabulary: auth.Vocabulary{Refs: []meta.Ref{reference}}}})
+		_, err = NewApplication(mutable, Options[*testEntity, int64]{DeleteMode: DeletePurge, Resource: "mutable", Authorizer: fixedAuthorizer{vocabulary: auth.Vocabulary{Refs: []meta.Ref{reference}}}})
 		if errors.Code(err) != errors.InvalidInput {
 			t.Fatalf("mutable reference %v: %v", reference, err)
 		}
@@ -89,7 +89,7 @@ func TestResourceContractsBindIndependentlyAndRejectMutableAuthorization(t *test
 		repo *testkit.MemoryRepository[*testEntity, int64]
 		want errors.ErrorCode
 	}{{protected, errors.Forbidden}, {mutable, ""}} {
-		application, err := NewApplication(test.repo, Options[*testEntity, int64]{Resource: "document", Authorizer: auth.Allow()})
+		application, err := NewApplication(test.repo, Options[*testEntity, int64]{DeleteMode: DeletePurge, Resource: "document", Authorizer: auth.Allow()})
 		if err != nil {
 			t.Fatal(err)
 		}

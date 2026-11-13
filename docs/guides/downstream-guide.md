@@ -39,7 +39,7 @@ replace gochen-runtime => ../gochen-runtime
 | 场景 | Core 入口 | 配套能力 |
 | --- | --- | --- |
 | 配置、字典、一般管理 | `domain/crud` + `app/crud` | Runtime Repo / REST |
-| 需要审计、软删除与恢复 | `audit` + `app/crud` + `app/crud/deletion` + `app/crud/audit` | 审计 Store、同库事务 |
+| 需要审计、软删除与恢复 | `audit` + `app/crud` + `app/crud/audit` | 审计 Store、同库事务 |
 | 通过事件重建状态 | `domain/eventsourced` + `app/eventsourced` | EventStore、Outbox、Projection |
 | 写入结果需要后续跟踪 | `app/operation` | 结果 Store、Tracker、轮询 / SSE |
 | 多步骤补偿 | `process/saga` | 同步 CommandExecutor、状态 Store |

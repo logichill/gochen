@@ -1,4 +1,4 @@
-package deletion
+package crud_test
 
 import (
 	"context"
@@ -106,7 +106,7 @@ func TestAuditReasonFromExecute(t *testing.T) {
 	if _, err := app.Execute(ctx, "rename", doc.GetID(), func(_ context.Context, e *auditDoc) error {
 		e.Name = "b"
 		return nil
-	}, WithReason("manual fix")); err != nil {
+	}, appcrud.WithReason("manual fix")); err != nil {
 		t.Fatalf("Execute(): %v", err)
 	}
 	records := auditRecords(t, repo, ctx, doc.GetID())

@@ -20,15 +20,15 @@ func TestNewApplicationRejectsInvalidOptions(t *testing.T) {
 	}{
 		{
 			name:    "missing authorizer",
-			options: Options[*testEntity, int64]{Resource: "doc"},
+			options: Options[*testEntity, int64]{DeleteMode: DeletePurge, Resource: "doc"},
 		},
 		{
 			name:    "empty resource",
-			options: Options[*testEntity, int64]{Authorizer: auth.Allow()},
+			options: Options[*testEntity, int64]{DeleteMode: DeletePurge, Authorizer: auth.Allow()},
 		},
 		{
 			name: "duplicate action",
-			options: Options[*testEntity, int64]{
+			options: Options[*testEntity, int64]{DeleteMode: DeletePurge,
 				Resource:   "doc",
 				Authorizer: auth.Allow(),
 				Actions:    []auth.Action{{Name: ActionRead, Kind: auth.KindRead}},
@@ -36,7 +36,7 @@ func TestNewApplicationRejectsInvalidOptions(t *testing.T) {
 		},
 		{
 			name: "invalid action kind",
-			options: Options[*testEntity, int64]{
+			options: Options[*testEntity, int64]{DeleteMode: DeletePurge,
 				Resource:   "doc",
 				Authorizer: auth.Allow(),
 				Actions:    []auth.Action{{Name: "weird", Kind: auth.Kind("bogus")}},
@@ -44,7 +44,7 @@ func TestNewApplicationRejectsInvalidOptions(t *testing.T) {
 		},
 		{
 			name: "audit_read without audit store",
-			options: Options[*testEntity, int64]{
+			options: Options[*testEntity, int64]{DeleteMode: DeletePurge,
 				Resource:   "doc",
 				Authorizer: auth.Allow(),
 				Actions:    []auth.Action{{Name: "audit_read", Kind: auth.KindRead}},
@@ -61,14 +61,14 @@ func TestNewApplicationRejectsInvalidOptions(t *testing.T) {
 }
 
 func TestNewApplicationRejectsNilRepository(t *testing.T) {
-	if _, err := NewApplication[*testEntity, int64](nil, Options[*testEntity, int64]{
+	if _, err := NewApplication[*testEntity, int64](nil, Options[*testEntity, int64]{DeleteMode: DeletePurge,
 		Resource:   "doc",
 		Authorizer: auth.Allow(),
 	}); !errors.Is(err, errors.InvalidInput) {
 		t.Fatalf("NewApplication(nil) error = %v, want InvalidInput", err)
 	}
 	var repo *testkit.MemoryRepository[*testEntity, int64]
-	if _, err := NewApplication[*testEntity, int64](repo, Options[*testEntity, int64]{
+	if _, err := NewApplication[*testEntity, int64](repo, Options[*testEntity, int64]{DeleteMode: DeletePurge,
 		Resource:   "doc",
 		Authorizer: auth.Allow(),
 	}); !errors.Is(err, errors.InvalidInput) {
@@ -77,7 +77,7 @@ func TestNewApplicationRejectsNilRepository(t *testing.T) {
 }
 
 func TestNewApplicationBuildsStandardDescriptor(t *testing.T) {
-	app, _ := newTestApplication(t, Options[*testEntity, int64]{})
+	app, _ := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge})
 	descriptor := app.Descriptor()
 	if descriptor.Resource != "doc" {
 		t.Fatalf("resource = %q", descriptor.Resource)
@@ -86,7 +86,7 @@ func TestNewApplicationBuildsStandardDescriptor(t *testing.T) {
 	for _, action := range descriptor.Actions {
 		names = append(names, action.Name)
 	}
-	if got := strings.Join(names, ","); got != "read,list,create,update,delete" {
+	if got := strings.Join(names, ","); got != "read,list,create,update,purge" {
 		t.Fatalf("actions = %q", got)
 	}
 	if _, ok := descriptor.Action("audit_read"); ok {
@@ -102,13 +102,13 @@ func TestNewApplicationBuildsStandardDescriptor(t *testing.T) {
 }
 
 func TestUsesAllowAuthorizerReflectsPolicy(t *testing.T) {
-	openApp, _ := newTestApplication(t, Options[*testEntity, int64]{})
+	openApp, _ := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge})
 	if !openApp.UsesAllowAuthorizer() {
 		t.Fatal("auth.Allow application must report UsesAllowAuthorizer")
 	}
 
 	repo := newTestRepo()
-	restricted, err := NewApplication[*testEntity, int64](repo, Options[*testEntity, int64]{
+	restricted, err := NewApplication[*testEntity, int64](repo, Options[*testEntity, int64]{DeleteMode: DeletePurge,
 		Resource:   "doc",
 		Authorizer: fixedAuthorizer{decision: auth.Decision{Allowed: true}},
 	})
@@ -171,7 +171,7 @@ func TestCreateValidatesDomainBeforeApplicationPolicy(t *testing.T) {
 	if repositoryErr != nil {
 		t.Fatal(repositoryErr)
 	}
-	app, err := NewApplication[*validatingEntity, int64](repo, Options[*validatingEntity, int64]{
+	app, err := NewApplication[*validatingEntity, int64](repo, Options[*validatingEntity, int64]{DeleteMode: DeletePurge,
 		Resource:   "doc",
 		Authorizer: auth.Allow(),
 		Validator:  orderedValidator{order: &order},
@@ -197,7 +197,7 @@ func TestCreateStopsAfterDomainInvariantFailure(t *testing.T) {
 	if repositoryErr != nil {
 		t.Fatal(repositoryErr)
 	}
-	app, err := NewApplication[*validatingEntity, int64](repo, Options[*validatingEntity, int64]{
+	app, err := NewApplication[*validatingEntity, int64](repo, Options[*validatingEntity, int64]{DeleteMode: DeletePurge,
 		Resource:   "doc",
 		Authorizer: auth.Allow(),
 		Validator:  orderedValidator{order: &order},
@@ -224,7 +224,7 @@ func TestCreateStopsAfterDomainInvariantFailure(t *testing.T) {
 
 func TestApplicationValidatorFailureLeavesNothingPersisted(t *testing.T) {
 	validator := &trackingValidator{err: errors.New("policy rejected")}
-	app, repo := newTestApplication(t, Options[*testEntity, int64]{Validator: validator})
+	app, repo := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge, Validator: validator})
 	err := app.Create(context.Background(), &testEntity{Name: "x"})
 	if !errors.Is(err, validator.err) {
 		t.Fatalf("Create() error = %v", err)

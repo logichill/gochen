@@ -83,10 +83,11 @@ type Options[T domain.IEntity[ID], ID comparable] struct {
 	Audit app.IAuditRepository
 
 	// 以下端口只在软删/生命周期构造中使用。
-	SoftDelete bool
-	Restore    domcrud.IRestoreRepository[T, ID]
-	Deleted    domcrud.IDeletedQueryRepository[T, ID]
-	Purge      domcrud.IPurgeRepository[T, ID]
+	SoftDelete  bool
+	DeletedRead domcrud.IDeletedReadRepository[T, ID]
+	Restore     domcrud.IRestoreRepository[T, ID]
+	Deleted     domcrud.IDeletedQueryRepository[T, ID]
+	Purge       domcrud.IPurgeRepository[T, ID]
 }
 
 // Core 编排授权、事务、钩子与审计。构造完成后只读，可并发复用。
@@ -108,10 +109,11 @@ type Core[T domain.IEntity[ID], ID comparable] struct {
 	tx    app.ITransactionRunner
 	audit app.IAuditRepository
 
-	softDelete bool
-	restore    domcrud.IRestoreRepository[T, ID]
-	deleted    domcrud.IDeletedQueryRepository[T, ID]
-	purge      domcrud.IPurgeRepository[T, ID]
+	softDelete  bool
+	deletedRead domcrud.IDeletedReadRepository[T, ID]
+	restore     domcrud.IRestoreRepository[T, ID]
+	deleted     domcrud.IDeletedQueryRepository[T, ID]
+	purge       domcrud.IPurgeRepository[T, ID]
 }
 
 // New 构造执行骨架并完成 Descriptor、词汇与数据类型校验。
@@ -149,11 +151,6 @@ func New[T domain.IEntity[ID], ID comparable](opts Options[T, ID]) (*Core[T, ID]
 		}
 		if depcheck.IsNil(opts.Tx) {
 			return nil, errors.NewCode(errors.InvalidInput, "repository must implement ITransactional for write actions")
-		}
-	}
-	if needsWrite && opts.SoftDelete {
-		if depcheck.IsNil(opts.Restore) || depcheck.IsNil(opts.Deleted) || depcheck.IsNil(opts.Purge) {
-			return nil, errors.NewCode(errors.InvalidInput, "soft-delete application requires restore, deleted-query and purge ports")
 		}
 	}
 	if !depcheck.IsNil(opts.Audit) {
@@ -199,25 +196,26 @@ func New[T domain.IEntity[ID], ID comparable](opts Options[T, ID]) (*Core[T, ID]
 		}
 	}
 	return &Core[T, ID]{
-		resource:   descriptor.Resource,
-		authorizer: opts.Authorizer,
-		vocabulary: vocabulary,
-		descriptor: descriptor,
-		actions:    actions,
-		hooks:      freezeHooks(opts.Hooks),
-		validator:  opts.Validator,
-		limits:     opts.Limits.Normalize(),
-		projector:  opts.Projector,
-		metadata:   metadata,
-		execution:  effective,
-		repo:       opts.Repo,
-		read:       opts.Read,
-		tx:         opts.Tx,
-		audit:      opts.Audit,
-		softDelete: opts.SoftDelete,
-		restore:    opts.Restore,
-		deleted:    opts.Deleted,
-		purge:      opts.Purge,
+		resource:    descriptor.Resource,
+		authorizer:  opts.Authorizer,
+		vocabulary:  vocabulary,
+		descriptor:  descriptor,
+		actions:     actions,
+		hooks:       freezeHooks(opts.Hooks),
+		validator:   opts.Validator,
+		limits:      opts.Limits.Normalize(),
+		projector:   opts.Projector,
+		metadata:    metadata,
+		execution:   effective,
+		repo:        opts.Repo,
+		read:        opts.Read,
+		tx:          opts.Tx,
+		audit:       opts.Audit,
+		softDelete:  opts.SoftDelete,
+		deletedRead: opts.DeletedRead,
+		restore:     opts.Restore,
+		deleted:     opts.Deleted,
+		purge:       opts.Purge,
 	}, nil
 }
 
@@ -628,3 +626,60 @@ func joinErrors(errs []error) error {
 }
 
 func nowUTC() time.Time { return time.Now() }
+
+// DeleteAction 返回业务删除实际执行的动作。
+func (c *Core[T, ID]) DeleteAction() string {
+	if c.softDelete {
+		return ActionDelete
+	}
+	return ActionPurge
+}
+
+func checkGenericAction(action string) error {
+	switch strings.TrimSpace(action) {
+	case ActionDelete, ActionRestore, ActionPurge, ActionListDeleted, ActionAuditRead:
+		return errors.NewCode(errors.Forbidden, "lifecycle actions require their dedicated entry point").WithContext("action", action)
+	}
+	return nil
+}
+
+// lifecycleGuard 冻结生命周期命令加载的真实资源边界和版本，钩子不得重定向写入。
+func (c *Core[T, ID]) lifecycleGuard(entity T) (func() error, error) {
+	id, version := entity.GetID(), entity.GetVersion()
+	protected, err := c.execution.CaptureProtected(entity)
+	if err != nil {
+		return nil, err
+	}
+	dimensions := map[string]any{}
+	for _, field := range c.metadata.Fields() {
+		if field.Dimension == "" {
+			continue
+		}
+		value, err := field.Read(entity)
+		if err != nil {
+			return nil, err
+		}
+		dimensions[field.Name] = value
+	}
+	return func() error {
+		if err := c.execution.CheckProtected(protected, entity); err != nil {
+			return err
+		}
+		if entity.GetID() != id || entity.GetVersion() != version {
+			return errors.NewCode(errors.Forbidden, "lifecycle hook changes identity or expected version")
+		}
+		for _, field := range c.metadata.Fields() {
+			if field.Dimension == "" {
+				continue
+			}
+			value, err := field.Read(entity)
+			if err != nil {
+				return err
+			}
+			if !reflect.DeepEqual(dimensions[field.Name], value) {
+				return errors.NewCode(errors.Forbidden, "lifecycle hook changes resource dimensions").WithContext("field", field.Name)
+			}
+		}
+		return nil
+	}, nil
+}

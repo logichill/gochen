@@ -67,8 +67,27 @@ type IApplication[T domain.IEntity[ID], ID comparable] interface {
 	IReadApplication[T, ID]
 	IWriteApplication[T, ID]
 	IActionExecutor[T, ID]
+	IRestoreApplication[T, ID]
+	IPurgeApplication[ID]
+	IDeletedQueryApplication[T, ID]
+	DeleteAction() string
 }
 
 var _ IApplication[domain.IEntity[int64], int64] = (*Application[domain.IEntity[int64], int64])(nil)
 
 var _ IReadApplication[domain.IEntity[int64], int64] = (*ReadApplication[domain.IEntity[int64], int64])(nil)
+
+// IRestoreApplication 声明可选的恢复用例端口；是否启用由 Descriptor 表达。
+type IRestoreApplication[T domain.IEntity[ID], ID comparable] interface {
+	Restore(context.Context, ID, ...ExecOption) (T, error)
+}
+
+// IPurgeApplication 声明永久清除用例端口。
+type IPurgeApplication[ID comparable] interface {
+	Purge(context.Context, ID, ...ExecOption) error
+}
+
+// IDeletedQueryApplication 声明可选的已删除列表端口；是否启用由 Descriptor 表达。
+type IDeletedQueryApplication[T domain.IEntity[ID], ID comparable] interface {
+	ListDeleted(context.Context, int, int) ([]T, error)
+}

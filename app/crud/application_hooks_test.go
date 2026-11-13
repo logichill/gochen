@@ -11,7 +11,7 @@ import (
 
 func TestCreateAfterHookFailureRollsBack(t *testing.T) {
 	want := errors.New("after create failed")
-	app, _ := newTestApplication(t, Options[*testEntity, int64]{
+	app, _ := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge,
 		Hooks: Hooks[*testEntity]{
 			ActionCreate: Stage[*testEntity]{
 				After: func(context.Context, *testEntity) error { return want },
@@ -34,7 +34,7 @@ func TestCreateAfterHookFailureRollsBack(t *testing.T) {
 
 func TestUpdateAfterHookFailureKeepsStoredState(t *testing.T) {
 	want := errors.New("after update failed")
-	app, _ := newTestApplication(t, Options[*testEntity, int64]{
+	app, _ := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge,
 		Hooks: Hooks[*testEntity]{
 			ActionUpdate: Stage[*testEntity]{
 				After: func(context.Context, *testEntity) error { return want },
@@ -63,9 +63,9 @@ func TestUpdateAfterHookFailureKeepsStoredState(t *testing.T) {
 
 func TestDeleteAfterHookFailureKeepsEntity(t *testing.T) {
 	want := errors.New("after delete failed")
-	app, _ := newTestApplication(t, Options[*testEntity, int64]{
+	app, _ := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge,
 		Hooks: Hooks[*testEntity]{
-			ActionDelete: Stage[*testEntity]{
+			ActionPurge: Stage[*testEntity]{
 				After: func(context.Context, *testEntity) error { return want },
 			},
 		},
@@ -89,7 +89,7 @@ func TestCreateAfterHookRunsBeforeCommitAndPostCommitAfterCommit(t *testing.T) {
 	var app *Application[*testEntity, int64]
 	var afterSawCommitted, postCommitSawCommitted bool
 	ctx := context.Background()
-	app, _ = newTestApplication(t, Options[*testEntity, int64]{
+	app, _ = newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge,
 		Hooks: Hooks[*testEntity]{
 			ActionCreate: Stage[*testEntity]{
 				After: func(context.Context, *testEntity) error {
@@ -120,7 +120,7 @@ func TestCreateAfterHookRunsBeforeCommitAndPostCommitAfterCommit(t *testing.T) {
 
 func TestCreatePostCommitErrorIsReturnedAfterCommit(t *testing.T) {
 	want := errors.New("post commit failed")
-	app, _ := newTestApplication(t, Options[*testEntity, int64]{
+	app, _ := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge,
 		Hooks: Hooks[*testEntity]{
 			ActionCreate: Stage[*testEntity]{
 				PostCommit: func(context.Context, *testEntity) error { return want },
@@ -154,11 +154,11 @@ func TestHooksAreKeyedByActionName(t *testing.T) {
 			return nil
 		}
 	}
-	app, _ := newTestApplication(t, Options[*testEntity, int64]{
+	app, _ := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge,
 		Hooks: Hooks[*testEntity]{
 			ActionCreate: Stage[*testEntity]{Before: record(&createCalls), After: record(&createCalls), PostCommit: record(&createCalls)},
 			ActionUpdate: Stage[*testEntity]{Before: record(&updateCalls), After: record(&updateCalls), PostCommit: record(&updateCalls)},
-			ActionDelete: Stage[*testEntity]{Before: record(&deleteCalls), After: record(&deleteCalls), PostCommit: record(&deleteCalls)},
+			ActionPurge:  Stage[*testEntity]{Before: record(&deleteCalls), After: record(&deleteCalls), PostCommit: record(&deleteCalls)},
 		},
 	})
 	ctx := context.Background()
@@ -190,7 +190,7 @@ func TestHooksAreKeyedByActionName(t *testing.T) {
 
 func TestCustomActionUsesItsOwnHookKey(t *testing.T) {
 	var createCalls, importCalls int
-	app, _ := newTestApplication(t, Options[*testEntity, int64]{
+	app, _ := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge,
 		Actions: []auth.Action{{Name: "import", Kind: auth.KindCreate}},
 		Hooks: Hooks[*testEntity]{
 			ActionCreate: Stage[*testEntity]{Before: func(context.Context, *testEntity) error {
@@ -216,7 +216,7 @@ func TestCustomActionUsesItsOwnHookKey(t *testing.T) {
 }
 
 func TestUpdateCommandBeforeHookValidatesFinalState(t *testing.T) {
-	app, _ := newTestApplication(t, Options[*testEntity, int64]{
+	app, _ := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge,
 		Hooks: Hooks[*testEntity]{ActionUpdate: Stage[*testEntity]{Before: func(_ context.Context, entity *testEntity) error {
 			if entity.Name == "forbidden" {
 				return errors.NewCode(errors.Validation, "forbidden name")

@@ -31,12 +31,10 @@ func NewReadApplication[T domain.IEntity[ID], ID comparable](
 	if depcheck.IsNil(repo) {
 		return nil, errors.NewCode(errors.InvalidInput, "repository cannot be nil")
 	}
-	for _, action := range options.Actions {
-		if action.Name == execution.ActionAuditRead {
-			return nil, errors.NewCode(errors.InvalidInput, "audit_read belongs to the independent audit reader")
-		}
+	if err := validateOptions(options, false); err != nil {
+		return nil, err
 	}
-	defaults, err := standardActions(options.Resource, options.ActionPermissions, false, canDelete[T, ID]())
+	defaults, err := standardActions(options.Resource, options.ActionPermissions, false, false, false, false)
 	if err != nil {
 		return nil, err
 	}

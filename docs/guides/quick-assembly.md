@@ -15,7 +15,7 @@
 
 权限码来自 `auth.Descriptor`，默认为 `<resource>:api:<action>`；Action 检查从 ctx 中的 Principal 读取权限集合。声明的 `ScopeRule` 在动作权限成功后由 `auth.ISpecResolver` 产出范围条件与服务端赋值；系统行为通过规则的 `System` 字段明确配置。Application 自动把条件交给仓储，在最终 SQL 中执行 `WITH CHECK` 与 `WHERE`。
 
-基础 CRUD Application 提供查询和批量用例；独立 deletion.NewApplication 要求恢复、已删除查询和永久删除，可选配置 Audit。REST 使用显式 WithDeletion / WithAudit 组合各能力，分别根据实际 Descriptor 推导路由，见 `gochen-runtime` 仓库 `api/rest/README.md`。
+CRUD Application 提供查询、批量和删除生命周期，写入构造必须显式选择 DeleteMode（DeleteSoft / DeletePurge），零值失败。EnableRestore / EnableDeletedQuery 独立选配，Audit 只参与事务写入。REST 使用 WithRoutes 显式选择恢复、永久清除和回收站路由，WithAudit 独立组合历史读取，删除路由使用冻结的 DeleteAction，见 `gochen-runtime` 仓库 `api/rest/README.md`。
 
 租户隔离和数据范围按 [L0–L4](../architecture/layered-authz.md)组合；字段保护、服务端赋值和 Transfer 通过 [资源契约](../architecture/resource-contracts.md)配置。
 

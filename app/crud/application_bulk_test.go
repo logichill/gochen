@@ -10,7 +10,7 @@ import (
 
 func TestDeleteBulkEmptyBulkSkipsValidationAndAuthorization(t *testing.T) {
 	authorizer := newCountingAuthorizer()
-	app, _ := newTestApplication(t, Options[*testEntity, int64]{
+	app, _ := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge,
 		Authorizer: authorizer,
 		Limits:     app.Limits{MaxBulkSize: 2},
 	})
@@ -33,7 +33,7 @@ func TestDeleteBulkEmptyBulkSkipsValidationAndAuthorization(t *testing.T) {
 func TestExecuteBulkRunsHooksAndValidationOncePerEntity(t *testing.T) {
 	var before, after int
 	validator := &trackingValidator{}
-	app, _ := newTestApplication(t, Options[*testEntity, int64]{
+	app, _ := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge,
 		Validator: validator,
 		Hooks: Hooks[*testEntity]{
 			ActionUpdate: Stage[*testEntity]{
@@ -66,7 +66,7 @@ func TestExecuteBulkRunsHooksAndValidationOncePerEntity(t *testing.T) {
 
 func TestExecuteBulkAfterHookFailureRollsBackWholeBulk(t *testing.T) {
 	want := errors.New("after update failed")
-	app, _ := newTestApplication(t, Options[*testEntity, int64]{
+	app, _ := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge,
 		Hooks: Hooks[*testEntity]{
 			ActionUpdate: Stage[*testEntity]{
 				After: func(_ context.Context, entity *testEntity) error {
@@ -106,9 +106,9 @@ func TestExecuteBulkAfterHookFailureRollsBackWholeBulk(t *testing.T) {
 
 func TestDeleteBulkRunsDeleteHookPerEntity(t *testing.T) {
 	var hookIDs []int64
-	app, _ := newTestApplication(t, Options[*testEntity, int64]{
+	app, _ := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge,
 		Hooks: Hooks[*testEntity]{
-			ActionDelete: Stage[*testEntity]{
+			ActionPurge: Stage[*testEntity]{
 				Before: func(_ context.Context, entity *testEntity) error {
 					hookIDs = append(hookIDs, entity.GetID())
 					return nil
@@ -132,7 +132,7 @@ func TestExecuteNewBulkPostCommitRunsAfterCommit(t *testing.T) {
 	var app *Application[*testEntity, int64]
 	var committed int
 	ctx := context.Background()
-	app, _ = newTestApplication(t, Options[*testEntity, int64]{
+	app, _ = newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge,
 		Hooks: Hooks[*testEntity]{
 			ActionCreate: Stage[*testEntity]{
 				PostCommit: func(_ context.Context, entity *testEntity) error {

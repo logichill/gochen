@@ -27,7 +27,7 @@ func TestUpdateComparesActualBusinessState(t *testing.T) {
 			ctx := context.Background()
 			repo, err := testkit.NewMemoryRepository[*stateEntity, int64](testkit.NewInt64Sequence(1))
 			require.NoError(t, err)
-			app, err := NewApplication(repo, Options[*stateEntity, int64]{Resource: "doc", Authorizer: auth.Allow()})
+			app, err := NewApplication(repo, Options[*stateEntity, int64]{DeleteMode: DeletePurge, Resource: "doc", Authorizer: auth.Allow()})
 			require.NoError(t, err)
 			entity := &stateEntity{Secret: "old", Values: map[string][]string{"key": {"before"}}}
 			require.NoError(t, app.Create(ctx, entity))
@@ -71,7 +71,7 @@ func TestFailedCommandRollsBackNestedBusinessState(t *testing.T) {
 	ctx := context.Background()
 	repo, err := testkit.NewMemoryRepository[*stateEntity, int64](testkit.NewInt64Sequence(1))
 	require.NoError(t, err)
-	app, err := NewApplication(repo, Options[*stateEntity, int64]{Resource: "doc", Authorizer: auth.Allow()})
+	app, err := NewApplication(repo, Options[*stateEntity, int64]{DeleteMode: DeletePurge, Resource: "doc", Authorizer: auth.Allow()})
 	require.NoError(t, err)
 	entity := &stateEntity{Values: map[string][]string{"key": {"before"}}}
 	require.NoError(t, app.Create(ctx, entity))

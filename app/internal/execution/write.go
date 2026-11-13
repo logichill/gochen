@@ -91,8 +91,11 @@ func (c *Core[T, ID]) Update(ctx context.Context, entity T) error {
 	})
 }
 
-// Delete 删除单个实体。删除应用执行软删，普通资源执行物理删。
+// Delete 按构造期配置执行软删或完整永久清除流程。
 func (c *Core[T, ID]) Delete(ctx context.Context, id ID) error {
+	if !c.softDelete {
+		return c.Purge(ctx, id)
+	}
 	ctx = operation.EnsureOperationID(ctx)
 	if err := checkContext(ctx); err != nil {
 		return err
@@ -125,6 +128,9 @@ func (c *Core[T, ID]) Delete(ctx context.Context, id ID) error {
 
 // DeleteBulk 一次授权、一个事务删除多个实体；任一失败整批回滚。
 func (c *Core[T, ID]) DeleteBulk(ctx context.Context, ids []ID) error {
+	if !c.softDelete {
+		return c.PurgeBulk(ctx, ids)
+	}
 	ctx = operation.EnsureOperationID(ctx)
 	if err := checkContext(ctx); err != nil {
 		return err
@@ -174,6 +180,9 @@ func (c *Core[T, ID]) createOne(
 	decision auth.Decision,
 	entity T,
 ) (domaudited.AuditRecord, bool, error) {
+	if err := checkActiveCreation(entity); err != nil {
+		return domaudited.AuditRecord{}, false, err
+	}
 	stage := c.hooks.For(action)
 	if !depcheck.IsNil(c.audit) || stage.After != nil || stage.PostCommit != nil {
 		if _, err := meta.Clone(entity); err != nil {
@@ -183,10 +192,19 @@ func (c *Core[T, ID]) createOne(
 	if err := c.invokeBefore(txCtx, stage, entity); err != nil {
 		return domaudited.AuditRecord{}, false, err
 	}
+	if err := checkActiveCreation(entity); err != nil {
+		return domaudited.AuditRecord{}, false, err
+	}
 	if err := c.applyAssignments(entity, decision.Assign); err != nil {
 		return domaudited.AuditRecord{}, false, err
 	}
 	if err := c.validate(entity); err != nil {
+		return domaudited.AuditRecord{}, false, err
+	}
+	if err := checkActiveCreation(entity); err != nil {
+		return domaudited.AuditRecord{}, false, err
+	}
+	if err := ValidateAssignments(entity, decision.Assign, c.metadata); err != nil {
 		return domaudited.AuditRecord{}, false, err
 	}
 	if err := c.repo.Create(txCtx, entity, spec); err != nil {
@@ -229,9 +247,26 @@ func (c *Core[T, ID]) updateLoaded(
 		return entity, domaudited.AuditRecord{}, false, errors.NewCode(errors.Concurrency, "entity version mismatch").
 			WithContext("expected_version", expected).WithContext("actual_version", actual)
 	}
+	loadedID, loadedVersion := before.GetID(), before.GetVersion()
+	deletion := captureDeletionState(before)
+	if err := deletion.check(entity); err != nil {
+		return entity, domaudited.AuditRecord{}, false, err
+	}
 	stage := c.hooks.For(action)
 	protected, err := c.execution.CaptureProtected(before)
 	if err != nil {
+		return entity, domaudited.AuditRecord{}, false, err
+	}
+	checkCandidate := func() error {
+		if entity.GetID() != loadedID || entity.GetVersion() != loadedVersion {
+			return errors.NewCode(errors.Forbidden, "ordinary update changes loaded identity or expected version")
+		}
+		if err := deletion.check(entity); err != nil {
+			return err
+		}
+		return c.execution.CheckProtected(protected, entity)
+	}
+	if err := checkCandidate(); err != nil {
 		return entity, domaudited.AuditRecord{}, false, err
 	}
 	beforeState, err := c.businessSnapshot(before)
@@ -250,17 +285,20 @@ func (c *Core[T, ID]) updateLoaded(
 			return entity, domaudited.AuditRecord{}, false, err
 		}
 	}
-	if err := c.execution.CheckProtected(protected, entity); err != nil {
+	if err := checkCandidate(); err != nil {
 		return entity, domaudited.AuditRecord{}, false, err
 	}
 	// 写前钩子校验命令产出的目标状态，单条与批量更新遵循相同顺序。
 	if err := c.invokeBefore(txCtx, stage, entity); err != nil {
 		return entity, domaudited.AuditRecord{}, false, err
 	}
-	if err := c.execution.CheckProtected(protected, entity); err != nil {
+	if err := checkCandidate(); err != nil {
 		return entity, domaudited.AuditRecord{}, false, err
 	}
 	if err := c.validate(entity); err != nil {
+		return entity, domaudited.AuditRecord{}, false, err
+	}
+	if err := checkCandidate(); err != nil {
 		return entity, domaudited.AuditRecord{}, false, err
 	}
 	afterState, err := c.businessSnapshot(entity)
@@ -331,8 +369,15 @@ func (c *Core[T, ID]) deleteOne(
 	if err != nil {
 		return domaudited.AuditRecord{}, false, err
 	}
+	guard, err := c.lifecycleGuard(entity)
+	if err != nil {
+		return domaudited.AuditRecord{}, false, err
+	}
 	stage := c.hooks.For(action)
 	if err := c.invokeBefore(txCtx, stage, entity); err != nil {
+		return domaudited.AuditRecord{}, false, err
+	}
+	if err := guard(); err != nil {
 		return domaudited.AuditRecord{}, false, err
 	}
 	if c.softDelete {
@@ -349,14 +394,14 @@ func (c *Core[T, ID]) deleteOne(
 		if err := deleteErr; err != nil {
 			return domaudited.AuditRecord{}, false, err
 		}
+		if err := guard(); err != nil {
+			return domaudited.AuditRecord{}, false, err
+		}
 		if err := c.repo.Update(txCtx, entity, spec); err != nil {
 			return domaudited.AuditRecord{}, false, err
 		}
-	} else if _, ok := any(entity).(domain.ISoftDeletable); ok {
-		return domaudited.AuditRecord{}, false, errors.NewCode(errors.FailedPrecondition, "soft-deletable entities require the deletion application")
-	} else if err := c.repo.Delete(txCtx, entity, spec); err != nil {
-		return domaudited.AuditRecord{}, false, err
 	}
+
 	if err := c.invokeAfter(txCtx, stage, entity); err != nil {
 		return domaudited.AuditRecord{}, false, err
 	}

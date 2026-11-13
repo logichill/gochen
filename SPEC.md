@@ -107,7 +107,7 @@
 5. **模块边界**：Core 禁止依赖 `gochen-runtime` 或 `gochen-contrib`；SQL、配置加载、具体 net/http server 与 Host/DI 运行时装配属于 Runtime。
 6. **内存能力属于 Core**：不引入物理驱动且用于无外部环境测试的内存实现（如 cache、MemoryEventStore、testkit）可以留在 Core。
 7. **发布边界**：开发态可用 `go.work` 与本地 replace；发布态必须使用真实模块版本，并在无 workspace、无本地 replace 的外部消费者中验证。
-8. **CRUD 子树**：`app/crud` 承载资源操作，`app/crud/audit` 与 `app/crud/deletion` 分别承载可选历史读取和删除生命周期。目录分组不合并接口、构造器或授权；CRUD 根包不依赖这两个子包。共享审计契约保留在顶级 `audit`，执行协议保留在 `app/internal/execution`。
+8. **CRUD 子树**：`app/crud.Application` 统一承载资源操作与删除生命周期。构造期必须显式选择 DeleteMode：DeleteSoft 时 Delete 只软删，DeletePurge 时 Delete 进入完整 Purge 流程；零值或未知值构造失败；Purge 始终物理清除，恢复和已删除查询独立选配。`app/crud/audit` 独立承载历史读取，CRUD 根包不依赖该子包。共享审计契约保留在顶级 `audit`，执行协议保留在 `app/internal/execution`。
 
 ## 5. 领域维度与条件写入
 

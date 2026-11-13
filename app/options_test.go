@@ -40,7 +40,7 @@ func ExampleIDescriptorProvider() {
 	if err != nil {
 		panic(err)
 	}
-	application, err := crud.NewApplication(repository, crud.Options[*note, int64]{
+	application, err := crud.NewApplication(repository, crud.Options[*note, int64]{DeleteMode: crud.DeletePurge,
 		Resource: "note", Authorizer: auth.Allow(), Limits: app.Limits{MaxPageSize: 20},
 	})
 	if err != nil {
@@ -55,7 +55,7 @@ var (
 	_ app.ITransactionRunner  = (*testkit.MemoryRepository[*note, int64])(nil)
 	_ app.IAuditRepository    = (*testkit.AuditedMemoryRepository[*domcrud.TrackedEntity[int64], int64])(nil)
 	_ app.IDescriptorProvider = (*crud.Application[*note, int64])(nil)
-	_                         = crud.Options[*domcrud.TrackedEntity[int64], int64]{Projector: app.Projector[*domcrud.TrackedEntity[int64]](nil)}
+	_                         = crud.Options[*domcrud.TrackedEntity[int64], int64]{DeleteMode: crud.DeletePurge, Projector: app.Projector[*domcrud.TrackedEntity[int64]](nil)}
 	_                         = eventsourced.Options[*domes.EventSourcedAggregate[int64], int64]{Limits: app.Limits{MaxBulkSize: 10}}
 )
 
@@ -75,10 +75,11 @@ func TestAuditSourceValidationThroughPublicOptions(t *testing.T) {
 	for _, source := range []string{"", "other"} {
 		t.Run(source, func(t *testing.T) {
 			store := auditSource{IAuditRepository: repository, source: source}
-			options := crud.Options[*domcrud.TrackedEntity[int64], int64]{Resource: "note", Authorizer: auth.Allow(), Audit: store}
+			options := crud.Options[*domcrud.TrackedEntity[int64], int64]{DeleteMode: crud.DeletePurge, Resource: "note", Authorizer: auth.Allow(), Audit: store}
 			if _, err := crud.NewApplication(repository, options); !errors.Is(err, errors.InvalidInput) {
 				t.Fatalf("write application accepted invalid audit source: %v", err)
 			}
+			options.DeleteMode = 0
 			if _, err := crud.NewReadApplication(repository, options); !errors.Is(err, errors.InvalidInput) {
 				t.Fatalf("read application accepted invalid audit source: %v", err)
 			}

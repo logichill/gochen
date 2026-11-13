@@ -9,6 +9,7 @@ import (
 	"gochen/app/internal/execution"
 	"gochen/auth"
 	"gochen/domain"
+	domcrud "gochen/domain/crud"
 
 	"gochen/errors"
 	"gochen/internal/depcheck"
@@ -21,7 +22,7 @@ type Application[T domain.IEntity[ID], ID comparable] struct {
 
 // NewApplication 创建可读写的 CRUD 应用。
 //
-// 标准动作：read / list / create / update / delete；配置 Options.Audit 时
+// 标准动作由构造期删除配置确定；配置 Options.Audit 时
 // 只参与写入协议；历史查询由 app/crud/audit.Reader 提供。
 func NewApplication[T domain.IEntity[ID], ID comparable](
 	repo Repository[T, ID],
@@ -30,28 +31,53 @@ func NewApplication[T domain.IEntity[ID], ID comparable](
 	if depcheck.IsNil(repo) {
 		return nil, errors.NewCode(errors.InvalidInput, "repository cannot be nil")
 	}
-	for _, action := range options.Actions {
-		if action.Name == execution.ActionAuditRead {
-			return nil, errors.NewCode(errors.InvalidInput, "audit_read belongs to the independent audit reader")
-		}
+	if err := validateOptions(options, true); err != nil {
+		return nil, err
 	}
-	defaults, err := standardActions(options.Resource, options.ActionPermissions, true, canDelete[T, ID]())
+	defaults, err := standardActions(options.Resource, options.ActionPermissions, true, options.DeleteMode == DeleteSoft, options.EnableRestore, options.EnableDeletedQuery)
 	if err != nil {
 		return nil, err
 	}
+	purge, ok := repo.(domcrud.IPurgeRepository[T, ID])
+	if !ok || depcheck.IsNil(purge) {
+		return nil, errors.NewCode(errors.InvalidInput, "repository must provide physical purge capability")
+	}
+	deletedRead, _ := repo.(domcrud.IDeletedReadRepository[T, ID])
+	if isSoftDeletable[T, ID]() && depcheck.IsNil(deletedRead) {
+		return nil, errors.NewCode(errors.InvalidInput, "soft-deletable entity requires including-deleted read capability for purge")
+	}
+	var restore domcrud.IRestoreRepository[T, ID]
+	if options.EnableRestore {
+		restore, _ = repo.(domcrud.IRestoreRepository[T, ID])
+		if depcheck.IsNil(restore) {
+			return nil, errors.NewCode(errors.InvalidInput, "restore capability is required")
+		}
+	}
+	var deleted domcrud.IDeletedQueryRepository[T, ID]
+	if options.EnableDeletedQuery {
+		deleted, _ = repo.(domcrud.IDeletedQueryRepository[T, ID])
+		if depcheck.IsNil(deleted) {
+			return nil, errors.NewCode(errors.InvalidInput, "deleted query capability is required")
+		}
+	}
 	core, err := execution.New(execution.Options[T, ID]{
-		Resource:   options.Resource,
-		Authorizer: options.Authorizer,
-		Actions:    options.Actions,
-		Defaults:   defaults,
-		Hooks:      options.Hooks,
-		Validator:  options.Validator,
-		Limits:     options.Limits,
-		Repo:       repo,
-		Read:       repo,
-		Tx:         repo,
-		Audit:      options.Audit,
-		Projector:  options.Projector,
+		SoftDelete:  options.DeleteMode == DeleteSoft,
+		DeletedRead: deletedRead,
+		Restore:     restore,
+		Deleted:     deleted,
+		Purge:       purge,
+		Resource:    options.Resource,
+		Authorizer:  options.Authorizer,
+		Actions:     options.Actions,
+		Defaults:    defaults,
+		Hooks:       options.Hooks,
+		Validator:   options.Validator,
+		Limits:      options.Limits,
+		Repo:        repo,
+		Read:        repo,
+		Tx:          repo,
+		Audit:       options.Audit,
+		Projector:   options.Projector,
 	})
 	if err != nil {
 		return nil, err
@@ -60,13 +86,20 @@ func NewApplication[T domain.IEntity[ID], ID comparable](
 }
 
 // standardActions 构造标准动作清单；permissions 按动作名覆盖默认权限码。
-func standardActions(resource string, permissions map[string]string, writable, deletable bool) ([]auth.Action, error) {
+func standardActions(resource string, permissions map[string]string, writable, softDelete, restore, deletedQuery bool) ([]auth.Action, error) {
 	resource = strings.TrimSpace(resource)
 	names := []string{ActionRead, ActionList}
 	if writable {
 		names = append(names, ActionCreate, ActionUpdate)
-		if deletable {
+		if softDelete {
 			names = append(names, ActionDelete)
+		}
+		names = append(names, ActionPurge)
+		if restore {
+			names = append(names, ActionRestore)
+		}
+		if deletedQuery {
+			names = append(names, ActionListDeleted)
 		}
 	}
 	known := make(map[string]struct{}, len(names))
@@ -94,13 +127,13 @@ func standardActions(resource string, permissions map[string]string, writable, d
 	for _, name := range names {
 		kind := auth.KindRead
 		switch name {
-		case ActionList:
+		case ActionList, ActionListDeleted:
 			kind = auth.KindList
 		case ActionCreate:
 			kind = auth.KindCreate
-		case ActionUpdate:
+		case ActionUpdate, ActionRestore:
 			kind = auth.KindUpdate
-		case ActionDelete:
+		case ActionDelete, ActionPurge:
 			kind = auth.KindDelete
 		}
 		actions = append(actions, auth.Action{
@@ -112,11 +145,56 @@ func standardActions(resource string, permissions map[string]string, writable, d
 	return actions, nil
 }
 
-func canDelete[T domain.IEntity[ID], ID comparable]() bool {
+func isSoftDeletable[T domain.IEntity[ID], ID comparable]() bool {
 	var zero T
 	_, ok := any(zero).(domain.ISoftDeletable)
-	return !ok
+	return ok
 }
 
 // MaxBulkSize 返回批量上限。
 func (a *Application[T, ID]) MaxBulkSize() int { return a.core.MaxBulkSize() }
+
+func validateOptions[T domain.IEntity[ID], ID comparable](options Options[T, ID], writable bool) error {
+	if writable && options.DeleteMode != DeleteSoft && options.DeleteMode != DeletePurge {
+		return errors.NewCode(errors.InvalidInput, "write application requires explicit DeleteMode (DeleteSoft or DeletePurge)")
+	}
+	if !writable && (options.DeleteMode != 0 || options.EnableRestore || options.EnableDeletedQuery) {
+		return errors.NewCode(errors.InvalidInput, "read-only application cannot configure deletion lifecycle")
+	}
+	if (options.DeleteMode == DeleteSoft || options.EnableRestore || options.EnableDeletedQuery) && !isSoftDeletable[T, ID]() {
+		return errors.NewCode(errors.InvalidInput, "deletion state capabilities require domain.ISoftDeletable")
+	}
+	for _, action := range options.Actions {
+		switch strings.TrimSpace(action.Name) {
+		case ActionDelete, ActionRestore, ActionPurge, ActionListDeleted, execution.ActionAuditRead:
+			return errors.NewCode(errors.InvalidInput, "built-in lifecycle and audit actions cannot be declared as custom actions").WithContext("action", action.Name)
+		}
+		if !writable && action.Kind != auth.KindRead && action.Kind != auth.KindList {
+			return errors.NewCode(errors.InvalidInput, "read-only application cannot declare write actions")
+		}
+	}
+	for name := range options.Hooks {
+		if strings.TrimSpace(name) != name {
+			return errors.NewCode(errors.InvalidInput, "hook action name must be canonical").WithContext("action", name)
+		}
+		switch name {
+		case ActionDelete:
+			if !writable || options.DeleteMode != DeleteSoft {
+				return errors.NewCode(errors.InvalidInput, "delete hooks require soft-delete mode; use purge hooks for hard deletion")
+			}
+		case ActionRestore:
+			if !writable || !options.EnableRestore {
+				return errors.NewCode(errors.InvalidInput, "restore hooks require restore capability")
+			}
+		case ActionPurge:
+			if !writable {
+				return errors.NewCode(errors.InvalidInput, "read-only application cannot configure purge hooks")
+			}
+		case ActionListDeleted:
+			if !writable || !options.EnableDeletedQuery {
+				return errors.NewCode(errors.InvalidInput, "deleted-query hooks require deleted-query capability")
+			}
+		}
+	}
+	return nil
+}

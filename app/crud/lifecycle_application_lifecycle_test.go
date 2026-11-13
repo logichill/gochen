@@ -1,4 +1,4 @@
-package deletion
+package crud_test
 
 import (
 	"context"
@@ -145,7 +145,7 @@ func TestRestoreClearsDeletionAndWritesAudit(t *testing.T) {
 	}
 
 	restoreCtx := operatorContext(t, "carol")
-	restored, err := app.Restore(restoreCtx, doc.GetID(), WithReason("mistaken delete"))
+	restored, err := app.Restore(restoreCtx, doc.GetID(), appcrud.WithReason("mistaken delete"))
 	if err != nil {
 		t.Fatalf("Restore(): %v", err)
 	}
@@ -252,7 +252,7 @@ func TestPurgeUsesDedicatedHooks(t *testing.T) {
 	if err := app.Delete(ctx, doc.GetID()); err != nil {
 		t.Fatalf("Delete(): %v", err)
 	}
-	if err := app.Purge(ctx, doc.GetID(), WithReason("retention")); err != nil {
+	if err := app.Purge(ctx, doc.GetID(), appcrud.WithReason("retention")); err != nil {
 		t.Fatalf("Purge(): %v", err)
 	}
 	if deleteAfter != 1 {

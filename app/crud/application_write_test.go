@@ -10,7 +10,7 @@ import (
 )
 
 func TestCreateAssignsIDAndPersists(t *testing.T) {
-	app, _ := newTestApplication(t, Options[*testEntity, int64]{})
+	app, _ := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge})
 	ctx := context.Background()
 	entity := &testEntity{Name: "first", Active: true}
 	if err := app.Create(ctx, entity); err != nil {
@@ -33,7 +33,7 @@ func TestCreateAssignsIDAndPersists(t *testing.T) {
 }
 
 func TestUpdatePersistsChangesAndAdvancesVersion(t *testing.T) {
-	app, _ := newTestApplication(t, Options[*testEntity, int64]{})
+	app, _ := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge})
 	ctx := context.Background()
 	created := mustCreate(t, app, ctx, "before")
 
@@ -59,7 +59,7 @@ func TestUpdatePersistsChangesAndAdvancesVersion(t *testing.T) {
 }
 
 func TestUpdateWithoutChangesSkipsWrite(t *testing.T) {
-	app, _ := newTestApplication(t, Options[*testEntity, int64]{})
+	app, _ := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge})
 	ctx := context.Background()
 	created := mustCreate(t, app, ctx, "same")
 	loaded, err := app.Get(ctx, created.GetID())
@@ -79,7 +79,7 @@ func TestUpdateWithoutChangesSkipsWrite(t *testing.T) {
 }
 
 func TestUpdateRejectsStaleVersion(t *testing.T) {
-	app, _ := newTestApplication(t, Options[*testEntity, int64]{})
+	app, _ := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge})
 	ctx := context.Background()
 	created := mustCreate(t, app, ctx, "original")
 
@@ -111,14 +111,14 @@ func TestUpdateRejectsStaleVersion(t *testing.T) {
 }
 
 func TestUpdateMissingEntityReturnsNotFound(t *testing.T) {
-	app, _ := newTestApplication(t, Options[*testEntity, int64]{})
+	app, _ := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge})
 	if err := app.Update(context.Background(), &testEntity{Entity: domaincrudEntity(42), Name: "x"}); !errors.Is(err, errors.NotFound) {
 		t.Fatalf("Update(missing) error = %v, want NotFound", err)
 	}
 }
 
 func TestDeleteRemovesEntity(t *testing.T) {
-	app, _ := newTestApplication(t, Options[*testEntity, int64]{})
+	app, _ := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge})
 	ctx := context.Background()
 	created := mustCreate(t, app, ctx, "doomed")
 	if err := app.Delete(ctx, created.GetID()); err != nil {
@@ -138,7 +138,7 @@ func TestDeleteRemovesEntity(t *testing.T) {
 
 func TestDeleteBulkIsAtomicAndAuthorizesOnce(t *testing.T) {
 	authorizer := newCountingAuthorizer()
-	app, _ := newTestApplication(t, Options[*testEntity, int64]{Authorizer: authorizer})
+	app, _ := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge, Authorizer: authorizer})
 	ctx := context.Background()
 	first := mustCreate(t, app, ctx, "a")
 	second := mustCreate(t, app, ctx, "b")
@@ -147,8 +147,8 @@ func TestDeleteBulkIsAtomicAndAuthorizesOnce(t *testing.T) {
 	if err := app.DeleteBulk(ctx, []int64{first.GetID(), second.GetID()}); err != nil {
 		t.Fatalf("DeleteBulk(): %v", err)
 	}
-	if authorizer.calls[ActionDelete] != 1 {
-		t.Fatalf("authorize calls = %d, want 1", authorizer.calls[ActionDelete])
+	if authorizer.calls[ActionPurge] != 1 {
+		t.Fatalf("authorize calls = %d, want 1", authorizer.calls[ActionPurge])
 	}
 	count, err := app.Count(ctx)
 	if err != nil || count != 1 {
@@ -157,7 +157,7 @@ func TestDeleteBulkIsAtomicAndAuthorizesOnce(t *testing.T) {
 }
 
 func TestDeleteBulkValidation(t *testing.T) {
-	app, _ := newTestApplication(t, Options[*testEntity, int64]{
+	app, _ := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge,
 		Limits: app.Limits{MaxBulkSize: 2},
 	})
 	ctx := context.Background()
@@ -183,7 +183,7 @@ func TestDeleteBulkValidation(t *testing.T) {
 }
 
 func TestExecuteChangesLoadedEntity(t *testing.T) {
-	app, _ := newTestApplication(t, Options[*testEntity, int64]{})
+	app, _ := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge})
 	ctx := context.Background()
 	created := mustCreate(t, app, ctx, "before")
 
@@ -207,7 +207,7 @@ func TestExecuteChangesLoadedEntity(t *testing.T) {
 }
 
 func TestExecuteNoOpDoesNotWrite(t *testing.T) {
-	app, _ := newTestApplication(t, Options[*testEntity, int64]{})
+	app, _ := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge})
 	ctx := context.Background()
 	created := mustCreate(t, app, ctx, "same")
 	result, err := app.Execute(ctx, ActionUpdate, created.GetID(), func(context.Context, *testEntity) error {
@@ -222,7 +222,7 @@ func TestExecuteNoOpDoesNotWrite(t *testing.T) {
 }
 
 func TestExecuteErrors(t *testing.T) {
-	app, _ := newTestApplication(t, Options[*testEntity, int64]{
+	app, _ := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge,
 		Actions: []auth.Action{{Name: "import", Kind: auth.KindCreate}},
 	})
 	ctx := context.Background()
@@ -256,7 +256,7 @@ func TestExecuteErrors(t *testing.T) {
 }
 
 func TestExecuteNewCreatesEntity(t *testing.T) {
-	app, _ := newTestApplication(t, Options[*testEntity, int64]{})
+	app, _ := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge})
 	ctx := context.Background()
 	created, err := app.ExecuteNew(ctx, ActionCreate, func(context.Context) (*testEntity, error) {
 		return &testEntity{Name: "new"}, nil
@@ -283,7 +283,7 @@ func TestExecuteNewCreatesEntity(t *testing.T) {
 }
 
 func TestExecuteNewBulkCreatesAndValidatesLimit(t *testing.T) {
-	app, _ := newTestApplication(t, Options[*testEntity, int64]{
+	app, _ := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge,
 		Limits: app.Limits{MaxBulkSize: 2},
 	})
 	ctx := context.Background()
@@ -328,7 +328,7 @@ func TestExecuteNewBulkCreatesAndValidatesLimit(t *testing.T) {
 }
 
 func TestExecuteBulkUpdatesInOneTransaction(t *testing.T) {
-	app, _ := newTestApplication(t, Options[*testEntity, int64]{})
+	app, _ := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge})
 	ctx := context.Background()
 	first := mustCreate(t, app, ctx, "a")
 	second := mustCreate(t, app, ctx, "b")

@@ -9,7 +9,7 @@ import (
 
 // typed nil 指针实体必须 fail-fast 返回 InvalidInput，而不是 panic 或落库。
 func TestApplicationWriteRejectsTypedNilEntity(t *testing.T) {
-	app, _ := newTestApplication(t, Options[*testEntity, int64]{})
+	app, _ := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge})
 	ctx := context.Background()
 	var nilEntity *testEntity
 
@@ -27,7 +27,7 @@ func TestApplicationWriteRejectsTypedNilEntity(t *testing.T) {
 }
 
 func TestApplicationBulkWriteRejectsTypedNilEntity(t *testing.T) {
-	app, _ := newTestApplication(t, Options[*testEntity, int64]{})
+	app, _ := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge})
 	ctx := context.Background()
 	var nilEntity *testEntity
 
@@ -43,7 +43,7 @@ func TestApplicationBulkWriteRejectsTypedNilEntity(t *testing.T) {
 }
 
 func TestApplicationRejectsNilContext(t *testing.T) {
-	app, _ := newTestApplication(t, Options[*testEntity, int64]{})
+	app, _ := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge})
 	var ctx context.Context
 
 	if err := app.Create(ctx, &testEntity{Name: "x"}); !errors.Is(err, errors.InvalidInput) {

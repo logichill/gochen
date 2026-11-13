@@ -18,7 +18,7 @@ func TestOptionsAreCapturedAtConstruction(t *testing.T) {
 		}},
 	}
 	actions := []auth.Action{{Name: "rename", Kind: auth.KindUpdate}}
-	app, _ := newTestApplication(t, Options[*testEntity, int64]{
+	app, _ := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge,
 		Actions: actions,
 		Hooks:   hooks,
 		Limits:  app.Limits{MaxBulkSize: 1, MaxPageSize: 1},
@@ -60,7 +60,7 @@ func TestOptionsAreCapturedAtConstruction(t *testing.T) {
 }
 
 func TestLimitsNormalizeNonPositiveValues(t *testing.T) {
-	app, _ := newTestApplication(t, Options[*testEntity, int64]{
+	app, _ := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge,
 		Limits: app.Limits{MaxBulkSize: -1, MaxPageSize: 0},
 	})
 	if app.MaxBulkSize() != 1000 || app.MaxPageSize() != 1000 {
@@ -69,7 +69,7 @@ func TestLimitsNormalizeNonPositiveValues(t *testing.T) {
 }
 
 func TestDescriptorReturnsCopy(t *testing.T) {
-	app, _ := newTestApplication(t, Options[*testEntity, int64]{})
+	app, _ := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge})
 	first := app.Descriptor()
 	first.Actions[0].Name = "mutated"
 	second := app.Descriptor()

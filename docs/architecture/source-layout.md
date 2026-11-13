@@ -8,7 +8,7 @@
 
 | 包 | 主体与实现文件 |
 | --- | --- |
-| `app/crud`、`app/crud/deletion` | 各自的 `application.go` 定义应用与构造器，CRUD 的 `read_application_read.go`、`application_write.go` 提供公共入口；两种应用共享 `app/internal/execution` 的读写、钩子、批量、生命周期与审计骨架，见 [app](../../app/README.md#crud-与审计实现的文件组织) |
+| `app/crud` | `application.go` 定义统一资源应用与构造器，CRUD 的 `read_application_read.go`、`application_write.go` 提供普通写入口、`application_lifecycle.go` 承载删除生命周期入口；全部资源用例共享 `app/internal/execution` 的读写、钩子、批量、生命周期与审计骨架，见 [app](../../app/README.md#crud-与审计实现的文件组织) |
 | `app/crud/audit` | `reader.go` 定义独立历史读取接口、配置、构造器与授权；审计记录和存储契约仍在顶级 `audit`，不依赖 CRUD 应用门面 |
 | `app/eventsourced` | `application.go`、`application_command.go`、`application_actions.go` 编排用例，`command_message_handler.go` 接入命令消息；`repository_read.go`、`repository_write.go` 承载仓储读写，`history.go` 提供历史读模型与查询 |
 | `app/operation` | `runner_execute.go`、`runner_idempotency.go`、`runner_result.go` 承载执行、幂等和结果构建；`context.go` 定义操作 ID 上下文；`memory_store_*.go` 承载存储扩展 |

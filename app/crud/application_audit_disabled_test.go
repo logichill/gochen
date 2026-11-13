@@ -36,7 +36,7 @@ func TestAuditDisabledUpdatesSkipAuditSerialization(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				application, err := NewApplication(repo, Options[*auditFailingEntity, int64]{Resource: "document", Authorizer: auth.Allow()})
+				application, err := NewApplication(repo, Options[*auditFailingEntity, int64]{DeleteMode: DeletePurge, Resource: "document", Authorizer: auth.Allow()})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -88,7 +88,7 @@ func TestAuditDisabledUpdateRetainsBusinessSnapshotValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	application, err := NewApplication(repo, Options[*businessEntity, int64]{Resource: "document", Authorizer: auth.Allow()})
+	application, err := NewApplication(repo, Options[*businessEntity, int64]{DeleteMode: DeletePurge, Resource: "document", Authorizer: auth.Allow()})
 	if err != nil {
 		t.Fatal(err)
 	}

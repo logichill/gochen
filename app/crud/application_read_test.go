@@ -16,7 +16,7 @@ import (
 )
 
 func TestListNormalizesPageBounds(t *testing.T) {
-	app, _ := newTestApplication(t, Options[*testEntity, int64]{
+	app, _ := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge,
 		Limits: app.Limits{MaxPageSize: 2},
 	})
 	ctx := context.Background()
@@ -50,7 +50,7 @@ func TestListNormalizesPageBounds(t *testing.T) {
 }
 
 func TestGetExistsCountAndQuery(t *testing.T) {
-	app, _ := newTestApplication(t, Options[*testEntity, int64]{})
+	app, _ := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge})
 	ctx := context.Background()
 	a := mustCreate(t, app, ctx, "a")
 	mustCreate(t, app, ctx, "b")
@@ -101,7 +101,7 @@ func TestGetExistsCountAndQuery(t *testing.T) {
 }
 
 func TestQueryNormalizesPageBounds(t *testing.T) {
-	app, _ := newTestApplication(t, Options[*testEntity, int64]{
+	app, _ := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge,
 		Limits: app.Limits{MaxPageSize: 2},
 	})
 	ctx := context.Background()
@@ -126,7 +126,7 @@ func TestQueryCountUsesFiltersAndOneAuthorization(t *testing.T) {
 	}
 	authorizer := newCountingAuthorizer()
 	authorizer.inner = fixedAuthorizer{decision: auth.Decision{Allowed: true, Spec: spec.Eq(meta.ByDimension("owner"), "alice")}, vocabulary: auth.Vocabulary{Refs: []meta.Ref{meta.ByDimension("owner")}}}
-	app, _ := newTestApplicationWithRepo(t, repo, Options[*testEntity, int64]{Authorizer: authorizer})
+	app, _ := newTestApplicationWithRepo(t, repo, Options[*testEntity, int64]{DeleteMode: DeletePurge, Authorizer: authorizer})
 	count, err := app.QueryCount(t.Context(), query.QueryOptions{Offset: 100, Limit: 1, Fields: []string{"unknown"}, Sorts: []query.Sort{{Field: "unknown"}}, Filters: eqFilter("name", "match")})
 	if err != nil || count != 2 {
 		t.Fatalf("filtered count = %d, %v", count, err)
@@ -149,7 +149,7 @@ func TestApplicationPropagatesAuthorizerSpec(t *testing.T) {
 		decision:   auth.Decision{Allowed: true, Spec: spec.Eq(meta.ByDimension("owner"), "alice")},
 		vocabulary: auth.Vocabulary{Refs: []meta.Ref{meta.ByDimension("owner")}},
 	}
-	app, _ := newTestApplicationWithRepo(t, repo, Options[*testEntity, int64]{
+	app, _ := newTestApplicationWithRepo(t, repo, Options[*testEntity, int64]{DeleteMode: DeletePurge,
 		Authorizer: ownerSpec,
 	})
 	ctx := context.Background()
@@ -208,7 +208,7 @@ func TestCreateAppliesServerAssignments(t *testing.T) {
 		},
 		vocabulary: auth.Vocabulary{Refs: []meta.Ref{meta.ByDimension("owner")}, Assignable: []meta.Dimension{"owner"}},
 	}
-	app, _ := newTestApplicationWithRepo(t, repo, Options[*testEntity, int64]{Authorizer: assigning})
+	app, _ := newTestApplicationWithRepo(t, repo, Options[*testEntity, int64]{DeleteMode: DeletePurge, Authorizer: assigning})
 	ctx := context.Background()
 
 	entity := &testEntity{Name: "assigned"}
@@ -235,7 +235,7 @@ func TestNewApplicationRejectsUnknownNamedCondition(t *testing.T) {
 		vocabulary: auth.Vocabulary{},
 	}
 	repo := newTestRepo()
-	app, err := NewApplication[*testEntity, int64](repo, Options[*testEntity, int64]{
+	app, err := NewApplication[*testEntity, int64](repo, Options[*testEntity, int64]{DeleteMode: DeletePurge,
 		Resource:   "doc",
 		Authorizer: authorizer,
 	})
@@ -249,7 +249,7 @@ func TestNewApplicationRejectsUnknownNamedCondition(t *testing.T) {
 }
 
 func TestReadRunsCustomActionWithSpec(t *testing.T) {
-	app, _ := newTestApplication(t, Options[*testEntity, int64]{
+	app, _ := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge,
 		Actions: []auth.Action{{Name: "export", Kind: auth.KindList}},
 	})
 	ctx := context.Background()
@@ -310,7 +310,7 @@ func TestReadApplicationServesListAndQuery(t *testing.T) {
 }
 
 func TestResourceHasNoOptionalAuditSurface(t *testing.T) {
-	application, _ := newTestApplication(t, Options[*testEntity, int64]{})
+	application, _ := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge})
 	if _, ok := any(application).(appaudit.IAuditReader[int64]); ok {
 		t.Fatal("resource unexpectedly exposes audit reads")
 	}
@@ -321,7 +321,7 @@ func TestApplicationWithAuditStoreWritesTrail(t *testing.T) {
 	if repositoryErr != nil {
 		t.Fatal(repositoryErr)
 	}
-	app, err := NewApplication[*auditEntity, int64](repo, Options[*auditEntity, int64]{
+	app, err := NewApplication[*auditEntity, int64](repo, Options[*auditEntity, int64]{DeleteMode: DeletePurge,
 		Resource:   "doc",
 		Authorizer: auth.Allow(),
 		Audit:      repo,

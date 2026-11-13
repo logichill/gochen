@@ -42,7 +42,7 @@ type IRepository[T domain.IEntity[ID], ID comparable] interface {
 // IPurgeRepository 定义“物理删除（不可恢复）”的可选扩展能力。
 //
 // 说明：
-// - 普通 Delete 已是物理删除，Purge 保留给审计资源的永久删除流程；
+// - Application 的硬删除和显式永久清除统一通过本端口执行；
 // - 读取边界字段取自删除前的实体。
 type IPurgeRepository[T domain.IEntity[ID], ID comparable] interface {
 	// Purge 永久删除实体（物理删除，不可恢复），包括已软删的行。

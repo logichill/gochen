@@ -43,7 +43,7 @@ func TestDeclarationAutomaticallyProtectsQueryCommandsAndRollback(t *testing.T) 
 			t.Fatal(err)
 		}
 	}
-	options := crud.Options[*declaredOrder, int64]{Resource: "order", ActionPermissions: map[string]string{"read": "order:api:read", "list": "order:api:read", "create": "order:api:write", "update": "order:api:write", "delete": "order:api:write"}}
+	options := crud.Options[*declaredOrder, int64]{DeleteMode: crud.DeletePurge, Resource: "order", ActionPermissions: map[string]string{"read": "order:api:read", "list": "order:api:read", "create": "order:api:write", "update": "order:api:write", "purge": "order:api:write"}}
 	descriptor, err := crud.Describe(options, true)
 	if err != nil {
 		t.Fatal(err)
@@ -90,7 +90,7 @@ func TestApplicationRejectsActionOnlyAndDescriptorDrift(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	options := crud.Options[*declaredOrder, int64]{Resource: "order"}
+	options := crud.Options[*declaredOrder, int64]{DeleteMode: crud.DeletePurge, Resource: "order"}
 	descriptor, err := crud.Describe(options, true)
 	if err != nil {
 		t.Fatal(err)

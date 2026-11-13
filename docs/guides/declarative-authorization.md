@@ -11,11 +11,11 @@
 ## Application
 
 1. 从仓储取得 `ExecutionDescriptor().Metadata()`，准备 Application Options。
-2. 使用 `crud.Describe`、`deletion.Describe` 或 `eventsourced.Describe` 取得与实际执行同源的 Descriptor。
+2. 使用 `crud.Describe` 或 `eventsourced.Describe` 取得与实际执行同源的 Descriptor。
 3. 在 `auth.Declaration` 中绑定 Descriptor、`ResourceAccessData` 和规则。
 4. `auth.Compile` 接收权限检查器、实体元数据及可选治理配置；将生成的授权器注入 Application。
 
-Runtime Quick 的 `DeclaredApp` 完成基础 CRUD 声明装配；删除生命周期与事件溯源 Application 使用各自的 Describe、Compile 与构造入口。具体签名与约束见各函数 GoDoc。
+Runtime Quick 的 `DeclaredApp` 完成统一 CRUD（含显式 DeleteMode 与可选恢复/查询）的声明装配；事件溯源 Application 使用自身的 Describe、Compile 与构造入口。具体签名与约束见各函数 GoDoc。
 
 生产资源入口优先使用 `Compile`。`New` 提供低层策略与治理装配，其 `Plan()` 返回未绑定状态；Application 构造仍校验资源契约及词汇，`ValidatePlanBinding` 对未绑定计划直接返回。资源执行入口的 `BindExecution` 和启动门禁要求有效编译计划，因此 `New` 的构造成功仅证明低层执行内核完成装配。
 

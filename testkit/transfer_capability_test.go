@@ -32,7 +32,7 @@ func TestTransferApplicationRequiresVersionSetter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = appcrud.NewApplication(r, appcrud.Options[*unversionedTransferEntity, int64]{Resource: "document", Authorizer: auth.Allow(),
+	_, err = appcrud.NewApplication(r, appcrud.Options[*unversionedTransferEntity, int64]{DeleteMode: appcrud.DeletePurge, Resource: "document", Authorizer: auth.Allow(),
 		Actions: []auth.Action{{Name: "receive", Kind: auth.KindTransfer}}})
 	if !errors.Is(err, errors.InvalidInput) {
 		t.Fatalf("unversioned transfer application: %v", err)

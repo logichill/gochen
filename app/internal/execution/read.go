@@ -92,6 +92,9 @@ func (c *Core[T, ID]) Read(ctx context.Context, action string, fn func(ctx conte
 	if fn == nil {
 		return errors.NewCode(errors.InvalidInput, "read function cannot be nil")
 	}
+	if err := checkGenericAction(action); err != nil {
+		return err
+	}
 	spec, _, err := c.authorizeKind(ctx, action, nil, auth.KindList)
 	if err != nil {
 		return err

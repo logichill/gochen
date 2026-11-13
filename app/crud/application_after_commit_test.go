@@ -28,7 +28,7 @@ func TestCommandResultsSurvivePostCommitFailure(t *testing.T) {
 				calls++
 				return want
 			}}
-			app, repo := newTestApplication(t, Options[*testEntity, int64]{
+			app, repo := newTestApplication(t, Options[*testEntity, int64]{DeleteMode: DeletePurge,
 				Hooks: Hooks[*testEntity]{ActionCreate: stage, ActionUpdate: stage},
 			})
 			entities := []*testEntity{{Name: "first"}}

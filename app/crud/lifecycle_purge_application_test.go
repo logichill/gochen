@@ -1,7 +1,8 @@
-package deletion
+package crud_test
 
 import (
 	"context"
+	appcrud "gochen/app/crud"
 	"testing"
 
 	"gochen/auth"
@@ -44,7 +45,7 @@ func TestPurgeWritesAuditWithReasonAndBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := app.Purge(purgeCtx, doc.GetID(), WithReason("retention")); err != nil {
+	if err := app.Purge(purgeCtx, doc.GetID(), appcrud.WithReason("retention")); err != nil {
 		t.Fatalf("Purge(): %v", err)
 	}
 	if _, err := repo.GetWithDeleted(ctx, doc.GetID(), spec.All()); !errors.Is(err, errors.NotFound) {

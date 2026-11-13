@@ -6,10 +6,10 @@
 
 | 原入口/写法 | 候选入口 | 核心三仓内消费者 |
 | --- | --- | --- |
-| 公共 Options 暴露 execution.Limits | `app.Limits` | CRUD、deletion、ES 与外部配置示例 |
-| CRUD 仓储嵌入 internal 事务端口 | `app.ITransactionRunner` | CRUD、deletion、Runtime Repo、Contrib GORM 契约测试 |
+| 公共 Options 暴露 execution.Limits | `app.Limits` | CRUD、ES 与外部配置示例 |
+| CRUD 仓储嵌入 internal 事务端口 | `app.ITransactionRunner` | CRUD、Runtime Repo、Contrib GORM 契约测试 |
 | audited Projector 使用 internal 类型 | `app.Projector[T]` | audited 及共享执行实现 |
-| 审计只声明写接口、构造时另断言读接口 | `app.IAuditRepository`，只组合写入及数据源身份；独立查询使用 `audit.IAuditQueryStore` | CRUD 与 deletion 可选审计；业务仓储同源检查保留 |
+| 审计只声明写接口、构造时另断言读接口 | `app.IAuditRepository`，只组合写入及数据源身份；独立查询使用 `audit.IAuditQueryStore` | CRUD 可选审计；业务仓储同源检查保留 |
 | `host.IDescriptorProvider` | `app.IDescriptorProvider` | Module、应用目录、REST |
 | `RouteRegistrar(func() *Routes)` | `RouteRegistrar(routes)` 或 `module.RouteRegistrarFunc(fn)` | Host、HTTP 共同契约测试、示例 |
 | `EventHandler(func() *Handler)` | `EventHandler(handler)` | typed Module 与冻结订阅清单 |
@@ -34,7 +34,7 @@
 
 没有表/列、ID 编码、审计字段、事件 type/schema/payload、snapshot/checkpoint/outbox 的迁移。ES 事件历史动作由 audit_read 改为 event_history_read，默认权限同步变化；部署端必须显式迁移原 ES 历史授权，不修改 CRUD 审计权限。详见[能力拆分迁移](business-capabilities-next.md)。
 
-CRUD 与 deletion 共用私有执行骨架；业务审计仍在同一个事务回调中写入，失败回滚，提交后失败仍为 `AfterCommitError`。审计查询使用历史 Dimensions 快照。ES 继续使用独立授权、回放、重试和事件保存流程；原子 SaveAll 及快照装饰器边界不变。Transfer、条件下推、租户与受保护维度合同保留。原多资源 Command API 已移除，改为显式业务预检和受保护应用编排，正式判定仍逐资源执行；同源事务边界需实际验证，不能自动声称跨存储原子提交。详见[授权执行迁移](next-authorization-migration.md)。
+CRUD 的普通写入与删除生命周期共用私有执行骨架；业务审计仍在同一个事务回调中写入，失败回滚，提交后失败仍为 `AfterCommitError`。审计查询使用历史 Dimensions 快照。ES 继续使用独立授权、回放、重试和事件保存流程；原子 SaveAll 及快照装饰器边界不变。Transfer、条件下推、租户与受保护维度合同保留。原多资源 Command API 已移除，改为显式业务预检和受保护应用编排，正式判定仍逐资源执行；同源事务边界需实际验证，不能自动声称跨存储原子提交。详见[授权执行迁移](next-authorization-migration.md)。
 
 ## 下游影响清单
 
@@ -55,3 +55,7 @@ CRUD 与 deletion 共用私有执行骨架；业务审计仍在同一个事务�
 分别在三个仓库运行 `GOWORK=off go build ./...`、`go vet ./...`、`go test -count=1 ./...`。Core `GOWORK=off go list -m all` 只能输出 gochen。Runtime 普通模块完整例子为 `examples/typed-module`；Contrib 的 `TestTypedModuleGORMHTTPContract` 对同一个 GORM 接入分别验证 net/http 和 Gin。
 
 MySQL/PostgreSQL 外部数据库契约需要独立测试 DSN，不以 SQLite 成功替代。发布真实模块版本、移除本地 replace、改业务依赖和合并 main 是后续独立决定。
+
+## 统一删除生命周期迁移
+
+独立 app/crud/deletion 已移除，改为 crud.Application。所有写入 Options 必须显式配置 DeleteMode（DeleteSoft / DeletePurge），零值失败关闭；只读构造不配置模式。EnableRestore / EnableDeletedQuery 独立选配。硬模式的 Delete 进入完整 Purge 管线，需将旧 delete 权限覆盖和钩子改为 purge，并用同源 Descriptor / DeleteAction 绑定 HTTP。仓储拆分 IDeletedReadRepository（GetWithDeleted）与 IRestoreRepository（仅 Restore），Purge 不再要求恢复。HTTP 删除能力与公开路由分别配置，详细边界见[业务能力与生命周期](business-capabilities-next.md)。

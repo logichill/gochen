@@ -35,8 +35,8 @@ func main() {
 	log.SetFlags(0)
 	repo, err := testkit.NewMemoryRepository[*document, int64](testkit.NewInt64Sequence(1))
 	must(err)
-	options := crud.Options[*document, int64]{Resource: "document", ActionPermissions: map[string]string{
-		"read": "document:api:read", "list": "document:api:read", "create": "document:api:write", "update": "document:api:write", "delete": "document:api:write",
+	options := crud.Options[*document, int64]{DeleteMode: crud.DeletePurge, Resource: "document", ActionPermissions: map[string]string{
+		"read": "document:api:read", "list": "document:api:read", "create": "document:api:write", "update": "document:api:write", "purge": "document:api:write",
 	}}
 	descriptor, err := crud.Describe(options, true)
 	must(err)

@@ -1,43 +1,31 @@
 # next：业务能力、独立审计与显式 ES
 
-本候选完成核心三仓内的业务能力拆分，不再把 CRUD、Audited、ES 当作三档应用模板。CRUD 是资源操作，Audit 是可选事务记录与独立历史读取，删除是独立生命周期，ES 是权威事件及恢复路径。CQRS 中间态继续暂缓。
+本候选统一 CRUD 与删除生命周期，审计写入保持可选，历史读取独立，ES 保持权威事件及恢复路径。CQRS 中间态继续暂缓。
 
-## 1. 资源、审计与删除分别构造
+## 1. 统一资源生命周期与独立审计
 
-资源应用位于 `app/crud`，历史读取与删除生命周期分别位于 `app/crud/audit` 和 `app/crud/deletion`。各能力仍独立构造、组合和授权，`app/crud` 不反向依赖这两个子包。顶级 `audit` 的记录与存储契约、`app/internal/execution` 的共享执行协议保持原位，不保留旧包路径的兼容转发。
+- `crud.NewReadApplication` 返回真正只读的 `*crud.ReadApplication`，没有写入、执行、Transfer、Restore、Purge、ListDeleted 或 AuditTrail 方法。
+- `crud.NewApplication` 是唯一通用资源门面，`Options.DeleteMode` 必须显式设为 `crud.DeleteSoft` 或 `crud.DeletePurge`。零值、未知值和不支持的软模式均在 Describe/构造期失败，绝不猜测或降级。
+- `DeleteSoft` 下 Delete/DeleteBulk 只标记软删；重复删除可返回 NotFound/Conflict，但绝不升级为永久清除。`DeletePurge` 下 Delete/DeleteBulk 进入完整 Purge 管线，使用 purge 权限、钩子和审计。Purge 始终物理清除（包含旧软删记录）。内部共享算法，不重复生命周期实现。
+- `EnableRestore` 与 `EnableDeletedQuery` 独立配置，软实体可以在硬模式下管理旧软删数据。仓储恰好有方法不会自动开启能力。HTTP 暴露另行选择。
+- 所有写应用需要真实 `domain/crud.IPurgeRepository`。软实体需要独立 `IDeletedReadRepository.GetWithDeleted`，永久清除不要求 Restore。启用恢复再要求 `IRestoreRepository.Restore`，启用列表再要求 `IDeletedQueryRepository`。不存在补空方法的绕过适配器。
+- `Options.Audit` 只选择同源事务审计写入，不强制历史查询、删除状态或操作者字段。`app/crud/audit.NewReader` 独立绑定历史查询、有效元数据与 audit_read 授权；永久删除以后仍按历史 DimensionSnapshot 查询。
 
-- `crud.NewReadApplication` 返回真正只读的 `*crud.ReadApplication`，没有写入、执行、Transfer 或 AuditTrail 方法。
-- `crud.NewApplication` 是唯一通用 CRUD 门面。`Options.Audit` 只选择审计写入，不强制历史查询、软删除或操作者字段。
-- `app/crud/audit.NewReader[ID](queryStore, repository, Options{...})` 只提供审计历史。资源元数据来自 repository 的有效契约，查询按历史 DimensionSnapshot 授权，永久删除之后仍可读取。读取动作仍是 `audit_read`。
-- `deletion.NewApplication(repository, deletion.Options{Options: crud.Options{...}})` 只提供 Delete/DeleteBulk/Restore/Purge/ListDeleted。它不复制 CRUD 的读写和 Execute/Transfer。需要事务审计时才配置 Audit。
-- `audit.IAuditStore` / `audit.IAuditQueryStore` 分别表达记录写入与读取。写入端 `app.IAuditRepository` 只再要求数据源身份，同源校验与实际事务参与都不可省略。
+`domain.ChangeInfo` 与 `domain.DeletionState` 可独立组合。`domain/crud.TrackedEntity` 只是保留原字段形状的便利组合。根 audit 的记录和存储契约、app/internal/execution 的统一执行协议保持原位。
 
-旧 `app/audited`、`domain/audited.IAuditedEntity`、`IAuditedRepository` 已移除，不保留兼容别名。领域可分别使用 `domain.ChangeInfo`（修改归因）、`domain.DeletionState`（删除状态）。`domain/crud.TrackedEntity` 仅是旧字段形状的便捷组合，普通 Entity 也能启用完整审计。
+### 破坏性迁移
 
-软删除实体的 CRUD 描述中没有 delete，直接调用 CRUD.Delete 也不能物理删除它。软删只走 deletion.Delete，永久删除只走 Purge。物理仓储仍遵循已有条件写入、版本与事务契约。没有将历史字段、表名或 JSON 层级重新解释为新结构。
+已删除独立 `app/crud/deletion` 包、Application、Options、Describe 与 IDeletionApplication，不保留别名或转发。旧 deletion.NewApplication 改为 crud.NewApplication，并显式配置 DeleteMode 和可选恢复/查询标志；旧 app/deletion 同样不能继续使用。历史读取仍使用 app/crud/audit，根 gochen/audit 路径不变。
 
-### 破坏性 import 路径迁移
+所有写入构造必须补齐显式 DeleteMode，不能把旧省略值当作硬删除默认值。硬模式标准描述只有 purge，无 delete；旧 delete 的 ActionPermissions、Hooks 需显式迁移到 purge，否则构造失败。软模式保留 delete，同时具有独立 purge。Describe 与 Application 使用同源配置，DeleteAction 返回冻结的实际动作，AuthorizationBinding/FastDeny 与真实管线一致。
 
-旧 next 消费者需要逐项替换以下 import：
+restore / purge / delete / list_deleted / audit_read 是保留动作名，自定义 Actions 不能重新声明（包括空白变体）。四种通用 Execute 入口不能借用生命周期权限执行任意业务写入；普通 update 仍可用于 REST PUT，但输入、回调、Before 与校验后必须保持加载的删除状态与删除归因不变；创建入口必须产出未删除状态。任何违反均为 Forbidden，批量整批回滚，专用生命周期入口才可迁移删除态。
 
-- 旧 `gochen/app/audit` → 新 `gochen/app/crud/audit`。
-- 旧 `gochen/app/deletion` → 新 `gochen/app/crud/deletion`。
+## 2. REST 与 Module 显式选择路由
 
-旧路径不保留兼容别名或转发包。根 `gochen/audit` 的记录与存储契约路径不变，不要将其替换为应用层历史读取包。Core、Runtime、Contrib 三仓内的调用者已同步；业务下游尚未验证，需更新自身 import 后运行各项目的构建与测试。
+默认公开普通 CRUD；恢复、永久清除和回收站路由必须显式经 `rest.WithRoutes` 选择，显式列表替换默认路由，可对完整资源只公开读取。`rest.WithAudit(history)` 独立组合历史读取，`WithDeletion` 已删除。方法集或实现 ISoftDeletable 本身不发布路由。
 
-## 2. REST 与 Module 显式组合
-
-```go
-host.Module("notes").
-    Binding(rest.Resource(resources,
-        rest.WithAudit[*Note, int64](history),
-        rest.WithDeletion[*Note, int64](trash))).
-    Build()
-```
-
-不需要审计或删除的模块仍只有 `Binding(rest.Resource(resources))`。每个能力贡献自己的动作、权限、执行对象；HTTP 不再通过最大接口猜测横切能力。不同资源混装、重复动作、nil 能力在装配时失败。各动作使用实际能力的 AuthorizationBinding，不能以普通 read 的授权替代 audit_read。
-
-CRUD 审计路由仍是 `GET /:id/audit`；删除路由仍是 `DELETE /:id`、`DELETE /bulk`、`POST /:id/restore`、`DELETE /:id/purge` 和 `GET /deleted`。审计记录要求可信 operator；独立修改归因字段沿用仓储的上下文 / DefaultActor 填充规则（默认 system，不代表用户认证）。纯删除状态不要求操作者或 HTTP extractor。需要时使用已有 WithOperatorExtractor，或由认证边界写入 contextx。
+业务 DELETE 路由使用冻结 DeleteAction：软模式绑定 delete，硬模式绑定 purge。显式永久清除路径仍是 DELETE /:id/purge；恢复 POST /:id/restore，回收站 GET /deleted。各路由校验实际 Descriptor 和授权来源，不允许调用方另配模式或动作。纯删除状态不要求 operator；事务审计要求可信 operator。修改归因继续沿用仓储上下文 / DefaultActor（默认 system，不等于认证用户）。
 
 ## 3. 命名业务与一次动作绑定
 
@@ -73,21 +61,17 @@ ES 事件历史不等同于操作审计，不能声称包含拒绝、失败请�
 
 ## 5. 验收与迁移边界
 
-- Core 测试：普通 Entity 可同事务审计且不带删除；仅删除状态可软删/恢复/永久删且无审计；失败审计、批量失败、维度隔离、Transfer、提交后失败继续回归。
+- Core 测试：普通 Entity 可同事务审计且无需删除状态；仅删除状态可软删/恢复/永久删且无审计；失败审计、批量失败、维度隔离、Transfer、提交后失败继续回归。
 - Runtime：SQL 测试覆盖独立字段组件、原列映射、事务与版本；REST 校验独立能力并核对实际授权来源；notes 与订单审批是完整业务切片。
 - Contrib：GORM 与 Gin/nethttp 对照相同资源能力、认证/授权、版本及入口契约；实际 MySQL/PostgreSQL 由固定上游提交的数据库 CI 验证。
 - 显式 ES：新旧重放一致、未知事件失败、引用隔离、陈旧写入、取消、AfterCommitError、原快照拒绝。
 
 三仓分别 build/vet/test/race，Runtime 运行 examples smoke，Core 保持零外部依赖。最终执行结果以对应提交验收记录为准。
 
-没有迁移 IAM、LLM、Workflow 或业务仓。下游需要同步替换旧包/API、拆分授权描述、显式添加 REST 能力，审查 ES 历史权限和手写路由，再运行自身测试。旧接入点盘点仍见 [核心迁移清单](core-next-migration.md)，不是下游已经兼容的证明。
+没有迁移 IAM、LLM、Workflow 或业务仓。下游需要同步替换旧包/API、按统一配置重建授权描述、显式选择 REST 路由，审查 ES 历史权限和手写路由，再运行自身测试。旧接入点盘点仍见 [核心迁移清单](core-next-migration.md)，不是下游已经兼容的证明。
 
 仅推送三个 next，Core → Runtime → Contrib 顺序，后两仓锁定真实上游 SHA。没有合并 main、发布模块版本、改动持久数据或生产部署；dotless module path 与同级开发态 replace 保留。
 
-### 删除端口拆分后续范围
+### 生命周期验收边界
 
-本次目录分组不改写共享执行协议。当前 `deletion.Repository` 嵌入 `crud.Repository`，因此除生命周期所需端口外还要求 Create、物理 Delete、Query 和 QueryCount；`execution.Options.Repo` / `Read` 及对应 Core 字段仍分别接收完整的 `domain/crud.IRepository` / `execution.ReadRepository`。只在公开接口上删除嵌入无法通过构造，也不能安全地用空实现补齐。
-
-后续改动限定为按真实消费者拆开共享执行端口：删除只要求 Get、Update、ExecutionDescriptor、WithinTx、GetWithDeleted、Restore、ListDeleted 和 Purge，启用审计时继续验证实际仓储的数据源身份与同事务参与。保留共享执行骨架，不复制生命周期算法或增加兼容适配器。`deletion.Options` 同步独立声明删除使用的 Resource、Authorizer、ActionPermissions、Hooks、Validator、Limits、Audit、Projector；自定义动作仍不属于删除能力，不因此新增执行入口。需要同步迁移构造配置调用点，并单独审查公共类型变更。
-
-验收范围：只实现上述最小端口、完全没有 Create / Delete / Query / QueryCount 的仓储能够构造并完成五种删除用例；生命周期授权、条件规约、版本、批量回滚、可选审计同源与失败回滚、钩子隔离和提交后错误保持不变；CRUD 的读写、命令和 Transfer、显式 ES 入口仍通过原回归。三仓分别执行 build、vet、test、race，Core 保持零外部依赖。
+普通和软实体分别显式构造模式；缺能力/未配置模式失败关闭。回归包括重复软删不清除、硬模式清理旧软删行、一次 bulk 授权与事务回滚、purge-only 允许而 delete-only 拒绝、purge 钩子与审计一致、独立历史不丢失、恢复/查询独立开启、禁止通用 Execute 借用生命周期权限，以及只读应用无生命周期入口。三仓分别 build/vet/test/race，Core 保持零外部依赖。

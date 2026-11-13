@@ -39,6 +39,7 @@ func NewAuditedMemoryRepository[T domain.IEntity[ID], ID comparable](generator g
 var (
 	_ domcrud.IRepository[domain.IEntity[int64], int64]             = (*AuditedMemoryRepository[domain.IEntity[int64], int64])(nil)
 	_ domcrud.IPurgeRepository[domain.IEntity[int64], int64]        = (*AuditedMemoryRepository[domain.IEntity[int64], int64])(nil)
+	_ domcrud.IDeletedReadRepository[domain.IEntity[int64], int64]  = (*AuditedMemoryRepository[domain.IEntity[int64], int64])(nil)
 	_ domcrud.IRestoreRepository[domain.IEntity[int64], int64]      = (*AuditedMemoryRepository[domain.IEntity[int64], int64])(nil)
 	_ domcrud.IDeletedQueryRepository[domain.IEntity[int64], int64] = (*AuditedMemoryRepository[domain.IEntity[int64], int64])(nil)
 	_ audited.IAuditStore                                           = (*AuditedMemoryRepository[domain.IEntity[int64], int64])(nil)

@@ -12,16 +12,6 @@ func (a *Application[T, ID]) Update(ctx context.Context, entity T) error {
 	return a.core.Update(ctx, entity)
 }
 
-// Delete 物理删除单个实体。
-func (a *Application[T, ID]) Delete(ctx context.Context, id ID) error {
-	return a.core.Delete(ctx, id)
-}
-
-// DeleteBulk 一次授权、一个事务物理删除多个实体。
-func (a *Application[T, ID]) DeleteBulk(ctx context.Context, ids []ID) error {
-	return a.core.DeleteBulk(ctx, ids)
-}
-
 // Execute 修改已有实体。
 func (a *Application[T, ID]) Execute(
 	ctx context.Context,
