@@ -22,7 +22,7 @@ type Application[T domain.IEntity[ID], ID comparable] struct {
 // NewApplication 创建可读写的 CRUD 应用。
 //
 // 标准动作：read / list / create / update / delete；配置 Options.Audit 时
-// 只参与写入协议；历史查询由 app/audit.Reader 提供。
+// 只参与写入协议；历史查询由 app/crud/audit.Reader 提供。
 func NewApplication[T domain.IEntity[ID], ID comparable](
 	repo Repository[T, ID],
 	options Options[T, ID],

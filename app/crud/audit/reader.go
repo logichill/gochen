@@ -86,7 +86,7 @@ func (r *Reader[ID]) AuthorizationPlan() (auth.Plan, bool) { return auth.PlanOf(
 
 // AuthorizationBinding 返回经过验证的授权绑定。
 func (r *Reader[ID]) AuthorizationBinding(action string) (auth.EntryBinding, error) {
-	return auth.BindExecution(r.authorizer, r.descriptor, auth.ResourceAccessData, "app/audit.Reader", "AuditStore(snapshot spec)", action)
+	return auth.BindExecution(r.authorizer, r.descriptor, auth.ResourceAccessData, "app/crud/audit.Reader", "AuditStore(snapshot spec)", action)
 }
 
 // FastDeny 执行安全的提前拒绝。

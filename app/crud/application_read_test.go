@@ -3,7 +3,7 @@ package crud
 import (
 	"context"
 	"gochen/app"
-	appaudit "gochen/app/audit"
+	appaudit "gochen/app/crud/audit"
 	"gochen/app/query"
 	"gochen/auth"
 	"gochen/domain/meta"

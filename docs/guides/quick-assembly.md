@@ -11,7 +11,7 @@
 | `quick.App[T, ID](repository, options)` | 返回基础 `*crud.Application[T, ID]`；授权器由 `options.Authorizer` 提供 |
 | `quick.DeclaredApp[T, ID](repository, options, rules, dependencies)` | 使用仓储元数据编译强类型规则，自动构造并绑定授权器 |
 
-上述构造函数均返回 error。声明式应用使用 `DeclaredApp`，动作来自 `crud.Describe`，字段来自仓储有效契约。复杂装配可通过 `auth.Compile` 或 `auth.New` 构造授权器，再注入 `crud.Options.Authorizer`。`SoftDeleteRepo` 独立声明仓储能力，审计写入由 crud.Options.Audit 单独配置，历史读取由 app/audit.Reader 提供。
+上述构造函数均返回 error。声明式应用使用 `DeclaredApp`，动作来自 `crud.Describe`，字段来自仓储有效契约。复杂装配可通过 `auth.Compile` 或 `auth.New` 构造授权器，再注入 `crud.Options.Authorizer`。`SoftDeleteRepo` 独立声明仓储能力，审计写入由 crud.Options.Audit 单独配置，历史读取由 app/crud/audit.Reader 提供。
 
 权限码来自 `auth.Descriptor`，默认为 `<resource>:api:<action>`；Action 检查从 ctx 中的 Principal 读取权限集合。声明的 `ScopeRule` 在动作权限成功后由 `auth.ISpecResolver` 产出范围条件与服务端赋值；系统行为通过规则的 `System` 字段明确配置。Application 自动把条件交给仓储，在最终 SQL 中执行 `WITH CHECK` 与 `WHERE`。
 

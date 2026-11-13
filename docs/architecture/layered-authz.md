@@ -8,7 +8,7 @@ Gochen 将用例编排、动作权限、数据隔离、数据范围和决策治�
 
 | 层级 | 解决的问题 | 当前入口 |
 | --- | --- | --- |
-| L0 Plain | 一个业务用例如何执行 | `app/crud`、`app/deletion`、`app/audit`、`app/eventsourced` |
+| L0 Plain | 一个业务用例如何执行 | `app/crud`、`app/crud/deletion`、`app/crud/audit`、`app/eventsourced` |
 | L1 Action | 能否执行某个动作 | `auth.Compile`、`auth.NewPermissionPolicy` |
 | L2 Isolated | 数据属于哪个业务隔离空间 | `contextx.TenantID`、Runtime Repo 的 `WithIsolation` |
 | L3 Scoped | 能访问哪些范围内的数据 | `auth.ScopeRule`、`auth.WithScope`、项目范围解析器 |

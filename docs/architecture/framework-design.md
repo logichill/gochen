@@ -34,10 +34,12 @@ Gochen 通过接口和组合根组织领域建模、应用编排与基础设施�
 `domain/crud.IRepository` 要求 `Create`、`Update`、`Delete`、`Get`。Application 按用例要求查询、事务等附加仓储能力；只有删除生命周期要求恢复、已删除查询和永久删除。Repository 在构造期声明隔离与资源契约，授权条件由 Application 显式传入每次调用。
 
 - CRUD：领域实体 → `app/crud.Application` → Runtime REST。
-- 审计：独立 `audit` 记录与存储契约，CRUD 可选同事务写入；`app/audit.Reader` 独立读取历史。
-- 删除生命周期：`app/deletion` 提供软删、恢复、永久删与回收站，不要求审计或修改人字段。
+- 审计：独立 `audit` 记录与存储契约，CRUD 可选同事务写入；`app/crud/audit.Reader` 独立读取历史。
+- 删除生命周期：`app/crud/deletion` 提供软删、恢复、永久删与回收站，不要求审计或修改人字段。
 - 显式事件溯源：Model/Reducer → StateRepository → 原有 EventStore；不依赖反射聚合。
 - 可选聚合便利路径：领域聚合 → `app/eventsourced` 仓储与命令服务 → EventStore；读侧可由投影维护。
+
+审计历史与删除生命周期按可选 CRUD 能力归入同一子树，各自的接口、构造器和授权保持独立。CRUD 根包不依赖这两个子包；共享的审计契约和执行骨架分别保留在顶级 `audit` 与 `app/internal/execution`。
 
 `app/query` 定义适配器查询协议，业务领域查询可另设有明确业务含义的仓储方法。`app/operation` 表达一次写入的结果与可见状态；Saga / Workflow 表达多步骤过程。
 

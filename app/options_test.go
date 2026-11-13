@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"gochen/app"
-	"gochen/app/audit"
 	"gochen/app/crud"
+	"gochen/app/crud/audit"
 	"gochen/app/eventsourced"
 	"gochen/auth"
 

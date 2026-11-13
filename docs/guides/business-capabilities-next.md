@@ -4,15 +4,26 @@
 
 ## 1. 资源、审计与删除分别构造
 
+资源应用位于 `app/crud`，历史读取与删除生命周期分别位于 `app/crud/audit` 和 `app/crud/deletion`。各能力仍独立构造、组合和授权，`app/crud` 不反向依赖这两个子包。顶级 `audit` 的记录与存储契约、`app/internal/execution` 的共享执行协议保持原位，不保留旧包路径的兼容转发。
+
 - `crud.NewReadApplication` 返回真正只读的 `*crud.ReadApplication`，没有写入、执行、Transfer 或 AuditTrail 方法。
 - `crud.NewApplication` 是唯一通用 CRUD 门面。`Options.Audit` 只选择审计写入，不强制历史查询、软删除或操作者字段。
-- `app/audit.NewReader[ID](queryStore, repository, Options{...})` 只提供审计历史。资源元数据来自 repository 的有效契约，查询按历史 DimensionSnapshot 授权，永久删除之后仍可读取。读取动作仍是 `audit_read`。
+- `app/crud/audit.NewReader[ID](queryStore, repository, Options{...})` 只提供审计历史。资源元数据来自 repository 的有效契约，查询按历史 DimensionSnapshot 授权，永久删除之后仍可读取。读取动作仍是 `audit_read`。
 - `deletion.NewApplication(repository, deletion.Options{Options: crud.Options{...}})` 只提供 Delete/DeleteBulk/Restore/Purge/ListDeleted。它不复制 CRUD 的读写和 Execute/Transfer。需要事务审计时才配置 Audit。
 - `audit.IAuditStore` / `audit.IAuditQueryStore` 分别表达记录写入与读取。写入端 `app.IAuditRepository` 只再要求数据源身份，同源校验与实际事务参与都不可省略。
 
 旧 `app/audited`、`domain/audited.IAuditedEntity`、`IAuditedRepository` 已移除，不保留兼容别名。领域可分别使用 `domain.ChangeInfo`（修改归因）、`domain.DeletionState`（删除状态）。`domain/crud.TrackedEntity` 仅是旧字段形状的便捷组合，普通 Entity 也能启用完整审计。
 
 软删除实体的 CRUD 描述中没有 delete，直接调用 CRUD.Delete 也不能物理删除它。软删只走 deletion.Delete，永久删除只走 Purge。物理仓储仍遵循已有条件写入、版本与事务契约。没有将历史字段、表名或 JSON 层级重新解释为新结构。
+
+### 破坏性 import 路径迁移
+
+旧 next 消费者需要逐项替换以下 import：
+
+- 旧 `gochen/app/audit` → 新 `gochen/app/crud/audit`。
+- 旧 `gochen/app/deletion` → 新 `gochen/app/crud/deletion`。
+
+旧路径不保留兼容别名或转发包。根 `gochen/audit` 的记录与存储契约路径不变，不要将其替换为应用层历史读取包。Core、Runtime、Contrib 三仓内的调用者已同步；业务下游尚未验证，需更新自身 import 后运行各项目的构建与测试。
 
 ## 2. REST 与 Module 显式组合
 
@@ -72,3 +83,11 @@ ES 事件历史不等同于操作审计，不能声称包含拒绝、失败请�
 没有迁移 IAM、LLM、Workflow 或业务仓。下游需要同步替换旧包/API、拆分授权描述、显式添加 REST 能力，审查 ES 历史权限和手写路由，再运行自身测试。旧接入点盘点仍见 [核心迁移清单](core-next-migration.md)，不是下游已经兼容的证明。
 
 仅推送三个 next，Core → Runtime → Contrib 顺序，后两仓锁定真实上游 SHA。没有合并 main、发布模块版本、改动持久数据或生产部署；dotless module path 与同级开发态 replace 保留。
+
+### 删除端口拆分后续范围
+
+本次目录分组不改写共享执行协议。当前 `deletion.Repository` 嵌入 `crud.Repository`，因此除生命周期所需端口外还要求 Create、物理 Delete、Query 和 QueryCount；`execution.Options.Repo` / `Read` 及对应 Core 字段仍分别接收完整的 `domain/crud.IRepository` / `execution.ReadRepository`。只在公开接口上删除嵌入无法通过构造，也不能安全地用空实现补齐。
+
+后续改动限定为按真实消费者拆开共享执行端口：删除只要求 Get、Update、ExecutionDescriptor、WithinTx、GetWithDeleted、Restore、ListDeleted 和 Purge，启用审计时继续验证实际仓储的数据源身份与同事务参与。保留共享执行骨架，不复制生命周期算法或增加兼容适配器。`deletion.Options` 同步独立声明删除使用的 Resource、Authorizer、ActionPermissions、Hooks、Validator、Limits、Audit、Projector；自定义动作仍不属于删除能力，不因此新增执行入口。需要同步迁移构造配置调用点，并单独审查公共类型变更。
+
+验收范围：只实现上述最小端口、完全没有 Create / Delete / Query / QueryCount 的仓储能够构造并完成五种删除用例；生命周期授权、条件规约、版本、批量回滚、可选审计同源与失败回滚、钩子隔离和提交后错误保持不变；CRUD 的读写、命令和 Transfer、显式 ES 入口仍通过原回归。三仓分别执行 build、vet、test、race，Core 保持零外部依赖。

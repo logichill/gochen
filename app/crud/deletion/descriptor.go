@@ -24,7 +24,7 @@ func Describe[T IEntity[ID], ID comparable](options Options[T, ID]) (auth.Descri
 func (a *Application[T, ID]) AuthorizationPlan() (auth.Plan, bool) { return a.core.AuthorizationPlan() }
 
 func (a *Application[T, ID]) AuthorizationBinding(action string) (auth.EntryBinding, error) {
-	return a.core.AuthorizationBinding(action, "app/deletion.Application")
+	return a.core.AuthorizationBinding(action, "app/crud/deletion.Application")
 }
 
 // FastDeny 执行声明计划提供的安全提前拒绝。

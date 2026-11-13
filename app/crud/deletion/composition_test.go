@@ -3,8 +3,8 @@ package deletion
 import (
 	"context"
 	"gochen/app"
-	appaudit "gochen/app/audit"
 	appcrud "gochen/app/crud"
+	appaudit "gochen/app/crud/audit"
 	"gochen/audit"
 	"gochen/auth"
 	"gochen/errors"

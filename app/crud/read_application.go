@@ -11,7 +11,7 @@ import (
 )
 
 // ReadApplication 编排只读用例，不提供写入、动作执行或归属迁移方法。
-// 审计读取由独立的 app/audit.Reader 提供。
+// 审计读取由独立的 app/crud/audit.Reader 提供。
 type ReadApplication[T domain.IEntity[ID], ID comparable] struct {
 	readApplication[T, ID]
 }
