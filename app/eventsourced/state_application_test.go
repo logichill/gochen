@@ -212,6 +212,61 @@ func TestStateApplicationChecksBaselineAndFinalStateBeforeAppend(t *testing.T) {
 	}
 }
 
+func TestStateApplicationCreateRequiresAssignmentCapability(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		assignable bool
+		assign     bool
+	}{
+		{name: "transfer only assignment", assign: true},
+		{name: "transfer only without assignment"},
+		{name: "assignable assignment", assignable: true, assign: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, original, stream, az := guardedFixture(t, false)
+			az.vocabulary.Assignable = []meta.Dimension{"department"}
+			if tc.assign {
+				az.decision.Assign = []auth.Assignment{{Dimension: "department", Value: int64(10)}}
+			}
+			options := guardedOptions(az)
+			options.Contract.Transferable = []meta.Dimension{"department"}
+			if tc.assignable {
+				options.Contract.Assignable = []meta.Dimension{"department"}
+			}
+			a, err := NewStateApplication(original.repo, options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if a.execution.CanAssign("department") != tc.assignable || !a.execution.CanTransfer("department") {
+				t.Fatal("unexpected resource capabilities")
+			}
+			calls := 0
+			result, err := a.Execute(ctx, "open", 1, 0, func(context.Context, guardedState) ([]guardedEvent, error) {
+				calls++
+				return []guardedEvent{{"t1", 10, 3}}, nil
+			})
+			if az.calls != 1 || az.request.Action != "open" {
+				t.Fatalf("create did not authorize once: calls=%d request=%+v", az.calls, az.request)
+			}
+			if tc.assign && !tc.assignable {
+				if !errors.Is(err, errors.Internal) || result != nil {
+					t.Errorf("create assignment without capability: result=%+v err=%v", result, err)
+				}
+				if stream.reads != 0 || calls != 0 || stream.appends != 0 || len(stream.events[1]) != 0 {
+					t.Errorf("invalid assignment reached load/decide/append: reads=%d decides=%d appends=%d events=%d", stream.reads, calls, stream.appends, len(stream.events[1]))
+				}
+				return
+			}
+			if err != nil || result == nil || result.Version() != 1 || result.Value().Department != 10 {
+				t.Fatalf("valid create: result=%+v err=%v", result, err)
+			}
+			if stream.reads != 1 || calls != 1 || stream.appends != 1 || len(stream.events[1]) != 1 {
+				t.Fatalf("valid create execution: reads=%d decides=%d appends=%d events=%d", stream.reads, calls, stream.appends, len(stream.events[1]))
+			}
+		})
+	}
+}
+
 func TestStateApplicationCreateAssignmentsAreProducedByEvents(t *testing.T) {
 	ctx, a, stream, az := guardedFixture(t, false)
 	az.decision.Assign = []auth.Assignment{{Dimension: "department", Value: int64(10)}}
@@ -238,6 +293,46 @@ func TestStateApplicationCreateAssignmentsAreProducedByEvents(t *testing.T) {
 	}
 	if _, err := a.Execute(ctx, "change", 2, 0, decideState(guardedEvent{"t1", 10, 3})); !errors.Is(err, errors.NotFound) {
 		t.Fatalf("update absent: %v", err)
+	}
+}
+
+func TestStateApplicationUpdateProtectsTransferOnlyAssignments(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		department int64
+	}{
+		{name: "unchanged", department: 10},
+		{name: "changed", department: 20},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, original, stream, az := guardedFixture(t, true)
+			az.decision.Spec = spec.All()
+			az.decision.Assign = []auth.Assignment{{Dimension: "department", Value: tc.department}}
+			az.vocabulary.Assignable = []meta.Dimension{"department"}
+			options := guardedOptions(az)
+			options.Contract.Transferable = []meta.Dimension{"department"}
+			a, err := NewStateApplication(original.repo, options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			calls := 0
+			result, err := a.Execute(ctx, "change", 1, 1, func(context.Context, guardedState) ([]guardedEvent, error) {
+				calls++
+				return []guardedEvent{{"t1", tc.department, 6}}, nil
+			})
+			if az.calls != 1 || stream.reads != 1 || calls != 1 {
+				t.Fatalf("update did not reach decision: authorizations=%d reads=%d decides=%d", az.calls, stream.reads, calls)
+			}
+			if tc.department != 10 {
+				if !errors.Is(err, errors.Forbidden) || result != nil || stream.appends != 0 || len(stream.events[1]) != 1 {
+					t.Fatalf("protected assignment changed state: result=%+v err=%v appends=%d events=%d", result, err, stream.appends, len(stream.events[1]))
+				}
+				return
+			}
+			if err != nil || result == nil || result.Version() != 2 || result.Value().Department != 10 || result.Value().Balance != 6 || stream.appends != 1 || len(stream.events[1]) != 2 {
+				t.Fatalf("unchanged assignment blocked update: result=%+v err=%v appends=%d events=%d", result, err, stream.appends, len(stream.events[1]))
+			}
+		})
 	}
 }
 

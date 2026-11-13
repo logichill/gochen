@@ -77,6 +77,14 @@ func (a *StateApplication[S, E, ID]) Execute(ctx context.Context, action string,
 	if creating && expectedVersion != 0 {
 		return nil, errors.NewCode(errors.InvalidInput, "create requires expected version zero")
 	}
+	if creating {
+		for _, assignment := range decision.Assign {
+			if !a.execution.CanAssign(assignment.Dimension) {
+				return nil, errors.NewCode(errors.Internal, "create assignment lacks resource capability").
+					WithContext("dimension", string(assignment.Dimension))
+			}
+		}
+	}
 	runCtx, err := a.commandContext(ctx, action, opts)
 	if err != nil {
 		return nil, err
