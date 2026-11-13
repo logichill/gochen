@@ -374,3 +374,36 @@ func TestAllPoliciesIsolatesNestedRequestIntent(t *testing.T) {
 		t.Fatal("caller intent changed")
 	}
 }
+
+func TestAuthorizeClosesRetainedFactsOnSuccessDenialAndError(t *testing.T) {
+	for _, outcome := range []string{"allow", "deny", "error"} {
+		t.Run(outcome, func(t *testing.T) {
+			var retained auth.Request
+			fact, err := auth.NewFact("retained", func(context.Context, auth.Request) (string, error) { return "trusted", nil })
+			if err != nil {
+				t.Fatal(err)
+			}
+			policy, err := auth.WithFacts(auth.PolicyFunc(func(ctx context.Context, req auth.Request) (auth.Decision, error) {
+				retained = req
+				if _, err := fact.Get(ctx, req); err != nil {
+					return auth.Decision{}, err
+				}
+				if outcome == "error" {
+					return auth.Decision{}, errors.NewCode(errors.Dependency, "unavailable")
+				}
+				return auth.Decision{Allowed: outcome == "allow", Spec: spec.All()}, nil
+			}), fact)
+			if err != nil {
+				t.Fatal(err)
+			}
+			a, err := auth.New(auth.Options{Policy: policy})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, _ = a.Authorize(t.Context(), auth.Request{Resource: "document", Action: "read"})
+			if _, err := fact.Get(t.Context(), retained); !errors.Is(err, errors.FailedPrecondition) {
+				t.Fatalf("retained fact remained usable: %v", err)
+			}
+		})
+	}
+}

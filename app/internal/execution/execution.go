@@ -6,21 +6,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"gochen/app"
-	domcrud "gochen/domain/crud"
-	"gochen/domain/spec"
 	"reflect"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"gochen/app"
 	"gochen/app/query"
 	"gochen/auth"
 	"gochen/contextx"
 	"gochen/domain"
-
+	domcrud "gochen/domain/crud"
 	"gochen/domain/meta"
+	"gochen/domain/spec"
 	"gochen/errors"
 	"gochen/internal/depcheck"
 	"gochen/validate"
@@ -69,15 +68,14 @@ type ReadRepository[T domain.IEntity[ID], ID comparable] interface {
 
 // Options 是构造期配置；所有字段在构造时冻结。
 type Options[T domain.IEntity[ID], ID comparable] struct {
-	CommandGrant *app.CommandGrant
-	Resource     string
-	Authorizer   auth.IAuthorizer
-	Actions      []auth.Action
-	Defaults     []auth.Action
-	Hooks        Hooks[T]
-	Validator    validate.IValidator
-	Limits       app.Limits
-	Projector    app.Projector[T]
+	Resource   string
+	Authorizer auth.IAuthorizer
+	Actions    []auth.Action
+	Defaults   []auth.Action
+	Hooks      Hooks[T]
+	Validator  validate.IValidator
+	Limits     app.Limits
+	Projector  app.Projector[T]
 
 	Repo  domcrud.IRepository[T, ID]
 	Read  ReadRepository[T, ID]
@@ -93,18 +91,17 @@ type Options[T domain.IEntity[ID], ID comparable] struct {
 
 // Core 编排授权、事务、钩子与审计。构造完成后只读，可并发复用。
 type Core[T domain.IEntity[ID], ID comparable] struct {
-	commandGrant *app.CommandGrant
-	resource     string
-	authorizer   auth.IAuthorizer
-	vocabulary   auth.Vocabulary
-	descriptor   auth.Descriptor
-	actions      map[string]auth.Action
-	hooks        Hooks[T]
-	validator    validate.IValidator
-	limits       app.Limits
-	projector    app.Projector[T]
-	metadata     *meta.Metadata
-	execution    app.ExecutionDescriptor
+	resource   string
+	authorizer auth.IAuthorizer
+	vocabulary auth.Vocabulary
+	descriptor auth.Descriptor
+	actions    map[string]auth.Action
+	hooks      Hooks[T]
+	validator  validate.IValidator
+	limits     app.Limits
+	projector  app.Projector[T]
+	metadata   *meta.Metadata
+	execution  app.ExecutionDescriptor
 
 	repo  domcrud.IRepository[T, ID]
 	read  ReadRepository[T, ID]
@@ -139,11 +136,6 @@ func New[T domain.IEntity[ID], ID comparable](opts Options[T, ID]) (*Core[T, ID]
 	if err := auth.ValidatePlanBinding(opts.Authorizer, descriptor, auth.ResourceAccessData); err != nil {
 		return nil, err
 	}
-	if opts.CommandGrant != nil {
-		if err := opts.CommandGrant.BindExecution(opts.Read, opts.Authorizer, descriptor); err != nil {
-			return nil, err
-		}
-	}
 	needsWrite := false
 	for _, action := range descriptor.Actions {
 		switch action.Kind {
@@ -157,15 +149,6 @@ func New[T domain.IEntity[ID], ID comparable](opts Options[T, ID]) (*Core[T, ID]
 		}
 		if depcheck.IsNil(opts.Tx) {
 			return nil, errors.NewCode(errors.InvalidInput, "repository must implement ITransactional for write actions")
-		}
-		if opts.CommandGrant != nil {
-			provider, ok := opts.Repo.(app.IExecutionDescriptorProvider)
-			if !ok {
-				return nil, errors.NewCode(errors.InvalidInput, "command write repository must declare its execution descriptor")
-			}
-			if err := opts.CommandGrant.BindExecution(provider, opts.Authorizer, descriptor); err != nil {
-				return nil, err
-			}
 		}
 	}
 	if needsWrite && opts.SoftDelete {
@@ -216,26 +199,25 @@ func New[T domain.IEntity[ID], ID comparable](opts Options[T, ID]) (*Core[T, ID]
 		}
 	}
 	return &Core[T, ID]{
-		commandGrant: opts.CommandGrant,
-		resource:     descriptor.Resource,
-		authorizer:   opts.Authorizer,
-		vocabulary:   vocabulary,
-		descriptor:   descriptor,
-		actions:      actions,
-		hooks:        freezeHooks(opts.Hooks),
-		validator:    opts.Validator,
-		limits:       opts.Limits.Normalize(),
-		projector:    opts.Projector,
-		metadata:     metadata,
-		execution:    effective,
-		repo:         opts.Repo,
-		read:         opts.Read,
-		tx:           opts.Tx,
-		audit:        opts.Audit,
-		softDelete:   opts.SoftDelete,
-		restore:      opts.Restore,
-		deleted:      opts.Deleted,
-		purge:        opts.Purge,
+		resource:   descriptor.Resource,
+		authorizer: opts.Authorizer,
+		vocabulary: vocabulary,
+		descriptor: descriptor,
+		actions:    actions,
+		hooks:      freezeHooks(opts.Hooks),
+		validator:  opts.Validator,
+		limits:     opts.Limits.Normalize(),
+		projector:  opts.Projector,
+		metadata:   metadata,
+		execution:  effective,
+		repo:       opts.Repo,
+		read:       opts.Read,
+		tx:         opts.Tx,
+		audit:      opts.Audit,
+		softDelete: opts.SoftDelete,
+		restore:    opts.Restore,
+		deleted:    opts.Deleted,
+		purge:      opts.Purge,
 	}, nil
 }
 
@@ -409,28 +391,10 @@ func (c *Core[T, ID]) canonicalIDs(ids []ID) []string {
 }
 
 func (c *Core[T, ID]) authorize(ctx context.Context, action string, ids []ID) (spec.Spec, auth.Decision, error) {
-	if c.commandGrant != nil {
-		decision, err := c.commandGrant.ExecutionDecision(ctx, c.resource, action, c.canonicalIDs(ids))
-		if err != nil {
-			return spec.Spec{}, auth.Decision{}, err
-		}
-		return decision.Spec, decision, nil
-	}
 	return AuthorizeAction(ctx, c.resource, c.authorizer, c.descriptor, c.actions, c.vocabulary, c.metadata, action, c.canonicalIDs(ids))
 }
 
 func (c *Core[T, ID]) authorizeKind(ctx context.Context, action string, ids []ID, kinds ...auth.Kind) (spec.Spec, auth.Decision, error) {
-	if c.commandGrant != nil {
-		declared, ok := c.actions[action]
-		if ok {
-			for _, kind := range kinds {
-				if kind == declared.Kind {
-					return c.authorize(ctx, action, ids)
-				}
-			}
-		}
-		return spec.Spec{}, auth.Decision{}, errors.NewCode(errors.Forbidden, "action kind is outside the command execution")
-	}
 	return AuthorizeKind(ctx, c.resource, c.authorizer, c.descriptor, c.actions, c.vocabulary, c.metadata, action, c.canonicalIDs(ids), kinds...)
 }
 

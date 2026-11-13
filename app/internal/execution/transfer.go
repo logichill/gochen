@@ -23,9 +23,6 @@ func (c *Core[T, ID]) Transfer(ctx context.Context, action string, id ID, expect
 	if err := checkContext(ctx); err != nil {
 		return zero, err
 	}
-	if c.commandGrant != nil {
-		return zero, errors.NewCode(errors.FailedPrecondition, "command-bound applications do not support two-phase transfer")
-	}
 	if _, active := contextx.TxLifecycleFromContext(ctx); active {
 		return zero, errors.NewCode(errors.FailedPrecondition, "transfer must begin outside a transaction")
 	}

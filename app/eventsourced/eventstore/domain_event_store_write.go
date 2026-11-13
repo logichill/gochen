@@ -69,8 +69,8 @@ func (a *domainEventStore[ID]) prepareDomainEvents(ctx context.Context, aggregat
 			return nil, errors.NewCode(errors.InvalidInput, "domain event type cannot be empty").
 				WithContext("domain_event_type", fmt.Sprintf("%T", de))
 		}
-		if !a.eventRegistry.HasEvent(eventType) {
-			return nil, errors.NewCode(errors.NotFound, "unknown event type").
+		if err := a.eventRegistry.ValidateEvent(eventType, de); err != nil {
+			return nil, errors.Wrap(err, errors.Code(err), "invalid domain event registration").
 				WithContext("event_type", eventType).
 				WithContext("aggregate_type", a.aggregateType).
 				WithContext("aggregate_id", aggregateID).

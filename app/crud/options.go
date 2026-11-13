@@ -16,11 +16,8 @@ import (
 // ActionPermissions 按动作名覆盖标准动作的默认权限码（<resource>:api:<action>），
 // 允许多个动作共用一个权限码；键必须是本应用已声明的标准动作。
 type Options[T domain.IEntity[ID], ID comparable] struct {
-	Resource   string
-	Authorizer auth.IAuthorizer
-	// CommandGrant 将嵌套应用绑定到当前命令已经完成的完整授权判定。
-	// 此类应用的 Transfer 返回 FailedPrecondition；两阶段迁移使用独立应用执行。
-	CommandGrant      *app.CommandGrant
+	Resource          string
+	Authorizer        auth.IAuthorizer
 	Actions           []auth.Action
 	ActionPermissions map[string]string
 	Hooks             Hooks[T]

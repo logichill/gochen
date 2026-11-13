@@ -38,7 +38,8 @@ func (s *State[S, ID]) Version() uint64 { return s.version }
 func (s *State[S, ID]) ID() ID { return s.id }
 
 // StateRepository 编排显式状态的加载、归约、决定和追加，无聚合基类或元数据要求。
-// 它是提交工具，不代替业务入口授权；调用方必须在 Load/Execute 前执行授权及规约校验。
+// 它是提交工具，不代替业务入口授权；业务应通过 StateApplication 访问，
+// 低层 Load/Execute 仅由可信组合根持有，不提供资源授权。
 type StateRepository[S any, E domain.IDomainEvent, ID comparable] struct {
 	model  es.Model[S, E]
 	stream IEventStream[ID]
@@ -115,10 +116,16 @@ func stateEvent[E domain.IDomainEvent](event domain.IDomainEvent) (E, error) {
 // 成功或 AfterCommitError 返回新的基线，旧基线仍可读取但再次写入会发生版本冲突。
 // 空事件不追加，也不执行版本守卫。事件不可被回调保留后修改；不自动重试。
 func (r *StateRepository[S, E, ID]) Execute(ctx context.Context, base *State[S, ID], decide func(context.Context, S) ([]E, error)) (*State[S, ID], error) {
+	return r.execute(ctx, base, decide, func(S) error { return nil })
+}
+
+// execute 在事件归约后、任何追加前检查真实候选状态。guard 只接收隔离副本，
+// 不能通过修改校验参数改变实际提交状态；即使没有事件，也必须执行检查。
+func (r *StateRepository[S, E, ID]) execute(ctx context.Context, base *State[S, ID], decide func(context.Context, S) ([]E, error), guard func(S) error) (*State[S, ID], error) {
 	if err := stateContext(ctx); err != nil {
 		return nil, err
 	}
-	if base == nil || base.owner != r || decide == nil {
+	if r == nil || base == nil || base.owner != r || decide == nil || guard == nil {
 		return nil, errors.NewCode(errors.InvalidInput, "state must belong to repository and decide is required")
 	}
 	events, err := decide(ctx, base.Value())
@@ -137,6 +144,9 @@ func (r *StateRepository[S, E, ID]) Execute(ctx context.Context, base *State[S, 
 	}
 	next, err := r.model.Replay(base.value, events)
 	if err != nil {
+		return nil, err
+	}
+	if err := guard(r.model.Clone(next)); err != nil {
 		return nil, err
 	}
 	if err := ctx.Err(); err != nil {

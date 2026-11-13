@@ -41,17 +41,16 @@ func NewReadApplication[T domain.IEntity[ID], ID comparable](
 		return nil, err
 	}
 	core, err := execution.New(execution.Options[T, ID]{
-		Resource:     options.Resource,
-		Authorizer:   options.Authorizer,
-		CommandGrant: options.CommandGrant,
-		Actions:      options.Actions,
-		Defaults:     defaults,
-		Hooks:        options.Hooks,
-		Validator:    options.Validator,
-		Limits:       options.Limits,
-		Read:         repo,
-		Audit:        options.Audit,
-		Projector:    options.Projector,
+		Resource:   options.Resource,
+		Authorizer: options.Authorizer,
+		Actions:    options.Actions,
+		Defaults:   defaults,
+		Hooks:      options.Hooks,
+		Validator:  options.Validator,
+		Limits:     options.Limits,
+		Read:       repo,
+		Audit:      options.Audit,
+		Projector:  options.Projector,
 	})
 	if err != nil {
 		return nil, err

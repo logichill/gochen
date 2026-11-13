@@ -49,8 +49,16 @@
 - 空事件不调用追加，也不进行版本守卫；需要跨流原子守卫时使用原子仓储，不把本工具当作事务。
 - 所有流事件必须版本连续；未知事件、解码/升级失败或取消均失败关闭。读取期间允许新事件出现，提交时仍以最终读取版本执行乐观锁检查。
 - 不自动读取、写入或转换旧聚合快照；NewEventStream 拒绝 SnapshotManager。显式模型的快照需要独立、明确的格式设计和迁移。
-- StateRepository 是有限提交工具，不是授权应用模板。业务用例负责权限、作用域及最终状态校验；事件元数据沿用已有 contextx 注入方式。
+- StateRepository 是有限提交工具，不是授权应用模板。组合根持有低层仓储，向业务仅注入下面的 StateApplication；直接注入或调用低层端口仍可绕开应用授权。
 
-可运行示例：Runtime `examples/domain/explicit-eventsourced`，以业务 accountService 显式组合账户级授权，具名 Deposit/Withdraw 命令携带调用方 ExpectedVersion，拒绝过期命令后仍由追加检查并发。示例授权策略只允许固定演示账户；生产必须注入真实权限与租户边界。兼容性与故障隔离测试：`eventstore/state_repository_test.go`，同一实际内存事件流分别由传统聚合和显式模型回放。
+`NewStateApplication(repo, StateOptions[S, ID, V])` 是显式状态的受保护入口，复用 `auth.IAuthorizer` 与 `app.ResourceContract`，不创建第二套授权器。`DescribeState` 与构造器共用同一显式动作清单；支持 read、create、update，业务调用 `Load(ctx, action, id)` 或 `Execute(ctx, action, id, expectedVersion, decide)`。`AuthorizationBinding(action)` 来自同一执行对象，可供入口门禁使用。
+
+可信组合根提供 `View(ID, S) V`，V 为带 `entity:"id"` 字段的结构体指针；S 仍是无接口、无标签要求的普通状态。投影 ID 必须等于目标流 ID，所有策略引用必须在投影元数据中有绑定；投影必须忠实、完整地表达业务安全事实，不能从请求上下文捏造租户/部门或省略要保护的字段。框架能核对声明和投影值，无法证明任意投影函数忠实于 S；因此 View 必须由可信组合根定义并做业务契约测试。字符串流 ID 必须非空且无首尾空白，避免授权目标与实际目标不同。
+
+受保护链路为：授权 → 回放 → 检查基线范围及隔离 → 检查调用方版本 → 决定事件 → 从原基线归约 → 检查真实结果 → 带原版本追加。更新默认保护 ID 和维度，资源声明可变维度后才放开；配置结构隔离时必须同时提供可信上下文解析器。权威赋值只核对事件产出的结果，绝不直接改写状态。领域校验与可选 Validate 只接收副本。对于任何已有事件的流，创建和更新都先检查基线范围/隔离；范围外先返回 NotFound，不借版本冲突泄露存在性或流版本。创建必须版本零且无已提交事件；不提供不存在流与已存在空流的额外区别。
+
+空事件仍执行最终范围、保护字段、赋值及领域校验，但不追加、不提供原子版本守卫。此入口仅保护单流操作，不保证外部权限数据与事件追加在同一事务中，也不提供跨流事务或自动重试。
+
+可运行示例：Runtime `examples/domain/explicit-eventsourced`。accountService 只决定具名 Deposit/Withdraw 输入对应的事件，StateApplication 执行授权和提交检查；调用方 ExpectedVersion 仍由最终追加再次核对。示例使用编译后的账户级授权，只允许固定演示账户；生产必须注入真实权限与租户边界。兼容性与故障隔离测试：`eventstore/state_repository_test.go`；授权边界测试：`state_application_test.go`。
 
 事件历史是事件流视图，不是完整操作审计。ES 的 `EventHistory` / `ActionEventHistoryRead` 使用 `event_history_read`，旧 ES `AuditTrail` / `audit_read` 不保留别名；权限目录与 HTTP 路由同步迁移。CRUD 操作审计不受此命名变化影响。

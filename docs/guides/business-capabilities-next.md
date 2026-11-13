@@ -31,13 +31,13 @@ CRUD 审计路由仍是 `GET /:id/audit`；删除路由仍是 `DELETE /:id`、`D
 ## 3. 命名业务与一次动作绑定
 
 ```go
-approveHTTP := rest.Bind("POST", "/:id/approve", approveCommand, decodeApprove)
+approveHTTP := rest.Bind("POST", "/:id/approve", approver, decodeApprove)
 orders := host.Module("orders").Binding(approveHTTP)
 ```
 
-业务公开 `OrderApprover.Approve(ctx, ApproveOrder)`，返回 `Approval`。领域规则与事务顺序是普通 Go，Command 的授权装配留在组合根。HTTP 与直接 Go 调用使用同一 Command，不再提供第二份动作名和任意 handler。Module 从同一绑定取得目录与入口。
+业务公开 `OrderApprover.Approve(ctx, ApproveOrder)`，返回 `Approval`。领域规则是普通 Go，单资源动作复用 CRUD.Execute 的授权、事务与审计。HTTP 与直接 Go 调用使用同一具名业务对象；传输接口只需 Execute 和同源 AuthorizationBinding，不依赖 Command 类型。Module 从同一绑定取得目录与入口。
 
-旧 `rest.Action` / ActionHandler 已移除。实际 Worker/CLI 可以调用同一命令，仍必须提供可信身份并参与既有入口核对；本候选不新增通用 Job 调度器、收据或效果解释器。多资源授权不自动创造跨数据库事务。
+旧 `rest.Action` / ActionHandler 已移除。实际 Worker/CLI 可以调用同一业务方法，仍必须提供可信身份并参与既有入口核对；本候选不新增通用 Job 调度器、收据或效果解释器。多资源授权不自动创造跨数据库事务。
 
 ## 4. 显式 ES 模型
 
@@ -48,9 +48,9 @@ orders := host.Module("orders").Binding(approveHTTP)
 - 空事件不写入也不验证数据库最新版本，不可把空决定当作并发锁。
 - 原事件适配器继续负责 codec、upcast、信封、顺序、版本、Direct/Outbox 发布。事件 wire type/schema/payload 不变。具体事件类型 E 的值与指针表示在回放时规范化，避免内存与 JSON 后端差异；仅同名但类型不同的事件仍拒绝。多事件接口 E 保留实际事件类型，Decide/Reduce 应遵循 registry 的指针事件约定。
 - 显式路径不使用旧聚合快照，传入 SnapshotManager 时构造失败；它从完整事件重放，旧反射聚合及快照路径仍可使用。不能将不同状态形状写进同一旧快照格式。
-- StateRepository 是持久化工具，不是自动授权的业务服务；在业务入口执行授权/范围检查。提交后失败仍为 AfterCommitError，不得当作未提交安全重试。
+- StateRepository 是持久化工具；业务注入 StateApplication，统一执行基线与事件归约后、追加前的授权/范围/保护字段检查。提交后失败仍为 AfterCommitError，不得当作未提交安全重试。
 
-代表性样例 `gochen-runtime/examples/domain/explicit-eventsourced` 与测试验证新旧路径读取同一事件流；并保留旧聚合便利 API，不强迫所有领域对象改为函数式模型。
+详见[授权执行迁移](next-authorization-migration.md)。代表性样例 `gochen-runtime/examples/domain/explicit-eventsourced` 与测试验证新旧路径读取同一事件流；并保留旧聚合便利 API，不强迫所有领域对象改为函数式模型。
 
 ### 事件历史命名与权限迁移
 

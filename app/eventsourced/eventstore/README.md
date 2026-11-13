@@ -32,6 +32,8 @@
 
 三种模式都需要 EventStore、事件 ID 生成器、Registry 和 UpgraderRegistry。缺失、typed nil 必需依赖或矛盾发布依赖返回 InvalidInput；禁止字段应保持 nil 接口。显式选择 Direct 后，不再输出“退化到直接发布”的构造日志。
 
+追加前按 Registry 校验整批领域事件的 Go 类型。EventType 名称相同但具体类型不同返回 InvalidInput，不写入事件、发布消息或写入 Outbox；未注册名称仍返回 NotFound。只接受工厂登记的指针类型及其一层解引用的值类型，不按 JSON 形状或类型可转换性放行；跨聚合原子批次同样先校验全部事件。
+
 下面展示在共同配置 `opts` 上选择一种模式；每个示例分别使用，不要叠加：
 
 ```go

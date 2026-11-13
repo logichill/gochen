@@ -34,7 +34,7 @@
 
 没有表/列、ID 编码、审计字段、事件 type/schema/payload、snapshot/checkpoint/outbox 的迁移。ES 事件历史动作由 audit_read 改为 event_history_read，默认权限同步变化；部署端必须显式迁移原 ES 历史授权，不修改 CRUD 审计权限。详见[能力拆分迁移](business-capabilities-next.md)。
 
-CRUD 与 deletion 共用私有执行骨架；业务审计仍在同一个事务回调中写入，失败回滚，提交后失败仍为 `AfterCommitError`。审计查询使用历史 Dimensions 快照。ES 继续使用独立授权、回放、重试和事件保存流程；原子 SaveAll 及快照装饰器边界不变。Transfer、多资源 Command、条件下推、租户与受保护维度没有改写。
+CRUD 与 deletion 共用私有执行骨架；业务审计仍在同一个事务回调中写入，失败回滚，提交后失败仍为 `AfterCommitError`。审计查询使用历史 Dimensions 快照。ES 继续使用独立授权、回放、重试和事件保存流程；原子 SaveAll 及快照装饰器边界不变。Transfer、条件下推、租户与受保护维度合同保留。原多资源 Command API 已移除，改为显式业务预检和受保护应用编排，正式判定仍逐资源执行；同源事务边界需实际验证，不能自动声称跨存储原子提交。详见[授权执行迁移](next-authorization-migration.md)。
 
 ## 下游影响清单
 

@@ -21,7 +21,7 @@
 
 CRUD 的 `Transfer` 接收调用方版本和目标归属，分别授权转出与接收，再在同一事务中写入、回读实际状态并保存两侧审计。迁移钩子支持 After / PostCommit。字段配置和完整执行规则见 [资源契约](../docs/architecture/resource-contracts.md)。
 
-通过 `Options.CommandGrant` 绑定到命令的应用在 `Transfer` 入口返回 `FailedPrecondition`。两阶段迁移使用独立应用；命令内的单资源判定复用范围见[强类型授权接入](../docs/guides/declarative-authorization.md#多资源命令)。
+单资源具名动作直接复用 `Execute`；多资源服务先预检全部资源，再在确有支持的同源事务中调用各受保护应用。应用仍正式授权，不使用命令专属 Grant 或上下文授权缓存。见[强类型授权接入](../docs/guides/declarative-authorization.md#多资源业务编排)。
 
 ## CRUD 与审计实现的文件组织
 
@@ -93,10 +93,6 @@ Hooks 以动作名为键，标准写动作使用 `create` / `update` / `delete`�
 
 `Execute` / `ExecuteNew` / 批量命令及 `Restore` 在提交后回调失败时返回已提交实体与 `contextx.AfterCommitError`。实体的 ID、版本与业务状态保持有效，调用方可据此返回降级成功或补偿失败的提交后阶段。
 
-资源专属命令通过 `CommandIdentityCall` 绑定全局 ID 服务能力。服务返回错误时，能力保留安全复制的部分结果和原错误（包含 AfterCommitError）；结果复制失败时清空输出并合并服务错误与复制错误。授权拒绝仍返回零结果，执行结束撤销能力。
-
-聚合读取通过 `CommandReader` 接收授权条件；装备切换等专属原子写入通过 `CommandWriter` 接收条件及冻结 ID 意图。专属写入要求写动作、同一资源实例且没有权威 Assign，装配回调负责实际仓储的条件、归属、版本和事务保护；通用实体写入继续通过 `CommandRepository`。这些能力均在命令结束后撤销，专属写入失败时保留安全复制的部分结果。
-
 `Purge` 的业务校验应使用 `GetWithDeleted` 读取记录，避免已软删除的实体被普通 `Get` 遮蔽。`Purge` / `Restore` 只执行各自显式配置的 Stage；空 Stage 不执行钩子，不回退到 `Delete` / `Update`。
 
 `Execute` / `ExecuteBulk` 先运行命令函数，再执行 `Before`，保证写前业务校验看到最终目标状态。更新按独立复制后的真实业务字段判断变化；字段 MarshalJSON 与审计 Projector 控制展示，隐藏字段的修改仍会持久化。无变化更新同样核对版本，合法 no-op 保持版本和审计记录数量。
@@ -117,7 +113,7 @@ CRUD 对软删除实体不声明 delete，直接调用其 Delete 也不会物理
 
 ## 事件溯源与写操作协议
 
-显式 ES 使用 `domain/eventsourced.Model` 与 `StateRepository`，从 Load → Replay → Decide → Append(expectedVersion) 顺序表达业务，不需要聚合基类或反射注册。既有反射路径仍可按 `eventstore.DomainEventStore → EventSourcedRepository → Application` 装配，详见[事件溯源速查](../docs/reference/ddd-eventsourcing-quick-reference.md)。
+显式 ES 使用 `domain/eventsourced.Model` 与 `StateApplication` 表达业务，固定执行授权 → 回放基线检查 → Decide → Replay 最终状态检查 → Append(expectedVersion)，不要求状态继承聚合基类。`StateRepository` 仍是低层提交工具，不作为普通业务授权入口。既有反射路径仍可按 `eventstore.DomainEventStore → EventSourcedRepository → Application` 装配，详见[事件溯源速查](../docs/reference/ddd-eventsourcing-quick-reference.md)。
 
 普通写入可直接返回业务结果；需要统一信封或延迟收敛跟踪时使用 [Operation](operation/README.md)。多步骤补偿与流程推进见 [process](../process/README.md)。
 

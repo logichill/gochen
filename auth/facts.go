@@ -285,6 +285,7 @@ func (a *Authorizer) prepareRequest(ctx context.Context, req Request) (Request, 
 
 // PrepareFacts 通过已注册提供方预读可信投影，供业务已需读取的路径复用。
 // 返回的请求仅能在同一授权器、身份绑定和意图下复用；最终写入仍需条件与版本验证。
+// 普通 Authorize 消费后关闭会话；需显式跨资源复用时使用 AuthorizeRequest，并在执行结束时 CloseFacts。
 func (a *Authorizer) PrepareFacts(ctx context.Context, req Request, sources ...IFactSource) (Request, error) {
 	prepared, err := a.prepareRequest(ctx, req)
 	if err != nil {

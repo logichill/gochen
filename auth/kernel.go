@@ -116,13 +116,15 @@ func New(options Options) (*Authorizer, error) {
 	return &Authorizer{inner: inner, vocabulary: v, factSources: append([]IFactSource(nil), sources...)}, nil
 }
 
-// Authorize 执行一次完整授权。
+// Authorize 执行一次完整授权，并在返回前关闭本次可信事实会话。
 func (a *Authorizer) Authorize(ctx context.Context, req Request) (Decision, error) {
-	decision, _, err := a.AuthorizeRequest(ctx, req)
+	decision, managed, err := a.AuthorizeRequest(ctx, req)
+	managed.CloseFacts()
 	return decision, err
 }
 
-// AuthorizeRequest 返回决策及受管理的冻结请求，供命令装配复用已读取的可信投影。
+// AuthorizeRequest 返回决策及受管理的冻结请求，供显式多资源编排复用可信投影。
+// 调用方必须在所属执行结束时调用 CloseFacts；普通应用使用 Authorize 自动关闭。
 func (a *Authorizer) AuthorizeRequest(ctx context.Context, req Request) (Decision, Request, error) {
 	frozen, err := a.prepareRequest(ctx, req)
 	if err != nil {
